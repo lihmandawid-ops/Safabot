@@ -18,10 +18,12 @@ from database.repositories import languages as languages_repo
 from database.seed import seed_languages
 from database.seed_words import seed_words
 from handlers.dictionary import dictionary_callback_handler
+from handlers.learning import learning_callback_handler
 from handlers.menu import main_menu_handler
 from handlers.settings import settings_callback_handler
 from handlers.start import start_conversation_handler
 from handlers.words import words_callback_handler
+from scheduler.notifications import register_notification_jobs
 from utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -72,8 +74,11 @@ def build_application() -> Application:
     application.add_handler(settings_callback_handler)
     application.add_handler(dictionary_callback_handler)
     application.add_handler(words_callback_handler)
+    application.add_handler(learning_callback_handler)
     application.add_handler(main_menu_handler)
     application.add_error_handler(on_error)
+
+    register_notification_jobs(application)
 
     return application
 

@@ -1,8 +1,21 @@
-"""🔄 Повторить (spec section 11-12).
+"""🔄 Повторить (learning-core stage, section 8's priority order: due
+reviews only, never new words).
 
-TODO(stage-7): implement against services/repetition_service.py and
-services/learning_service.py once they exist. Routed from
-handlers/menu.py, which currently shows a "coming soon" message for this
-button instead of calling into this module.
+Thin wrapper: the whole word -> reveal -> rate -> next word loop, the
+callback handler, and the resume logic are shared with 📚 Учить слова -
+see handlers/learning.py, which build_learning_session's
+include_new_words flag already distinguishes. Routed from
+handlers/menu.py.
 """
 from __future__ import annotations
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from handlers.learning import show_review_intro
+
+MODE = "learning"
+
+
+async def show_review_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_review_intro(update, context)

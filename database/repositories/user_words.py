@@ -7,14 +7,13 @@ belongs in services/user_word_service.py, not here.
 """
 from __future__ import annotations
 
-import datetime
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import UserWord, Word, WordStatus
 from utils.text import normalize_word
+from utils.time import utc_now
 
 _WITH_WORD = (selectinload(UserWord.word).selectinload(Word.translations),)
 
@@ -43,7 +42,7 @@ async def add_word(
         word_id=word_id,
         language_code=language_code,
         status=WordStatus.NEW,
-        next_review_at=datetime.datetime.now(datetime.timezone.utc),
+        next_review_at=utc_now(),
     )
     session.add(user_word)
     await session.flush()

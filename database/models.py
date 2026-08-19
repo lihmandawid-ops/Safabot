@@ -24,6 +24,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -152,6 +153,14 @@ class User(Base):
     subscription_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     subscription_end: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    # Streak (spec section 23 of the learning-core stage): last_learning_date
+    # is the user's own local calendar date of their last COMPLETED learning
+    # session (see services/learning_service.py) - the streak logic reads
+    # and updates these three together, never individually.
+    last_learning_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    current_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    longest_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -163,6 +172,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     words: Mapped[list["UserWord"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    learning_sessions: Mapped[list["LearningSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -326,7 +338,15 @@ class UserWord(Base):
     """
 
     __tablename__ = "user_words"
-    __table_args__ = (UniqueConstraint("user_id", "word_id", name="uq_user_word"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "word_id", name="uq_user_word"),
+        # The learning core's hot path: "give me this user's due words,
+        # in one language, ordered by how overdue they are" (spec section
+        # 28 calls out (user_id, next_review_at) specifically).
+        Index("ix_user_words_user_next_review", "user_id", "next_review_at"),
+        Index("ix_user_words_status", "status"),
+        Index("ix_user_words_language_code", "language_code"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -356,3 +376,103 @@ class UserWord(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"UserWord(user_id={self.user_id}, word_id={self.word_id}, status={self.status!r})"
+
+
+class LearningSession(Base):
+    """One 📚 Учить слова / 🔄 Повторить run (spec section 24 of the
+    learning-core stage). Persisted (never held only in
+    context.user_data) so a bot restart mid-session loses nothing -
+    handlers/learning.py always resolves "what's next" by reading this
+    row and its items, never from in-memory state.
+    """
+
+    __tablename__ = "learning_sessions"
+    __table_args__ = (
+        Index("ix_learning_sessions_user_lang_status", "user_id", "language_code", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="in_progress")
+
+    total_words: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_words: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    user: Mapped[User] = relationship(back_populates="learning_sessions")
+    items: Mapped[list["LearningSessionItem"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", order_by="LearningSessionItem.position"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"LearningSession(id={self.id}, user_id={self.user_id}, status={self.status!r})"
+
+
+class LearningSessionItem(Base):
+    """One word's slot within a LearningSession, in display order.
+
+    `is_new_word` records whether this slot was a NEW word at the moment
+    the session was built - that, not any separate counter, is what the
+    daily new-word limit (spec section 6) counts against, so the limit
+    stays correct even if a session is abandoned and rebuilt.
+    """
+
+    __tablename__ = "learning_session_items"
+    __table_args__ = (
+        UniqueConstraint("session_id", "position", name="uq_session_item_position"),
+        UniqueConstraint("session_id", "user_word_id", name="uq_session_item_word"),
+        Index("ix_session_items_session_completed", "session_id", "completed"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_word_id: Mapped[int] = mapped_column(
+        ForeignKey("user_words.id", ondelete="CASCADE"), nullable=False
+    )
+
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_new_word: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rating: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    session: Mapped[LearningSession] = relationship(back_populates="items")
+    user_word: Mapped[UserWord] = relationship()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"LearningSessionItem(session_id={self.session_id}, position={self.position})"
+
+
+class NotificationLog(Base):
+    """Records that a daily notification was sent, so the scheduler
+    (spec section 29) never sends the same slot twice for the same user
+    on the same local day even if the poller runs more than once or the
+    process restarts mid-day.
+    """
+
+    __tablename__ = "notification_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "notification_type", "scheduled_date", name="uq_notification_once_per_day"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scheduled_date: Mapped[date] = mapped_column(Date, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"NotificationLog(user_id={self.user_id}, "
+            f"type={self.notification_type!r}, date={self.scheduled_date})"
+        )

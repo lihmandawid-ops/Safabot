@@ -59,6 +59,7 @@ class Settings:
     default_timezone: str
     trial_days: int
     default_daily_new_words: int
+    max_daily_reviews: int
     default_morning_time: str
     default_afternoon_time: str
     default_evening_time: str
@@ -85,6 +86,10 @@ def get_settings() -> Settings:
         default_timezone=os.getenv("DEFAULT_TIMEZONE", "UTC"),
         trial_days=_get_int("TRIAL_DAYS", 7),
         default_daily_new_words=_get_int("DEFAULT_DAILY_NEW_WORDS", 4),
+        # Section 8 of the learning-core stage: cap how many overdue
+        # reviews get queued into one session, so a user who skipped a
+        # week never gets buried under hundreds of due words at once.
+        max_daily_reviews=_get_int("MAX_DAILY_REVIEWS", 30),
         default_morning_time=os.getenv("DEFAULT_MORNING_TIME", "09:00"),
         default_afternoon_time=os.getenv("DEFAULT_AFTERNOON_TIME", "14:00"),
         default_evening_time=os.getenv("DEFAULT_EVENING_TIME", "20:00"),

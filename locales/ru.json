@@ -152,5 +152,35 @@
   "words.button.open_card": "📖 Открыть карточку",
   "words.button.back": "⬅️ Назад",
   "words.button.cancel": "❌ Отмена",
-  "words.button.confirm_delete": "✅ Да, удалить"
+  "words.button.confirm_delete": "✅ Да, удалить",
+
+  "learning.nothing_to_do": "🎉 Пока нечего повторять — все слова выучены или ещё не пора.\n\nЗагляни в 📖 Словарь, чтобы добавить новые слова.",
+  "learning.nothing_due": "🎉 Сейчас нет слов, которым пора повторяться.",
+  "learning.ready": "📚 Время заниматься!\n\nСегодня тебе нужно повторить {count} слов.\n\nНачнём?",
+  "learning.ready_review": "🔄 Пора повторить слова!\n\nК повторению: {count} слов.",
+  "learning.resume": "У тебя осталось {count} слов в текущем занятии.",
+  "learning.button.start": "▶️ Начать",
+  "learning.button.continue": "▶️ Продолжить",
+  "learning.button.reveal": "👁 Показать перевод",
+
+  "learning.card_front": "{flag} {word}\n\n{pronunciation}",
+  "learning.card_back": "{flag} {word}\n\n{pronunciation}\n\n{translation_flag} {translation}\n\n{example}",
+
+  "learning.rating.again": "😣 Не помню",
+  "learning.rating.hard": "😐 С трудом",
+  "learning.rating.good": "🙂 Помню",
+  "learning.rating.easy": "😎 Очень легко",
+
+  "learning.session_gone": "Эта учебная сессия больше не активна. Загляни в 📚 Учить слова, чтобы начать заново.",
+
+  "learning.completion": "🎉 Отлично!\n\nСегодня:\n📚 Повторено: {total}\n🆕 Новых слов: {new_words}\n✅ Правильных: {correct}\n❌ Ошибок: {wrong}\n\n🔥 Серия: {streak} дней",
+
+  "notification.morning.with_new": "☀️ Доброе утро!\n\nТебя ждут новые слова и повторение.\n\n📚 Сегодня: {new_count} новых слов\n🔄 К повторению: {due_count} слов",
+  "notification.morning.reviews_only": "☀️ Доброе утро!\n\nСегодня новые слова закончились.\n\n🔄 К повторению: {due_count} слов.",
+  "notification.morning.button": "▶️ Начать обучение",
+  "notification.afternoon.text": "🌤 Время повторить слова.\n\n🔄 Сейчас ждут повторения: {due_count} слов.",
+  "notification.afternoon.button": "▶️ Повторить",
+  "notification.evening.due": "🌙 Небольшое повторение перед сном.\n\n🔄 Осталось: {due_count} слов.",
+  "notification.evening.button": "▶️ Повторить",
+  "notification.evening.done": "✅ Сегодняшнее обучение выполнено!\n\nОтличная работа."
 }

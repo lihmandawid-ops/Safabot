@@ -52,6 +52,14 @@ async def create_user(
     return user
 
 
+async def get_notifiable_users(session: AsyncSession) -> list[User]:
+    """Users the scheduler (services/notification_service.py) should even
+    consider - notifications_enabled=True filters out the rest at the DB
+    level instead of fetching everyone and checking in Python."""
+    result = await session.execute(select(User).where(User.notifications_enabled.is_(True)))
+    return list(result.scalars().all())
+
+
 async def update_user(session: AsyncSession, user: User, **fields: Any) -> User:
     """Set arbitrary column values on `user` and flush.
 

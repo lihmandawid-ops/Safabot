@@ -15,14 +15,14 @@ from telegram import Update
 from telegram.ext import ContextTypes, MessageHandler, filters
 
 from handlers import dictionary as dictionary_handler
+from handlers import learning as learning_handler
+from handlers import review as review_handler
 from handlers import settings as settings_handler
 from handlers import words as words_handler
 from keyboards import main_menu
 from utils.i18n import t
 
 _COMING_SOON: dict[str, str] = {
-    main_menu.LEARN_WORDS: "Учить слова (Этап 6)",
-    main_menu.REVIEW: "Повторить (Этап 7)",
     main_menu.PARSE_PHOTO: "Разбор фото (Этап 15)",
     main_menu.PARSE_TEXT: "Разбор текста (Этап 14, AI)",
     main_menu.PARSE_VOICE: "Разбор голоса (Этап 16)",
@@ -49,6 +49,16 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if text == main_menu.MY_WORDS:
         context.user_data.pop("mode", None)
         await words_handler.show_words_menu(update, context)
+        return
+
+    if text == main_menu.LEARN_WORDS:
+        context.user_data.pop("mode", None)
+        await learning_handler.show_learning_intro(update, context)
+        return
+
+    if text == main_menu.REVIEW:
+        context.user_data.pop("mode", None)
+        await review_handler.show_review_menu(update, context)
         return
 
     label = _COMING_SOON.get(text)
