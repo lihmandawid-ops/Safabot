@@ -31,12 +31,18 @@ German, Hebrew, Spanish, French, Italian, Ukrainian); один пользова�
 - Минимальная система локализации (`locales/ru.json` + `utils/i18n.t()`) —
   все тексты вынесены из handlers; добавление нового языка интерфейса не
   требует правки кода, только нового файла `locales/<code>.json`.
+- **Слова**: общий словарь (`Word` + переводы/примеры/формы), личный
+  словарь пользователя (`UserWord`), раздел **📖 Словарь** (поиск: точное
+  совпадение → нормализованное → частичное, в рамках одного языка) и
+  раздел **⭐ Мои слова** (фильтры, постраничный нумерованный список,
+  управление словом по номеру, массовый выбор `2,5,7` / `2 5 7`,
+  пауза/возврат в повторение, удаление с подтверждением, поиск по
+  личному словарю). Небольшой seed-набор из 28 слов (en/de) для разработки.
 
-Остальные разделы главного меню (Учить слова, Повторить, Словарь, Мои
-слова, разбор фото/текста/голоса, Прогресс, PRO) отвечают понятным
-сообщением «раздел в разработке» — они запланированы на следующие этапы
-(см. `handlers/menu.py` и `services/*.py`, где у каждого нереализованного
-раздела есть чёткий TODO с номером этапа).
+Разделы «Учить слова», «Повторить», «Мой прогресс», разбор фото/текста/
+голоса и PRO отвечают понятным сообщением «раздел в разработке» — они
+запланированы на следующие этапы (см. `handlers/menu.py` и `services/*.py`,
+где у каждого нереализованного раздела есть чёткий TODO с номером этапа).
 
 ## Требования
 
@@ -115,10 +121,9 @@ pytest
 ```
 
 Тесты используют собственный временный SQLite-файл на каждый тест и не
-трогают ваш рабочий `safabot.db`. Часть тестов (`test_words.py`,
-`test_repetition.py`) помечены `skip` — они описывают, что должно быть
-проверено на следующих этапах (Слова, Интервальное повторение), и станут
-активными, когда соответствующий функционал будет реализован.
+трогают ваш рабочий `safabot.db`. `test_repetition.py` остаётся `skip` —
+он описывает, что должно быть проверено на следующем этапе (интервальное
+повторение), и станет активным, когда алгоритм появится.
 
 ## Структура проекта
 
@@ -134,45 +139,55 @@ safabot/
 │
 ├── handlers/                 # Telegram-хендлеры (тонкий слой, без бизнес-логики)
 │   ├── start.py               # /start: онбординг (реализовано)
-│   ├── menu.py                 # роутинг главного меню (реализовано)
-│   ├── settings.py             # ⚙️ Настройки: просмотр профиля (реализовано)
-│   ├── learning.py, review.py, dictionary.py, words.py,
+│   ├── menu.py                 # роутинг главного меню + режимы (dictionary/my_words) (реализовано)
+│   ├── settings.py             # ⚙️ Настройки (реализовано)
+│   ├── dictionary.py           # 📖 Словарь: поиск + добавление в обучение (реализовано)
+│   ├── words.py                 # ⭐ Мои слова: фильтры/страницы/номера/bulk (реализовано)
+│   ├── learning.py, review.py,
 │   │   grammar.py, progress.py, media.py, payments.py   # заглушки со ссылкой на этап
 │
 ├── services/                 # бизнес-логика, независимая от Telegram
 │   ├── subscription_service.py   # trial / PRO-статус (реализовано)
+│   ├── word_service.py            # поиск, get_or_create, карточка слова (реализовано)
+│   ├── user_word_service.py       # add/pause/resume/delete, фильтры, поиск (реализовано)
+│   ├── dictionary_service.py      # фасад над word_service (реализовано)
 │   ├── learning_service.py, repetition_service.py,
-│   │   dictionary_service.py, translation_service.py,
+│   │   translation_service.py,
 │   │   ai_service.py, ocr_service.py, speech_service.py  # интерфейсы для следующих этапов
 │
 ├── database/
 │   ├── database.py             # async engine/session (SQLite сейчас, Postgres — смена DATABASE_URL)
-│   ├── models.py                # Language, User, UserLanguage (SQLAlchemy 2.x, FK на languages.code)
+│   ├── models.py                # Language, User, UserLanguage, Word, WordTranslation,
+│   │                             # WordExample, WordForm, UserWord (SQLAlchemy 2.x, FK-и)
 │   ├── seed.py                  # идемпотентный seed 8 языков
+│   ├── seed_words.py            # идемпотентный dev-набор из 28 слов (en/de)
 │   └── repositories/
-│       ├── users.py, languages.py, user_languages.py, subscriptions.py   # реализовано
-│       └── words.py, learning.py         # заглушки (Word/UserWord — Этап 5/7)
+│       ├── users.py, languages.py, user_languages.py, subscriptions.py,
+│       │   words.py, user_words.py, learning.py   # реализовано
 │
 ├── locales/
 │   └── ru.json                 # все тексты handlers; utils/i18n.py:t(key, lang)
 │
 ├── keyboards/                 # клавиатуры Telegram
-│   ├── main_menu.py, language.py, settings.py   # реализовано
-│   └── learning.py, words.py, payments.py # заглушки
+│   ├── main_menu.py, language.py, settings.py, dictionary.py, words.py   # реализовано
+│   └── learning.py, payments.py # заглушки
 │
 ├── scheduler/
 │   └── notifications.py       # интеграционная точка для JobQueue (Этап 10)
 │
 ├── utils/
-│   ├── logging.py, languages.py, pagination.py, text.py
+│   ├── logging.py, languages.py, pagination.py, text.py, i18n.py,
+│   │   levels.py, timezones.py, word_display.py
 │
 ├── migrations/                # Alembic
 │   └── versions/
 │
 └── tests/
     ├── conftest.py
-    ├── test_users.py, test_subscriptions.py    # реализовано
-    └── test_words.py, test_repetition.py        # skip-плейсхолдеры для будущих этапов
+    ├── test_users.py, test_subscriptions.py, test_languages.py,
+    │   test_user_languages.py, test_settings.py, test_words.py,
+    │   test_user_words.py, test_word_list_utils.py    # реализовано
+    └── test_repetition.py        # skip-плейсхолдер для следующего этапа
 ```
 
 ## База данных и миграции
@@ -194,6 +209,36 @@ safabot/
 - `database/database.py:init_models()` — это удобный способ создать таблицы
   «начисто» при локальной разработке; для реального продакшена и любых
   изменений схемы используйте только Alembic.
+- SQLite-внешние ключи включены явно (`PRAGMA foreign_keys=ON` при каждом
+  подключении) — без этого SQLite молча игнорирует нарушения FK.
+
+## Слова: как добавить новый язык или новое слово
+
+**Новый язык интерфейса/изучения** уже поддерживается архитектурно —
+языки сами по себе не привязаны к коду. Чтобы добавить N-й язык сверх
+исходных 8: добавьте запись в `database/seed_words.py`-подобный seed или
+таблицу `languages` (code/name/native_name), добавьте его в
+`utils/languages.SUPPORTED_LANGUAGES` (флаг + русское название для
+клавиатур) и, для полноценной локализации интерфейса, создайте
+`locales/<code>.json` — `utils/i18n.t()` подхватит его без правок кода.
+
+**Новое слово в общий словарь** — через `services/word_service.py`:
+
+```python
+word, created = await word_service.get_or_create_word(
+    session, language_code="en", word="achieve",
+    part_of_speech="verb", is_verb=True, difficulty="intermediate",
+)
+await words_repo.add_translation(session, word_id=word.id, language_code="ru", translation="достигать")
+await words_repo.add_example(session, word_id=word.id, example_text="She achieved her goal.", translation="Она достигла своей цели.")
+await words_repo.add_form(session, word_id=word.id, form_type="past", form="achieved")
+```
+
+`(language_code, normalized_word)` уникален, так что повторный вызов с
+тем же словом не создаёт дубликат — `created` будет `False`, а `word` —
+существующей записью. Небольшой готовый набор для разработки (28 слов,
+en/de) лежит в `database/seed_words.py` и подгружается автоматически при
+каждом запуске бота (идемпотентно).
 
 ## Этапы разработки
 
@@ -204,11 +249,11 @@ safabot/
 2. Подключение Telegram ✅
 3. Регистрация и onboarding ✅
 4. База данных ✅
-5. Слова (Word/UserWord)
+5. Слова (Word/UserWord) ✅
 6. Обучение (новые слова, 3 сообщения в день)
 7. Алгоритм интервального повторения
-8. Мои слова (нумерация, фильтры, пагинация)
-9. Словарь
+8. Мои слова (нумерация, фильтры, пагинация) ✅ (реализовано вместе с Этапом 5)
+9. Словарь ✅ (реализовано вместе с Этапом 5)
 10. Уведомления (JobQueue)
 11. Прогресс
 12. Trial ✅ (реализован досрочно вместе с онбордингом)

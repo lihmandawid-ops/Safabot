@@ -1,16 +1,17 @@
 """SQLAlchemy 2.x ORM models.
 
-Word and UserWord (spec sections 7-8 of the original brief) belong to
-Stage 5 (Words) and are deliberately not stubbed out here yet - an empty
-placeholder table would just be dead schema until the words feature
-lands, which the project's own rules against faking unconnected work
-advise against.
-
 Language is the source of truth for the 8 supported language codes
 (seeded via database/seed.py and migrations/versions accordingly).
 User.interface_language and UserLanguage.language_code/translation_language
 are foreign keys into it, so a typo'd or unsupported code is rejected by
 the database itself rather than silently accepted.
+
+Word/WordTranslation/WordExample/WordForm are the shared, per-language
+dictionary (spec section 1: same "gehen" in German and any homograph in
+another language are different rows, kept apart by the
+(language_code, normalized_word) unique constraint). UserWord is one
+user's personal learning state for one Word - never mutate a Word row to
+reflect a single user's progress.
 """
 from __future__ import annotations
 
@@ -21,9 +22,11 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
+    Text,
     Time,
     UniqueConstraint,
     func,
@@ -35,13 +38,70 @@ class Base(DeclarativeBase):
     pass
 
 
-class SubscriptionStatus(str, enum.Enum):
+class _StrEnum(str, enum.Enum):
+    """Base for our string-backed enums.
+
+    Plain `class X(str, Enum)` looks like a str but Enum's default
+    __str__/__format__ renders "X.MEMBER", not the value - harmless once a
+    value has round-tripped through the DB (SQLAlchemy hands back a plain
+    str), but a real bug the moment code does `t(f"...{status}", ...)`
+    right after setting `obj.status = WordStatus.PAUSED` in the same
+    session, before any reload. Overriding __str__ here makes both cases
+    render identically.
+    """
+
+    def __str__(self) -> str:  # noqa: D105
+        return str(self.value)
+
+
+class SubscriptionStatus(_StrEnum):
     """Section 24/25/26: where a user currently stands on PRO access."""
 
     TRIAL = "trial"
     FREE = "free"
     PRO = "pro"
     EXPIRED = "expired"
+
+
+class WordStatus(_StrEnum):
+    """Section 5: lifecycle of one UserWord (never the shared Word)."""
+
+    NEW = "new"
+    LEARNING = "learning"
+    REVIEW = "review"
+    PAUSED = "paused"
+    MASTERED = "mastered"
+    DELETED = "deleted"
+
+
+class PartOfSpeech(_StrEnum):
+    NOUN = "noun"
+    VERB = "verb"
+    ADJECTIVE = "adjective"
+    ADVERB = "adverb"
+    PRONOUN = "pronoun"
+    PREPOSITION = "preposition"
+    CONJUNCTION = "conjunction"
+    ARTICLE = "article"
+    PARTICLE = "particle"
+    PHRASE = "phrase"
+    OTHER = "other"
+
+
+class WordCategory(_StrEnum):
+    """Section 18. Thematic sets are future work; this only tags words."""
+
+    TRAVEL = "travel"
+    WORK = "work"
+    BUSINESS = "business"
+    DAILY_LIFE = "daily_life"
+    FOOD = "food"
+    FAMILY = "family"
+    TECHNOLOGY = "technology"
+    TRANSPORT = "transport"
+    HEALTH = "health"
+    EDUCATION = "education"
+    OTHER = "other"
 
 
 class Language(Base):
@@ -102,6 +162,9 @@ class User(Base):
     languages: Mapped[list["UserLanguage"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    words: Mapped[list["UserWord"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"User(id={self.id}, telegram_id={self.telegram_id})"
@@ -143,3 +206,153 @@ class UserLanguage(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"UserLanguage(user_id={self.user_id}, language_code={self.language_code!r})"
+
+
+class Word(Base):
+    """One dictionary entry in one language (spec section 1).
+
+    The (language_code, normalized_word) unique constraint is what keeps
+    "gehen" in German and any lookalike word in another language from
+    colliding - they're simply different rows, never merged.
+    """
+
+    __tablename__ = "words"
+    __table_args__ = (
+        UniqueConstraint("language_code", "normalized_word", name="uq_words_language_normalized"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+
+    word: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_word: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+    part_of_speech: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pronunciation: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phonetic: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    difficulty: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_verb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    translations: Mapped[list["WordTranslation"]] = relationship(
+        back_populates="word", cascade="all, delete-orphan"
+    )
+    examples: Mapped[list["WordExample"]] = relationship(
+        back_populates="word", cascade="all, delete-orphan"
+    )
+    forms: Mapped[list["WordForm"]] = relationship(
+        back_populates="word", cascade="all, delete-orphan"
+    )
+    user_words: Mapped[list["UserWord"]] = relationship(back_populates="word")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"Word(id={self.id}, language_code={self.language_code!r}, word={self.word!r})"
+
+
+class WordTranslation(Base):
+    """One sense/translation of a Word (spec section 2) - a word can have
+    several, e.g. "appointment" -> "встреча" / "запись" / "назначенная встреча"."""
+
+    __tablename__ = "word_translations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+
+    translation: Mapped[str] = mapped_column(String(255), nullable=False)
+    definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    word: Mapped[Word] = relationship(back_populates="translations")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"WordTranslation(word_id={self.word_id}, translation={self.translation!r})"
+
+
+class WordExample(Base):
+    """An example sentence for a Word (spec section 3)."""
+
+    __tablename__ = "word_examples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    example_text: Mapped[str] = mapped_column(Text, nullable=False)
+    translation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    word: Mapped[Word] = relationship(back_populates="examples")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"WordExample(word_id={self.word_id})"
+
+
+class WordForm(Base):
+    """A grammatical form of a Word, e.g. go/goes/went/gone/going (spec
+    section 17). form_type is a free string on purpose - each language's
+    morphology gets its own set of form types, added as that language's
+    support is built out; nothing here assumes English's shape.
+    """
+
+    __tablename__ = "word_forms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    form_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    form: Mapped[str] = mapped_column(String(255), nullable=False)
+    grammatical_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    word: Mapped[Word] = relationship(back_populates="forms")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"WordForm(word_id={self.word_id}, form_type={self.form_type!r}, form={self.form!r})"
+
+
+class UserWord(Base):
+    """One user's personal learning state for one Word (spec sections 4/5
+    of this stage's brief). Never delete this row on user-facing "delete" -
+    set status=DELETED instead, so a global Word already shared by other
+    users is never touched and a deleted word can be silently restored if
+    the user adds it again.
+    """
+
+    __tablename__ = "user_words"
+    __table_args__ = (UniqueConstraint("user_id", "word_id", name="uq_user_word"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=WordStatus.NEW)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    repetition_stage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    repetitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correct_answers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wrong_answers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    difficulty_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    is_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="words")
+    word: Mapped[Word] = relationship(back_populates="user_words")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"UserWord(user_id={self.user_id}, word_id={self.word_id}, status={self.status!r})"

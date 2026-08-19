@@ -13,12 +13,16 @@ def normalize_word(raw: str) -> str:
     return _WHITESPACE_RE.sub(" ", raw.strip()).casefold()
 
 
+_NUMBER_SPLIT_RE = re.compile(r"[,\s]+")
+
+
 def parse_number_list(raw: str) -> list[int]:
-    """Parse a user-typed selection like "2,5,7" (spec section 14) into
-    [2, 5, 7]. Raises ValueError on anything that isn't a comma-separated
-    list of positive integers.
+    """Parse a user-typed selection like "2,5,7" (spec section 14 of the
+    users stage / section 11 of the words stage) into [2, 5, 7]. Accepts
+    "2, 5, 7" and "2 5 7" too. Raises ValueError on anything that isn't a
+    comma/space-separated list of positive integers.
     """
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    parts = [p for p in _NUMBER_SPLIT_RE.split(raw.strip()) if p]
     if not parts:
         raise ValueError("empty selection")
     numbers = [int(p) for p in parts]

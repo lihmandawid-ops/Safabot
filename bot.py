@@ -16,9 +16,12 @@ from config import BASE_DIR, get_settings
 from database.database import init_models, session_scope
 from database.repositories import languages as languages_repo
 from database.seed import seed_languages
+from database.seed_words import seed_words
+from handlers.dictionary import dictionary_callback_handler
 from handlers.menu import main_menu_handler
 from handlers.settings import settings_callback_handler
 from handlers.start import start_conversation_handler
+from handlers.words import words_callback_handler
 from utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -31,7 +34,8 @@ async def on_startup(application: Application) -> None:
     async with session_scope() as session:
         await seed_languages(session)
         languages = await languages_repo.get_all_active(session)
-    logger.info("Database ready (%d languages seeded)", len(languages))
+        word_count = await seed_words(session)
+    logger.info("Database ready (%d languages seeded, %d words seeded)", len(languages), word_count)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -66,6 +70,8 @@ def build_application() -> Application:
 
     application.add_handler(start_conversation_handler)
     application.add_handler(settings_callback_handler)
+    application.add_handler(dictionary_callback_handler)
+    application.add_handler(words_callback_handler)
     application.add_handler(main_menu_handler)
     application.add_error_handler(on_error)
 
