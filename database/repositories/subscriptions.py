@@ -14,18 +14,25 @@ from database.models import SubscriptionStatus, User
 
 
 async def start_trial(session: AsyncSession, user: User, *, start: date, end: date) -> User:
-    user.trial_start_date = start
-    user.trial_end_date = end
+    user.trial_start = start
+    user.trial_end = end
     user.subscription_status = SubscriptionStatus.TRIAL
     await session.flush()
     return user
 
 
 async def set_subscription_status(
-    session: AsyncSession, user: User, *, status: SubscriptionStatus, end_date: date | None = None
+    session: AsyncSession,
+    user: User,
+    *,
+    status: SubscriptionStatus,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> User:
     user.subscription_status = status
+    if start_date is not None:
+        user.subscription_start = start_date
     if end_date is not None:
-        user.subscription_end_date = end_date
+        user.subscription_end = end_date
     await session.flush()
     return user

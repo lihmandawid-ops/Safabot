@@ -13,13 +13,24 @@ German, Hebrew, Spanish, French, Italian, Ukrainian); один пользова�
 - **Этап 1** — структура проекта.
 - **Этап 2** — подключение к Telegram (`bot.py`, `config.py`, логирование,
   обработка ошибок).
-- **Этап 3** — регистрация и onboarding (`/start`): выбор языка интерфейса,
-  изучаемого языка, уровня, количества новых слов в день → главное меню.
-- **Этап 4** — база данных: SQLAlchemy 2.x (async) + SQLite, модели `User` и
-  `UserLanguage`, репозитории, миграции Alembic.
-- Раздел **⚙️ Настройки** показывает реальный профиль пользователя из базы
-  данных.
-- 7-дневный **PRO trial** выдаётся автоматически при регистрации.
+- **Этап 3** — регистрация и onboarding (`/start`): язык интерфейса → язык
+  обучения → язык перевода → уровень → количество новых слов → часовой
+  пояс → главное меню. Прогресс онбординга переживает перезапуск бота
+  (`PicklePersistence`), а не хранится только в памяти процесса.
+- **Этап 4** — база данных полностью реализована: SQLAlchemy 2.x (async) +
+  SQLite, модели `Language`, `User`, `UserLanguage` со внешними ключами,
+  репозитории (`users`, `languages`, `user_languages`, `subscriptions`),
+  миграции Alembic (batch mode для SQLite, с переносом данных при
+  переименовании колонок).
+- Раздел **⚙️ Настройки** — полноценное inline-меню: смена активного
+  изучаемого языка, языка интерфейса, количества новых слов (для текущего
+  языка), времени и вкл/выкл уведомлений, уровня; подписка — просмотр.
+- 7-дневный **PRO trial** выдаётся автоматически при регистрации
+  (`services/subscription_service.py`: `is_trial_active`,
+  `is_subscription_active`, `has_pro_access`).
+- Минимальная система локализации (`locales/ru.json` + `utils/i18n.t()`) —
+  все тексты вынесены из handlers; добавление нового языка интерфейса не
+  требует правки кода, только нового файла `locales/<code>.json`.
 
 Остальные разделы главного меню (Учить слова, Повторить, Словарь, Мои
 слова, разбор фото/текста/голоса, Прогресс, PRO) отвечают понятным
@@ -136,13 +147,17 @@ safabot/
 │
 ├── database/
 │   ├── database.py             # async engine/session (SQLite сейчас, Postgres — смена DATABASE_URL)
-│   ├── models.py                # User, UserLanguage (SQLAlchemy 2.x)
+│   ├── models.py                # Language, User, UserLanguage (SQLAlchemy 2.x, FK на languages.code)
+│   ├── seed.py                  # идемпотентный seed 8 языков
 │   └── repositories/
-│       ├── users.py, subscriptions.py   # реализовано
+│       ├── users.py, languages.py, user_languages.py, subscriptions.py   # реализовано
 │       └── words.py, learning.py         # заглушки (Word/UserWord — Этап 5/7)
 │
+├── locales/
+│   └── ru.json                 # все тексты handlers; utils/i18n.py:t(key, lang)
+│
 ├── keyboards/                 # клавиатуры Telegram
-│   ├── main_menu.py, language.py         # реализовано
+│   ├── main_menu.py, language.py, settings.py   # реализовано
 │   └── learning.py, words.py, payments.py # заглушки
 │
 ├── scheduler/

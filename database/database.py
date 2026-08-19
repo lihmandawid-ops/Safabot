@@ -14,6 +14,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from config import get_settings
@@ -23,10 +24,22 @@ _engine = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, echo=False)
+        database_url = get_settings().database_url
+        _engine = create_async_engine(database_url, echo=False)
+        if database_url.startswith("sqlite"):
+            # SQLite ignores foreign key constraints unless told otherwise per
+            # connection - without this, User/UserLanguage rows could point
+            # at a language code that doesn't exist in the languages table.
+            event.listen(_engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
     return _engine
 
 

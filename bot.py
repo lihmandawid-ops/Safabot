@@ -7,21 +7,31 @@ exist so far, and runs polling. Run with:
 """
 from __future__ import annotations
 
-from telegram import Update
-from telegram.ext import Application, ContextTypes
+from pathlib import Path
 
-from config import get_settings
-from database.database import init_models
+from telegram import Update
+from telegram.ext import Application, ContextTypes, PicklePersistence
+
+from config import BASE_DIR, get_settings
+from database.database import init_models, session_scope
+from database.repositories import languages as languages_repo
+from database.seed import seed_languages
 from handlers.menu import main_menu_handler
+from handlers.settings import settings_callback_handler
 from handlers.start import start_conversation_handler
 from utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
+PERSISTENCE_FILE = BASE_DIR / "safabot_persistence.pickle"
+
 
 async def on_startup(application: Application) -> None:
     await init_models()
-    logger.info("Database ready")
+    async with session_scope() as session:
+        await seed_languages(session)
+        languages = await languages_repo.get_all_active(session)
+    logger.info("Database ready (%d languages seeded)", len(languages))
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -41,9 +51,21 @@ def build_application() -> Application:
             "BOT_TOKEN is not set. Copy .env.example to .env and fill in your Telegram bot token."
         )
 
-    application = Application.builder().token(settings.bot_token).post_init(on_startup).build()
+    # Persists ConversationHandler state and user_data to disk (spec
+    # section 5: onboarding must survive a bot restart, not just live in
+    # process memory).
+    persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
+
+    application = (
+        Application.builder()
+        .token(settings.bot_token)
+        .persistence(persistence)
+        .post_init(on_startup)
+        .build()
+    )
 
     application.add_handler(start_conversation_handler)
+    application.add_handler(settings_callback_handler)
     application.add_handler(main_menu_handler)
     application.add_error_handler(on_error)
 
