@@ -115,6 +115,25 @@ async def test_generate_new_words_calls_ai_only_for_the_shortfall(session, monke
     assert "extra1" in words and "extra2" in words
 
 
+async def test_generate_new_words_persists_definition_and_verb_forms(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5014)
+    entry = ai_models.GeneratedWord(
+        word="go", translations=[ai_models.TranslationResult(translation="идти")],
+        part_of_speech="verb", definition="to move from one place to another",
+        verb_forms={"past": "went", "gerund": "going"},
+    )
+    fake = _FakeAIService([entry])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=1)
+
+    assert len(created) == 1
+    word = created[0].word
+    assert word.definition == "to move from one place to another"
+    forms = {f.form_type: f.form for f in word.forms}
+    assert forms == {"past": "went", "gerund": "going"}
+
+
 async def test_generate_new_words_ai_failure_degrades_gracefully(session, monkeypatch):
     user, ul = await _create_user(session, telegram_id=5004)
     await _seed_local_words(session, 1)
@@ -189,10 +208,28 @@ async def test_get_new_words_for_today_auto_generates_the_shortfall(session):
     user, ul = await _create_user(session, telegram_id=5009, daily_new_words=4)
     await _seed_local_words(session, 10)
 
-    new_words = await learning_service.get_new_words_for_today(session, user=user, user_language=ul)
+    result = await learning_service.get_new_words_for_today(session, user=user, user_language=ul)
 
-    assert len(new_words) == 4
-    assert all(uw.status == WordStatus.NEW for uw in new_words)
+    assert len(result.words) == 4
+    assert result.shortfall is False
+    assert all(uw.status == WordStatus.NEW for uw in result.words)
+
+
+async def test_get_new_words_for_today_reports_shortfall_when_ai_unavailable(session, monkeypatch):
+    """AI-integration spec section 20/28: when local pool + AI still can't
+    fill the quota, callers must be told so they can show a friendly
+    "couldn't load new words" message instead of silently under-delivering."""
+    user, ul = await _create_user(session, telegram_id=5013, daily_new_words=4)
+    # No local pool at all, and AI fails - nothing can fill the quota.
+    monkeypatch.setattr(
+        word_generation_service, "get_ai_service",
+        lambda: _FakeAIService(raises=AIUnavailableError("down")),
+    )
+
+    result = await learning_service.get_new_words_for_today(session, user=user, user_language=ul)
+
+    assert result.words == []
+    assert result.shortfall is True
 
 
 async def test_daily_new_word_limit_holds_across_repeated_learning_launches(session):

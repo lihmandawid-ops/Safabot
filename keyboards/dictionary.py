@@ -20,14 +20,16 @@ def search_results_keyboard(words) -> InlineKeyboardMarkup:
 
 
 def word_card_keyboard(word_id: int, *, back_callback: str = "dict:back") -> InlineKeyboardMarkup:
+    """DeepSeek-integration spec section 6's button list - pronunciation
+    used to be its own button (card:pronounce:) but is now inlined
+    directly on the card text (utils.word_display.render_word_card_text),
+    so that button is gone; the callback handler stays wired for any
+    already-sent message that still has the old button."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("card.button.add", _LANG), callback_data=f"card:add:{word_id}")],
-            [
-                InlineKeyboardButton(t("card.button.forms", _LANG), callback_data=f"card:forms:{word_id}"),
-                InlineKeyboardButton(t("card.button.pronounce", _LANG), callback_data=f"card:pronounce:{word_id}"),
-            ],
             [InlineKeyboardButton(t("card.button.usage", _LANG), callback_data=f"card:usage:{word_id}")],
+            [InlineKeyboardButton(t("card.button.forms", _LANG), callback_data=f"card:forms:{word_id}")],
             [InlineKeyboardButton(t("card.button.back", _LANG), callback_data=back_callback)],
         ]
     )

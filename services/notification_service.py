@@ -61,7 +61,7 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
     )
 
     if slot == SLOT_MORNING:
-        new_words = await learning_service.get_new_words_for_today(session, user=user, user_language=current, now=now)
+        new_words = (await learning_service.get_new_words_for_today(session, user=user, user_language=current, now=now)).words
         if not due and not new_words:
             return None
         if new_words:

@@ -53,6 +53,7 @@ async def test_lookup_word_falls_back_to_provider_and_persists(session, monkeypa
         pronunciation="/ˈbjuːtɪfʊl/",
         examples=[ai_models.ExampleResult(text="What a beautiful day.", translation="Какой прекрасный день.")],
         difficulty="intermediate",
+        definition="pleasing to look at",
         verb_forms={"past": "should-be-ignored-not-a-verb"},
     )
     provider = _FakeProvider(data)
@@ -67,6 +68,7 @@ async def test_lookup_word_falls_back_to_provider_and_persists(session, monkeypa
     assert word.word == "beautiful"
     assert word.part_of_speech == "adjective"
     assert word.pronunciation == "/ˈbjuːtɪfʊl/"
+    assert word.definition == "pleasing to look at"
     assert {tr.translation for tr in word.translations} == {"красивый", "прекрасный"}
     assert word.examples[0].example_text == "What a beautiful day."
     assert word.forms == []  # not a verb - verb_forms must be ignored

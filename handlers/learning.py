@@ -116,20 +116,31 @@ async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, inc
             return
 
         due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code)
-        new_words = (
-            await learning_service.get_new_words_for_today(session, user=user, user_language=current)
-            if include_new_words
-            else []
-        )
+        shortfall = False
+        if include_new_words:
+            new_words_result = await learning_service.get_new_words_for_today(session, user=user, user_language=current)
+            new_words = new_words_result.words
+            shortfall = new_words_result.shortfall
+        else:
+            new_words = []
         total = len(due) + len(new_words)
 
         if total == 0:
+            if include_new_words and shortfall:
+                # AI-integration spec section 20/28: distinguish "nothing
+                # to do" from "wanted to generate new words but couldn't" -
+                # never leave the user guessing why the count is 0.
+                await update.message.reply_text(t("learning.generation_unavailable", _LANG))
+                return
             key = "learning.nothing_to_do" if include_new_words else "learning.nothing_due"
             await update.message.reply_text(t(key, _LANG))
             return
 
         if include_new_words:
-            await update.message.reply_text(t("learning.ready", _LANG, count=total), reply_markup=start_keyboard())
+            text = t("learning.ready", _LANG, count=total)
+            if shortfall:
+                text += "\n\n" + t("learning.generation_unavailable", _LANG)
+            await update.message.reply_text(text, reply_markup=start_keyboard())
         else:
             await update.message.reply_text(t("learning.ready_review", _LANG, count=total), reply_markup=start_review_keyboard())
 

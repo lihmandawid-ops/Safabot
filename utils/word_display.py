@@ -22,43 +22,51 @@ _POS_WITH_LABEL = {
 
 def part_of_speech_label(part_of_speech: str | None) -> str | None:
     """None for "other"/unset - there's nothing meaningful to show the
-    user for those, so the 📌 line is simply omitted (bugfix spec: word
-    cards were missing part of speech entirely)."""
+    user for those, so the part-of-speech section is simply omitted
+    (bugfix spec: word cards were missing part of speech entirely)."""
     if part_of_speech not in _POS_WITH_LABEL:
         return None
-    return t("card.pos_line", _LANG, pos=t(f"card.pos.{part_of_speech}", _LANG))
+    return t(f"card.pos.{part_of_speech}", _LANG)
 
 
 def render_word_card_text(card, *, status: str | None = None) -> str:
+    """DeepSeek-integration spec section 6's exact card layout: word, one
+    line per translation, then part of speech / pronunciation / meaning /
+    example each as its own "label:\\nvalue" section, ending with the
+    action buttons (keyboards.dictionary.word_card_keyboard)."""
     lang = LANGUAGE_BY_CODE.get(card.word.language_code)
     flag = lang.flag if lang else ""
 
     lines = [f"{flag} {card.word.word}"]
 
-    pos_label = part_of_speech_label(card.word.part_of_speech)
-    if pos_label is not None:
-        lines.append(pos_label)
-
     if card.translations:
         translation_lang = LANGUAGE_BY_CODE.get(card.translations[0].language_code)
         t_flag = translation_lang.flag if translation_lang else ""
-        joined = ", ".join(tr.translation for tr in card.translations)
-        lines.append(f"{t_flag} {joined}")
+        lines.append("")
+        lines.extend(f"{t_flag} {tr.translation}" for tr in card.translations)
 
     if status is not None:
         lines.append("")
         lines.append(status_label(status))
 
-    lines.append("")
-    if card.word.pronunciation:
-        lines.append(t("card.pronunciation_line", _LANG, pronunciation=card.word.pronunciation))
-    else:
-        lines.append(t("card.pronunciation_placeholder", _LANG))
+    pos_label = part_of_speech_label(card.word.part_of_speech)
+    if pos_label is not None:
+        lines.append("")
+        lines.append(t("card.pos_header", _LANG))
+        lines.append(pos_label)
 
     lines.append("")
+    lines.append(t("card.pronunciation_header", _LANG))
+    lines.append(card.word.pronunciation if card.word.pronunciation else t("card.no_pronunciation", _LANG))
+
+    lines.append("")
+    lines.append(t("card.definition_header", _LANG))
+    lines.append(card.word.definition if card.word.definition else t("card.no_definition", _LANG))
+
+    lines.append("")
+    lines.append(t("card.example_label", _LANG))
     if card.examples:
         example = card.examples[0]
-        lines.append(t("card.example_label", _LANG))
         lines.append(example.example_text)
         if example.translation:
             lines.append(example.translation)

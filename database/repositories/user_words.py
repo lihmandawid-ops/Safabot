@@ -15,7 +15,17 @@ from database.models import UserWord, Word, WordStatus
 from utils.text import normalize_word
 from utils.time import utc_now
 
-_WITH_WORD = (selectinload(UserWord.word).selectinload(Word.translations),)
+_WORD = selectinload(UserWord.word)
+# Branch into every sibling relationship a caller might read off
+# `user_word.word` (translations/examples/forms) - chaining a single
+# .selectinload().selectinload() only follows one path, so each needs its
+# own tuple entry sharing the `_WORD` prefix (same pattern as
+# words_repo._WITH_RELATIONS).
+_WITH_WORD = (
+    _WORD.selectinload(Word.translations),
+    _WORD.selectinload(Word.examples),
+    _WORD.selectinload(Word.forms),
+)
 
 
 async def get_user_word(session: AsyncSession, *, user_id: int, word_id: int) -> UserWord | None:

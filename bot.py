@@ -25,6 +25,7 @@ from handlers.start import start_conversation_handler
 from handlers.text_analysis import text_analysis_callback_handler
 from handlers.words import words_callback_handler
 from scheduler.notifications import register_notification_jobs
+from services.ai_diagnostics import test_deepseek_connection
 from utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -39,6 +40,14 @@ async def on_startup(application: Application) -> None:
         languages = await languages_repo.get_all_active(session)
         word_count = await seed_words(session)
     logger.info("Database ready (%d languages seeded, %d words seeded)", len(languages), word_count)
+
+    # Non-blocking: a broken/unconfigured AI connection must never stop
+    # the bot from starting - every AI-backed feature already falls back
+    # to the local database on its own (DictionaryService/
+    # WordGenerationService). This just logs whether it's actually usable.
+    result = await test_deepseek_connection()
+    if not result.ok:
+        logger.warning("AI connection check failed (reason=%s): %s", result.reason, result.detail)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -178,7 +178,8 @@ safabot/
 │   ├── learning.py              # 📚 Учить слова: сессия, карточка, 4 оценки (реализовано)
 │   ├── review.py                 # 🔄 Повторить: тот же цикл, только due-слова (реализовано)
 │   ├── text_analysis.py          # 📝 Разобрать текст: AI-разбор + добавление слов (реализовано)
-│   └── grammar.py, progress.py, media.py, payments.py   # заглушки со ссылкой на этап
+│   ├── grammar.py                # ✏️ Грамматика: свободный вопрос → explain_grammar() (реализовано)
+│   └── progress.py, media.py, payments.py   # заглушки со ссылкой на этап
 │
 ├── services/                 # бизнес-логика, независимая от Telegram
 │   ├── subscription_service.py   # trial / PRO-статус (реализовано)
@@ -194,6 +195,7 @@ safabot/
 │   ├── ai_provider.py              # AIProvider + HttpAIProvider (OpenAI-совместимый API) (реализовано)
 │   ├── ai_models.py                # Pydantic-схемы AI-ответов (реализовано)
 │   ├── ai_errors.py                # AIError и подклассы (реализовано)
+│   ├── ai_diagnostics.py           # test_deepseek_connection() (реализовано)
 │   └── translation_service.py, ocr_service.py, speech_service.py  # заглушки
 │
 ├── database/
@@ -234,7 +236,8 @@ safabot/
     │   test_repetition_service.py, test_learning_service.py,
     │   test_sessions.py, test_notifications.py,
     │   test_dictionary_service.py, test_word_generation_service.py,
-    │   test_manual_add_flow.py, test_ai_service.py, test_text_analysis_flow.py
+    │   test_manual_add_flow.py, test_ai_service.py, test_text_analysis_flow.py,
+    │   test_ai_diagnostics.py, test_grammar_flow.py, test_word_display.py
     │   # реализовано
 ```
 
@@ -421,8 +424,14 @@ generate_new_words()` на недостающее количество.
 Safabot использует AI как необязательный интеллектуальный слой поверх
 локальной базы — без него бот полностью работает (📖 Словарь и
 📚 Учить слова используют только seed-данные), с ним добавляются: поиск
-незнакомых слов, автогенерация, `💡 Как использовать?` и `📝 Разбор
-текста`.
+незнакомых слов, автогенерация, `💡 Как использовать?`, `📝 Разбор
+текста` и `✏️ Грамматика`.
+
+**Провайдер по умолчанию — DeepSeek** (`deepseek-chat`, API OpenAI-
+совместимый, `AI_BASE_URL=https://api.deepseek.com`). Ключ уже настроен в
+`.env` на этом деплое — ничего дополнительно указывать не нужно; ниже
+описано, как это устроено и как проверить, что подключение реально
+работает.
 
 ### Архитектура
 
@@ -481,6 +490,16 @@ HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
 
 **Как проверить подключение:**
 
+- `services/ai_diagnostics.test_deepseek_connection()` делает один
+  минимальный запрос к настроенному провайдеру и возвращает
+  `ConnectionTestResult(ok, reason, detail)` — никогда не бросает
+  исключение и никогда не печатает сам ключ. Вызывается автоматически при
+  каждом старте бота (`bot.py`'s `on_startup`, не блокирует запуск даже
+  при сбое) и пишет в лог ровно `DeepSeek connection: OK` при успехе, либо
+  `AI connection check failed (reason=...)` с точной причиной при неудаче
+  (`missing_api_key` / `disabled` / `unauthorized` / `rate_limited` /
+  `timeout` / `network_error` / `invalid_response`).
+- Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_deepseek_connection; print(asyncio.run(test_deepseek_connection()))"`.
 - В 📖 Словарь введите слово, которого точно нет в seed-наборе
   (`database/seed_words.py`) — например `serendipity`. Если AI настроен
   правильно, придёт карточка с переводом; при следующем вводе того же
@@ -502,8 +521,16 @@ HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
 | Автогенерация новых слов | 📚 Учить слова (через `WordGenerationService`) | `generate_words()` |
 | Объяснение слова | Карточка → 💡 Как использовать? | `explain_word()` |
 | Разбор текста | 📝 Разобрать текст | `analyze_text()` |
-| Объяснение грамматики | (сервисный метод, отдельного UI пока нет) | `explain_grammar()` |
+| Объяснение грамматики | ✏️ Грамматика (свободный вопрос, например «Why "went" not "goed"?») | `explain_grammar()` |
 | Извлечение слов из текста | заготовка для будущих OCR/голос-этапов | `extract_learning_words()` |
+
+Карточка слова (📖 Словарь, ➕ Добавить слово) показывает часть речи,
+произношение и значение (`Word.definition`) прямо в тексте карточки, не
+отдельными кнопками — только `🔤 Все формы` остаётся отдельной кнопкой
+(для глаголов; форма языка-специфична: `base/third_person/past/gerund`
+для английского, `Infinitiv/Präsens/Präteritum/Partizip II` для немецкого
+и так далее — AI не придумывает форму, если не уверен, просто не
+указывает её).
 
 `📝 Разобрать текст`: пользователь присылает текст → AI возвращает
 перевод, ключевые слова (слово — перевод, часть речи) и полезные
@@ -544,16 +571,25 @@ HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
 
 ### Тестирование без реального AI
 
-`tests/test_ai_service.py` использует `MockAIProvider` — тестовую
-реализацию `AIProvider` (тот же интерфейс, что и `HttpAIProvider`),
-подставляющую заранее заданные ответы/исключения вместо реального HTTP-
-запроса. Через неё прогоняется настоящий `LiveAIService` (сборка
-промпта → вызов провайдера → retry → валидация Pydantic-моделью →
-логирование), так что тесты проверяют реальную логику, а не только
-моки. Ни один тест в проекте не делает настоящий запрос к AI API.
+`tests/test_ai_service.py` использует `MockAIProvider`, а
+`tests/test_ai_diagnostics.py` — `MockDeepSeekProvider`: тестовые
+реализации `AIProvider` (тот же интерфейс, что и `HttpAIProvider`),
+подставляющие заранее заданные ответы/исключения вместо реального HTTP-
+запроса. Через них прогоняется настоящий `LiveAIService`/
+`test_deepseek_connection()` (сборка промпта → вызов провайдера → retry →
+валидация Pydantic-моделью → логирование), так что тесты проверяют
+реальную логику, а не только моки.
+
+Ни один тест в проекте не делает настоящий запрос к AI API — даже если в
+локальном `.env` разработчика лежит настоящий рабочий ключ DeepSeek.
+Это обеспечивает автоматический фикстур `tests/conftest.py:
+_isolate_ai_config` (`autouse=True`): каждый тест по умолчанию запускается
+с `AI_API_KEY=""`, независимо от реального `.env`; тесты, которым нужен
+«настроенный» AI, сами подставляют свой `LiveAIService`/провайдер через
+`monkeypatch.setattr(..., "get_ai_service", ...)`, в обход фабрики.
 
 ```bash
-pytest tests/test_ai_service.py -v
+pytest tests/test_ai_service.py tests/test_ai_diagnostics.py -v
 ```
 
 ## Ядро обучения: интервальное повторение + уведомления

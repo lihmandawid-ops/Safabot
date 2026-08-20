@@ -83,7 +83,9 @@ class GeneratedWord(BaseModel):
     part_of_speech: str | None = None
     phonetic: str | None = None
     pronunciation: str | None = None
-    definitions: list[str] = Field(default_factory=list)
+    # Singular, matching database.models.Word.definition - a short meaning/
+    # gloss, not a list of alternate senses (spec section 5's schema).
+    definition: str | None = None
     examples: list[ExampleResult] = Field(default_factory=list)
     difficulty: str | None = None
     category: str | None = None
@@ -107,7 +109,7 @@ class GeneratedWord(BaseModel):
             raise ValueError("at least one translation is required")
         return value
 
-    @field_validator("part_of_speech", "difficulty", "category", "phonetic", "pronunciation", mode="before")
+    @field_validator("part_of_speech", "difficulty", "category", "phonetic", "pronunciation", "definition", mode="before")
     @classmethod
     def _clean_optional_str(cls, value: object) -> object:
         return _clean(value) if isinstance(value, str) else value
@@ -135,13 +137,6 @@ class GeneratedWord(BaseModel):
             return None
         value = value.lower()
         return value if value in _VALID_CATEGORIES else None
-
-    @field_validator("definitions", mode="before")
-    @classmethod
-    def _normalize_definitions(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [value]
-        return value
 
     @field_validator("verb_forms")
     @classmethod

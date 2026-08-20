@@ -164,7 +164,7 @@ _LOOKUP_WORD_SYSTEM = (
     "phrase, respond with ONLY a JSON object (no extra text) with this shape: "
     '{"word": str, "translations": [{"translation": str, "usage_note": str|null}], '
     '"part_of_speech": str|null, "phonetic": str|null, "pronunciation": str|null, '
-    '"definitions": [str], "examples": [{"text": str, "translation": str|null}], '
+    '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
     '"difficulty": str|null, "category": str|null, "verb_forms": object|null}. '
     "verb_forms should only be set when part_of_speech is \"verb\", using whatever grammatical "
     "form names make sense for that language (do not force English's forms onto other languages)."
@@ -174,7 +174,7 @@ _GENERATE_WORDS_SYSTEM = (
     "You generate new vocabulary for a language-learning app. Respond with ONLY a JSON object: "
     '{"words": [ {"word": str, "translations": [{"translation": str, "usage_note": str|null}], '
     '"part_of_speech": str|null, "phonetic": str|null, "pronunciation": str|null, '
-    '"definitions": [str], "examples": [{"text": str, "translation": str|null}], '
+    '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
     '"difficulty": str|null, "category": str|null, "verb_forms": object|null}, ... ]}. '
     "Return exactly the requested amount of DISTINCT words the learner does not already know. "
     "Never repeat a word from the learner's known-words list."

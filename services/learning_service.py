@@ -9,6 +9,7 @@ the one place that connects a grade to a database mutation).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +23,17 @@ from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import local_day_bounds, local_today, utc_now
 
 
+@dataclass
+class NewWordsResult:
+    words: list[UserWord]
+    # True when the daily quota couldn't be fully filled even after local
+    # pool + AI generation - e.g. AI is unavailable/misconfigured and the
+    # local pool alone doesn't cover it. Callers use this to show a
+    # friendly heads-up (AI-integration spec section 20) instead of
+    # silently handing the user fewer words than expected.
+    shortfall: bool
+
+
 async def get_due_reviews(
     session: AsyncSession, *, user_id: int, language_code: str, now: datetime | None = None
 ) -> list[UserWord]:
@@ -31,9 +43,25 @@ async def get_due_reviews(
     )
 
 
+async def get_remaining_new_word_quota(
+    session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
+) -> int:
+    """How many more new words `user` can start today, per
+    user_language.daily_new_words (section 6) - shared by
+    get_new_words_for_today and any caller (e.g. handlers/learning.py's
+    intro screen) that needs the number without duplicating the
+    day-bounds + count query."""
+    now = now if now is not None else utc_now()
+    day_start, day_end = local_day_bounds(now, user.timezone)
+    already_used = await learning_repo.count_new_words_started_today(
+        session, user_id=user.id, language_code=user_language.language_code, day_start=day_start, day_end=day_end
+    )
+    return max(0, user_language.daily_new_words - already_used)
+
+
 async def get_new_words_for_today(
     session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
-) -> list[UserWord]:
+) -> NewWordsResult:
     """Section 6: never exceed user_language.daily_new_words new words
     per LOCAL calendar day, regardless of how many sessions that spans.
 
@@ -44,14 +72,9 @@ async def get_new_words_for_today(
     every caller (build_learning_session, handlers/learning.py's intro
     screen) gets generation for free.
     """
-    now = now if now is not None else utc_now()
-    day_start, day_end = local_day_bounds(now, user.timezone)
-    already_used = await learning_repo.count_new_words_started_today(
-        session, user_id=user.id, language_code=user_language.language_code, day_start=day_start, day_end=day_end
-    )
-    remaining = max(0, user_language.daily_new_words - already_used)
+    remaining = await get_remaining_new_word_quota(session, user=user, user_language=user_language, now=now)
     if remaining == 0:
-        return []
+        return NewWordsResult(words=[], shortfall=False)
 
     existing = await learning_repo.get_new_word_candidates(
         session, user_id=user.id, language_code=user_language.language_code,
@@ -59,7 +82,7 @@ async def get_new_words_for_today(
     )
     shortfall = remaining - len(existing)
     if shortfall <= 0:
-        return existing
+        return NewWordsResult(words=existing, shortfall=False)
 
     try:
         generated = await word_generation_service.generate_new_words(
@@ -70,7 +93,8 @@ async def get_new_words_for_today(
         # spec) - the user still gets whatever was already available.
         generated = []
 
-    return existing + generated
+    words = existing + generated
+    return NewWordsResult(words=words, shortfall=len(words) < remaining)
 
 
 async def build_learning_session(
@@ -100,7 +124,7 @@ async def build_learning_session(
 
     due = await get_due_reviews(session, user_id=user.id, language_code=user_language.language_code, now=now)
     new_words = (
-        await get_new_words_for_today(session, user=user, user_language=user_language, now=now)
+        (await get_new_words_for_today(session, user=user, user_language=user_language, now=now)).words
         if include_new_words
         else []
     )

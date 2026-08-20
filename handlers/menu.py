@@ -15,6 +15,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, MessageHandler, filters
 
 from handlers import dictionary as dictionary_handler
+from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
 from handlers import review as review_handler
 from handlers import settings as settings_handler
@@ -66,6 +67,11 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await text_analysis_handler.start_text_analysis(update, context)
         return
 
+    if text == main_menu.GRAMMAR:
+        context.user_data.pop("mode", None)
+        await grammar_handler.start_grammar(update, context)
+        return
+
     label = _COMING_SOON.get(text)
     if label is not None:
         context.user_data.pop("mode", None)
@@ -81,6 +87,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if mode == text_analysis_handler.MODE:
         await text_analysis_handler.handle_text_input(update, context, text)
+        return
+    if mode == grammar_handler.MODE:
+        await grammar_handler.handle_text_input(update, context, text)
         return
 
     await update.message.reply_text(t("menu.unknown_command", _LANG))

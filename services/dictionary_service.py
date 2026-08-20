@@ -116,6 +116,7 @@ async def _lookup_and_persist(
         part_of_speech=data.part_of_speech,
         pronunciation=data.pronunciation,
         phonetic=data.phonetic,
+        definition=data.definition,
         difficulty=data.difficulty,
         category=data.category,
     )

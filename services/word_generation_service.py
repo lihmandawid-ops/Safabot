@@ -147,6 +147,7 @@ async def _persist_and_add(
         part_of_speech=entry.part_of_speech,
         pronunciation=entry.pronunciation,
         phonetic=entry.phonetic,
+        definition=entry.definition,
         difficulty=entry.difficulty or user_language.level,
         category=entry.category,
     )
