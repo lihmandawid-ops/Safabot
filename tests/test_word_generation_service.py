@@ -233,12 +233,15 @@ async def test_get_new_words_for_today_reports_shortfall_when_ai_unavailable(ses
     assert result.shortfall is True
 
 
-async def test_daily_new_word_limit_holds_across_repeated_learning_launches(session):
+async def test_new_word_batch_regenerates_via_ai_for_repeated_same_day_launches(session, monkeypatch):
+    """Bugfix stage, explicit product decision: no daily cap on new words
+    - once local seed words run out, a repeated same-day 📚 Учить слова
+    must top up via AI generation rather than coming back empty."""
     from services.repetition_service import ReviewGrade
     from database.repositories import sessions as sessions_repo
 
     user, ul = await _create_user(session, telegram_id=5010, daily_new_words=2)
-    await _seed_local_words(session, 10)
+    await _seed_local_words(session, 2)  # exactly enough for one batch, none left over
 
     first = await learning_service.build_learning_session(session, user=user, user_language=ul)
     assert first is not None
@@ -252,8 +255,14 @@ async def test_daily_new_word_limit_holds_across_repeated_learning_launches(sess
     await learning_service.finish_session_if_complete(session, user, first)
     await session.commit()
 
+    fake = _FakeAIService([_generated("second_day_word_1", "слово1"), _generated("second_day_word_2", "слово2")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
     second = await learning_service.build_learning_session(session, user=user, user_language=ul)
-    assert second is None  # limit of 2 already used today, nothing due yet either
+
+    assert second is not None
+    assert second.total_words == 2
+    assert second.id != first.id
 
 
 async def test_generate_extra_words_adds_words_beyond_the_daily_new_words_quota(session):

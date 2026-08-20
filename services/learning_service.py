@@ -47,17 +47,19 @@ async def get_due_reviews(
 async def get_remaining_new_word_quota(
     session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
 ) -> int:
-    """How many more new words `user` can start today, per
-    user_language.daily_new_words (section 6) - shared by
-    get_new_words_for_today and any caller (e.g. handlers/learning.py's
-    intro screen) that needs the number without duplicating the
-    day-bounds + count query."""
-    now = now if now is not None else utc_now()
-    day_start, day_end = local_day_bounds(now, user.timezone)
-    already_used = await learning_repo.count_new_words_started_today(
-        session, user_id=user.id, language_code=user_language.language_code, day_start=day_start, day_end=day_end
-    )
-    return max(0, user_language.daily_new_words - already_used)
+    """How many new words to hand out the next time `user` opens 📚 Учить
+    слова, per user_language.daily_new_words (section 6).
+
+    Bugfix stage, real-Telegram feedback: there is deliberately no "already
+    used today" tracking here any more - daily_new_words is a per-session
+    batch size, not a once-a-day cap. A finished session's daily_new_words
+    words are gone (mastered/scheduled for review), so build_learning_session
+    only calls this again once there's no active session left to resume,
+    meaning the user can open 📚 Учить слова as many times as they want in
+    a day and always get a fresh batch - "the user wants more, so the bot
+    gives more" was an explicit product decision, not an oversight.
+    """
+    return user_language.daily_new_words
 
 
 async def get_extra_words_used_today(

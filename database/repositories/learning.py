@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import LearningSession, LearningSessionItem, UserWord, Word, WordStatus
+from database.models import UserWord, Word, WordStatus
 from services.repetition_service import RepetitionResult, clamp_difficulty
 from utils.time import utc_now
 
@@ -70,33 +70,6 @@ async def get_new_word_candidates(
         .limit(limit)
     )
     return list(result.scalars().unique().all())
-
-
-async def count_new_words_started_today(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    language_code: str,
-    day_start: datetime,
-    day_end: datetime,
-) -> int:
-    """How many distinct words were already handed out as "new" today
-    (spec section 6) - counted from LearningSessionItem.is_new_word so an
-    abandoned-and-rebuilt session still can't push a user over their
-    daily limit."""
-    result = await session.execute(
-        select(func.count(func.distinct(LearningSessionItem.user_word_id)))
-        .select_from(LearningSessionItem)
-        .join(LearningSession, LearningSessionItem.session_id == LearningSession.id)
-        .where(
-            LearningSession.user_id == user_id,
-            LearningSession.language_code == language_code,
-            LearningSessionItem.is_new_word.is_(True),
-            LearningSession.started_at >= day_start,
-            LearningSession.started_at < day_end,
-        )
-    )
-    return int(result.scalar_one())
 
 
 async def apply_review_result(

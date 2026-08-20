@@ -60,7 +60,11 @@ async def _complete_all_items(session, learning_session, *, now):
 
 
 @pytest.mark.parametrize("limit", [2, 4, 8])
-async def test_daily_new_word_limit_is_respected(session, limit):
+async def test_new_word_batch_size_matches_daily_new_words(session, limit):
+    """daily_new_words is a per-session batch size (bugfix stage, real-
+    Telegram feedback: there is no longer a once-a-day cap on top of it -
+    see test_a_fresh_batch_is_available_immediately_after_finishing_one
+    below)."""
     user, ul = await _create_user(session, telegram_id=2000 + limit, daily_new_words=limit)
     words = await _make_words(session, limit + 5, prefix=f"lim{limit}_")
     await _add_as_new(session, user.id, words)
@@ -69,6 +73,27 @@ async def test_daily_new_word_limit_is_respected(session, limit):
     learning_session = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
     assert learning_session.total_words == limit
     assert all(item.is_new_word for item in learning_session.items)
+
+
+async def test_a_fresh_batch_is_available_immediately_after_finishing_one(session):
+    """Bugfix stage, explicit product decision: "no daily limit on new
+    words - if the person wants more, the bot gives more". Finishing one
+    session's batch must not block a second, same-day batch."""
+    user, ul = await _create_user(session, telegram_id=2050, daily_new_words=2)
+    words = await _make_words(session, 10, prefix="fresh_")
+    await _add_as_new(session, user.id, words)
+    await session.commit()
+
+    first = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+    assert first.total_words == 2
+    await _complete_all_items(session, first, now=NOW)
+    await learning_service.finish_session_if_complete(session, user, first, now=NOW)
+    await session.commit()
+
+    second = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+    assert second is not None
+    assert second.total_words == 2
+    assert second.id != first.id
 
 
 async def test_due_reviews_do_not_count_against_new_word_limit(session):
