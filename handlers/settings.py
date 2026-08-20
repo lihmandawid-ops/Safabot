@@ -23,7 +23,13 @@ from config import get_settings
 from database.database import session_scope
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
+from keyboards.language import (
+    settings_add_learning_language_keyboard,
+    settings_add_translation_language_keyboard,
+)
 from keyboards.settings import (
+    add_language_level_keyboard,
+    add_language_words_keyboard,
     back_to_settings_keyboard,
     daily_words_pick_keyboard,
     interface_language_pick_keyboard,
@@ -119,8 +125,14 @@ async def _render_home(query, session, user) -> None:
 
 
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Every branch below answers the callback query exactly once - never
+    unconditionally up front AND again with a toast message, since
+    Telegram rejects a second answerCallbackQuery for the same query
+    (a real bug found via live testing: the toast-text branches used to
+    answer twice, the second call raised, and _render_home never ran -
+    the settings screen silently never updated for language/level/daily-
+    words/notification changes)."""
     query = update.callback_query
-    await query.answer()
     data = query.data
 
     async with session_scope() as session:
@@ -129,14 +141,78 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             return
 
         if data == "set:home":
+            await query.answer()
             await _render_home(query, session, user)
 
         elif data == "set:lang:list":
+            await query.answer()
             languages = await user_languages_repo.get_user_languages(session, user.id)
+            max_languages = (
+                get_settings().plan_limits.pro_max_languages
+                if subscription_service.has_pro_access(user)
+                else get_settings().plan_limits.free_max_languages
+            )
             await query.edit_message_text(
                 t("settings.pick_current_language", _LANG),
-                reply_markup=language_switch_keyboard(languages),
+                reply_markup=language_switch_keyboard(languages, can_add_more=len(languages) < max_languages),
             )
+
+        elif data == "set:addlang:start":
+            languages = await user_languages_repo.get_user_languages(session, user.id)
+            max_languages = (
+                get_settings().plan_limits.pro_max_languages
+                if subscription_service.has_pro_access(user)
+                else get_settings().plan_limits.free_max_languages
+            )
+            if len(languages) >= max_languages:
+                await query.answer(t("settings.add_language_limit_reached", _LANG, max=max_languages), show_alert=True)
+                return
+            await query.answer()
+            await query.edit_message_text(
+                t("settings.add_language_pick_learning", _LANG),
+                reply_markup=settings_add_learning_language_keyboard(),
+            )
+
+        elif data.startswith("set:addlang:learn:"):
+            await query.answer()
+            learning_code = data.removeprefix("set:addlang:learn:")
+            lang = LANGUAGE_BY_CODE[learning_code]
+            await query.edit_message_text(
+                t("settings.add_language_pick_translation", _LANG, flag=lang.flag, name=lang.name_ru),
+                reply_markup=settings_add_translation_language_keyboard(learning_language=learning_code),
+            )
+
+        elif data.startswith("set:addlang:trans:"):
+            await query.answer()
+            learning_code, translation_code = data.removeprefix("set:addlang:trans:").split(":")
+            await query.edit_message_text(
+                t("settings.pick_level", _LANG),
+                reply_markup=add_language_level_keyboard(learning_code, translation_code),
+            )
+
+        elif data.startswith("set:addlang:level:"):
+            await query.answer()
+            learning_code, translation_code, level = data.removeprefix("set:addlang:level:").split(":")
+            options = get_settings().plan_limits.daily_new_words_options
+            await query.edit_message_text(
+                t("settings.pick_daily_words", _LANG),
+                reply_markup=add_language_words_keyboard(learning_code, translation_code, level, options),
+            )
+
+        elif data.startswith("set:addlang:words:"):
+            learning_code, translation_code, level, count = data.removeprefix("set:addlang:words:").split(":")
+            try:
+                new_language = await user_languages_repo.add_language(
+                    session, user_id=user.id, language_code=learning_code,
+                    translation_language=translation_code, level=level, daily_new_words=int(count),
+                )
+            except user_languages_repo.DuplicateUserLanguageError:
+                await query.answer(t("settings.add_language_duplicate", _LANG), show_alert=True)
+                return
+            await user_languages_repo.set_active_language(session, user_id=user.id, user_language_id=new_language.id)
+            lang = LANGUAGE_BY_CODE[learning_code]
+            await query.answer(t("settings.add_language_added", _LANG, flag=lang.flag, name=lang.name_ru))
+            await _render_home(query, session, user)
 
         elif data.startswith("set:lang:pick:"):
             user_language_id = int(data.removeprefix("set:lang:pick:"))
@@ -155,6 +231,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await _render_home(query, session, user)
 
         elif data == "set:iface:list":
+            await query.answer()
             await query.edit_message_text(
                 t("settings.pick_interface_language", _LANG),
                 reply_markup=interface_language_pick_keyboard(),
@@ -168,6 +245,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await _render_home(query, session, user)
 
         elif data == "set:words:list":
+            await query.answer()
             options = get_settings().plan_limits.daily_new_words_options
             await query.edit_message_text(
                 t("settings.pick_daily_words", _LANG), reply_markup=daily_words_pick_keyboard(options)
@@ -182,11 +260,13 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await _render_home(query, session, user)
 
         elif data == "set:notif:slots":
+            await query.answer()
             await query.edit_message_text(
                 t("settings.pick_notification_slot", _LANG), reply_markup=notification_slot_keyboard()
             )
 
         elif data.startswith("set:notif:slot:"):
+            await query.answer()
             slot = data.removeprefix("set:notif:slot:")
             await query.edit_message_text(
                 t("settings.pick_notification_time", _LANG), reply_markup=notification_time_keyboard(slot)
@@ -220,6 +300,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await _render_home(query, session, user)
 
         elif data == "set:level:list":
+            await query.answer()
             await query.edit_message_text(
                 t("settings.pick_level", _LANG), reply_markup=level_pick_keyboard()
             )
@@ -231,6 +312,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await _render_home(query, session, user)
 
         elif data == "set:sub":
+            await query.answer()
             user = await subscription_service.refresh_expired_trial(session, user)
             status_line = t("settings.subscription", _LANG, status=t(f"subscription.status.{user.subscription_status}", _LANG))
             lines = [status_line]
@@ -239,6 +321,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.edit_message_text("\n".join(lines), reply_markup=back_to_settings_keyboard())
 
         else:
+            await query.answer()
             logger.warning("Unhandled settings callback_data: %s", data)
 
 

@@ -43,7 +43,7 @@ def back_to_settings_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def language_switch_keyboard(user_languages) -> InlineKeyboardMarkup:
+def language_switch_keyboard(user_languages, *, can_add_more: bool) -> InlineKeyboardMarkup:
     from utils.languages import LANGUAGE_BY_CODE
 
     rows = []
@@ -53,8 +53,41 @@ def language_switch_keyboard(user_languages) -> InlineKeyboardMarkup:
         if ul.is_current:
             label = f"✅ {label}"
         rows.append([InlineKeyboardButton(label, callback_data=f"set:lang:pick:{ul.id}")])
+    if can_add_more:
+        rows.append([InlineKeyboardButton(t("settings.menu.add_language", _LANG), callback_data="set:addlang:start")])
     rows.append([InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
+
+
+def add_language_level_keyboard(learning_language: str, translation_language: str) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                t(f"level.{code}", _LANG),
+                callback_data=f"set:addlang:level:{learning_language}:{translation_language}:{code}",
+            )
+        ]
+        for code in LEVEL_CODES
+    ]
+    rows.append([InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:lang:list")])
+    return InlineKeyboardMarkup(rows)
+
+
+def add_language_words_keyboard(
+    learning_language: str, translation_language: str, level: str, options: tuple[int, ...]
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    str(n),
+                    callback_data=f"set:addlang:words:{learning_language}:{translation_language}:{level}:{n}",
+                )
+                for n in options
+            ],
+            [InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:lang:list")],
+        ]
+    )
 
 
 def interface_language_pick_keyboard() -> InlineKeyboardMarkup:
