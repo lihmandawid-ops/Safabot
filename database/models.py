@@ -89,6 +89,19 @@ class PartOfSpeech(_StrEnum):
     OTHER = "other"
 
 
+class WordSource(_StrEnum):
+    """Where a UserWord's underlying Word came from (bugfix spec section
+    on manual add / generation): never a separate "manual database" - just
+    a tag on the same Word/UserWord rows everything else uses."""
+
+    DICTIONARY = "dictionary"
+    MANUAL = "manual"
+    GENERATED = "generated"
+    OCR = "ocr"
+    VOICE = "voice"
+    AI = "ai"
+
+
 class WordCategory(_StrEnum):
     """Section 18. Thematic sets are future work; this only tags words."""
 
@@ -367,6 +380,12 @@ class UserWord(Base):
     difficulty_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # How this UserWord's Word ended up in the user's learning list (bugfix
+    # spec): dictionary search, typed in manually, auto-generated, or
+    # ingested via OCR/voice/AI - purely informational, never branched on
+    # by the learning core itself.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default=WordSource.DICTIONARY)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -475,4 +494,30 @@ class NotificationLog(Base):
         return (
             f"NotificationLog(user_id={self.user_id}, "
             f"type={self.notification_type!r}, date={self.scheduled_date})"
+        )
+
+
+class WordGenerationLog(Base):
+    """One call to word_generation_service.generate_new_words (bugfix spec:
+    "для контроля использования AI и затрат") - logged even when the local
+    word pool covered everything and no AI provider was actually called
+    (provider="local"/"none"), so usage can be audited either way.
+    """
+
+    __tablename__ = "word_generation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    requested_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    generated_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"WordGenerationLog(user_id={self.user_id}, language_code={self.language_code!r}, "
+            f"requested={self.requested_amount}, generated={self.generated_amount})"
         )

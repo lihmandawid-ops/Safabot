@@ -13,6 +13,20 @@ def normalize_word(raw: str) -> str:
     return _WHITESPACE_RE.sub(" ", raw.strip()).casefold()
 
 
+_WORD_BATCH_SPLIT_RE = re.compile(r"[,\n]+")
+
+
+def split_word_batch(raw: str) -> list[str]:
+    """Split a user-typed word list on commas and/or newlines (bugfix
+    spec's ➕ Добавить слово: "несколько слов через запятую или с новой
+    строки"). Deliberately NOT split on plain spaces, unlike
+    parse_number_list, since a single entry may itself be a multi-word
+    phrase (e.g. "give up"). A single entry with no separators simply
+    yields a one-item list.
+    """
+    return [p.strip() for p in _WORD_BATCH_SPLIT_RE.split(raw) if p.strip()]
+
+
 _NUMBER_SPLIT_RE = re.compile(r"[,\s]+")
 
 

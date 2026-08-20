@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import Word, WordExample, WordForm, WordTranslation
+from database.models import UserWord, Word, WordExample, WordForm, WordTranslation
 from utils.text import normalize_word
 
 _WITH_RELATIONS = (
@@ -80,6 +80,31 @@ async def get_by_language(
         .offset(offset)
     )
     return list(result.scalars().all())
+
+
+async def find_unknown_words_for_generation(
+    session: AsyncSession, *, user_id: int, language_code: str, level: str, limit: int
+) -> list[Word]:
+    """Word rows in `language_code` the user has NO UserWord row for at
+    all - regardless of status (bugfix spec: "не уже известные пользователю
+    ни в каком статусе") - the local candidate pool
+    services/word_generation_service.py draws from before ever calling an
+    AI provider. Prefers words matching the user's level, same as
+    learning.get_new_word_candidates, without hard-excluding the rest."""
+    if limit <= 0:
+        return []
+    level_match = case((Word.difficulty == level, 0), else_=1)
+    known_subquery = (
+        select(UserWord.id).where(UserWord.user_id == user_id, UserWord.word_id == Word.id).exists()
+    )
+    result = await session.execute(
+        select(Word)
+        .where(Word.language_code == language_code, ~known_subquery)
+        .options(*_WITH_RELATIONS)
+        .order_by(level_match, Word.id)
+        .limit(limit)
+    )
+    return list(result.scalars().unique().all())
 
 
 async def get_verb_forms(session: AsyncSession, word_id: int) -> list[WordForm]:

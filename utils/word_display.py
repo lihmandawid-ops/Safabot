@@ -14,11 +14,30 @@ def status_label(status: str) -> str:
     return t(f"card.status.{status}", _LANG)
 
 
+_POS_WITH_LABEL = {
+    "noun", "verb", "adjective", "adverb", "pronoun",
+    "preposition", "conjunction", "article", "particle", "phrase",
+}
+
+
+def part_of_speech_label(part_of_speech: str | None) -> str | None:
+    """None for "other"/unset - there's nothing meaningful to show the
+    user for those, so the 📌 line is simply omitted (bugfix spec: word
+    cards were missing part of speech entirely)."""
+    if part_of_speech not in _POS_WITH_LABEL:
+        return None
+    return t("card.pos_line", _LANG, pos=t(f"card.pos.{part_of_speech}", _LANG))
+
+
 def render_word_card_text(card, *, status: str | None = None) -> str:
     lang = LANGUAGE_BY_CODE.get(card.word.language_code)
     flag = lang.flag if lang else ""
 
     lines = [f"{flag} {card.word.word}"]
+
+    pos_label = part_of_speech_label(card.word.part_of_speech)
+    if pos_label is not None:
+        lines.append(pos_label)
 
     if card.translations:
         translation_lang = LANGUAGE_BY_CODE.get(card.translations[0].language_code)

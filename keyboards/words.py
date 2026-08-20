@@ -20,6 +20,7 @@ def filter_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("words.filter.paused", _LANG), callback_data="words:filter:paused")],
             [InlineKeyboardButton(t("words.filter.mastered", _LANG), callback_data="words:filter:mastered")],
             [InlineKeyboardButton(t("words.search_button", _LANG), callback_data="words:search")],
+            [InlineKeyboardButton(t("words.add_button", _LANG), callback_data="words:add")],
         ]
     )
 

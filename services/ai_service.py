@@ -37,6 +37,18 @@ class AIService(ABC):
     async def explain_grammar(self, topic: str, *, language_code: str) -> str:
         """Short grammar explanation grounded in real words/sentences (section 21)."""
 
+    @abstractmethod
+    async def generate_words(
+        self, *, language_code: str, translation_language: str, level: str, amount: int, category: str | None = None
+    ) -> dict:
+        """Bulk vocabulary generation for services/word_generation_service.py's
+        AI fallback (bugfix spec). Must return a dict shaped like
+        {"words": [{"word", "translation": [...], "part_of_speech",
+        "phonetic", "examples": [{"text", "translation"}], "difficulty",
+        "category"}, ...]} - services/ai_word_schema.py validates the
+        response before anything from it is written to the database, so a
+        malformed reply here never corrupts the dictionary."""
+
 
 class NotConfiguredAIService(AIService):
     """Placeholder used while config.get_settings().ai_provider == "none".
@@ -57,6 +69,11 @@ class NotConfiguredAIService(AIService):
         raise NotImplementedError("AI provider not configured (see AI_PROVIDER in .env); arrives in Stage 14")
 
     async def explain_grammar(self, topic: str, *, language_code: str) -> str:
+        raise NotImplementedError("AI provider not configured (see AI_PROVIDER in .env); arrives in Stage 14")
+
+    async def generate_words(
+        self, *, language_code: str, translation_language: str, level: str, amount: int, category: str | None = None
+    ) -> dict:
         raise NotImplementedError("AI provider not configured (see AI_PROVIDER in .env); arrives in Stage 14")
 
 

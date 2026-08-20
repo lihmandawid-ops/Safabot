@@ -26,6 +26,7 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
 from database.models import UserWord
+from handlers import dictionary as dictionary_handler
 from keyboards.dictionary import word_card_keyboard
 from keyboards.words import (
     bulk_action_keyboard,
@@ -271,6 +272,20 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data["words_submode"] = "search"
             await query.answer()
             await edit(t("words.search_prompt", _LANG))
+
+        elif data == "words:add":
+            # Reuses handlers/dictionary.py's free-text handler wholesale
+            # (bugfix spec: never build a second add implementation) - it
+            # already does local-search-then-DictionaryProvider-fallback,
+            # single-word confirmation cards, batch input, and duplicate
+            # detection. Only the entry mode + prompt text differ.
+            context.user_data["mode"] = dictionary_handler.MODE
+            context.user_data["dictionary_entry_source"] = "manual"
+            context.user_data.pop("words_list", None)
+            context.user_data.pop("bulk_selection", None)
+            context.user_data.pop("words_submode", None)
+            await query.answer()
+            await edit(t("words.add_prompt", _LANG))
 
         elif data.startswith("words:page:"):
             direction = data.removeprefix("words:page:")

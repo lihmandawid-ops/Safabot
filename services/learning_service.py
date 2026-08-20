@@ -17,6 +17,7 @@ from config import get_settings
 from database.models import LearningSession, LearningSessionItem, User, UserLanguage, UserWord
 from database.repositories import learning as learning_repo
 from database.repositories import sessions as sessions_repo
+from services import word_generation_service
 from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import local_day_bounds, local_today, utc_now
 
@@ -34,7 +35,15 @@ async def get_new_words_for_today(
     session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
 ) -> list[UserWord]:
     """Section 6: never exceed user_language.daily_new_words new words
-    per LOCAL calendar day, regardless of how many sessions that spans."""
+    per LOCAL calendar day, regardless of how many sessions that spans.
+
+    Bugfix spec (root cause #2): if the words the user already has sitting
+    as NEW aren't enough to fill today's remaining quota, top up the
+    shortfall via word_generation_service before returning - this is the
+    one place 📚 Учить слова's "not enough new words" gap gets closed, so
+    every caller (build_learning_session, handlers/learning.py's intro
+    screen) gets generation for free.
+    """
     now = now if now is not None else utc_now()
     day_start, day_end = local_day_bounds(now, user.timezone)
     already_used = await learning_repo.count_new_words_started_today(
@@ -43,10 +52,25 @@ async def get_new_words_for_today(
     remaining = max(0, user_language.daily_new_words - already_used)
     if remaining == 0:
         return []
-    return await learning_repo.get_new_word_candidates(
+
+    existing = await learning_repo.get_new_word_candidates(
         session, user_id=user.id, language_code=user_language.language_code,
         level=user_language.level, limit=remaining,
     )
+    shortfall = remaining - len(existing)
+    if shortfall <= 0:
+        return existing
+
+    try:
+        generated = await word_generation_service.generate_new_words(
+            session, user=user, user_language=user_language, amount=shortfall
+        )
+    except Exception:
+        # Generation failing must never break the learning flow (bugfix
+        # spec) - the user still gets whatever was already available.
+        generated = []
+
+    return existing + generated
 
 
 async def build_learning_session(

@@ -40,3 +40,15 @@ def resume_offer_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("dictionary.resume_no", _LANG), callback_data=f"dict:resume_no:{user_word_id}")],
         ]
     )
+
+
+def batch_resume_keyboard(paused: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    """One 🔄 button per PAUSED word surfaced in a batch-add summary (bugfix
+    spec: offer to resume a paused word right from the "already had it"
+    section instead of making the user hunt for it in ⭐ Мои слова)."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("words.batch_resume_button", _LANG, word=word), callback_data=f"dict:resume:{uw_id}")]
+            for uw_id, word in paused
+        ]
+    )
