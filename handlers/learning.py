@@ -226,22 +226,26 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             await edit(t("words.choose_filter", _LANG), reply_markup=filter_keyboard())
 
         elif data.startswith("learn:know:"):
+            # Answer the callback query BEFORE mark_known_and_replace, not
+            # after: that call can trigger a real AI request for the
+            # replacement word (up to AI_TIMEOUT_SECONDS x retries - tens of
+            # seconds), and Telegram rejects a callback-query answer sent
+            # too late ("query is too old"), which used to surface as a
+            # generic "something went wrong" error with no visible result.
             user_word_id = int(data.removeprefix("learn:know:"))
+            await query.answer()
             learning_session = await sessions_repo.get_active_session(
                 session, user_id=user.id, language_code=current.language_code
             )
             if learning_session is None:
-                await query.answer()
                 await edit(t("learning.session_gone", _LANG))
                 return
             item = await learning_service.mark_known_and_replace(
                 session, user=user, user_language=current, learning_session=learning_session, user_word_id=user_word_id
             )
             if item is None:
-                await query.answer()
                 await edit(t("learning.session_gone", _LANG))
                 return
-            await query.answer()
             finished = await learning_service.finish_session_if_complete(session, user, learning_session)
             if finished:
                 stats = sessions_repo.session_stats(learning_session)

@@ -166,8 +166,25 @@ _LOOKUP_WORD_SYSTEM = (
     '"part_of_speech": str|null, "phonetic": str|null, "pronunciation": str|null, '
     '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
     '"difficulty": str|null, "category": str|null, "verb_forms": object|null}. '
-    "verb_forms should only be set when part_of_speech is \"verb\", using whatever grammatical "
-    "form names make sense for that language (do not force English's forms onto other languages)."
+    "The input word or phrase may be written in EITHER the target language or the translation "
+    "language - the user does not indicate which. Detect which language it's actually in "
+    'yourself: if it is already in the target language, "word" is that same word (normalized to '
+    "its dictionary/base form) and \"translations\" hold its meaning in the translation language. "
+    'If it is written in the translation language instead, "word" MUST be the equivalent word in '
+    'the target language (never the input as-is), and "translations" hold the original input '
+    "(or its natural equivalents) back in the translation language - i.e. always return a "
+    "target-language headword with translation-language translations, regardless of which "
+    "language the input was actually typed in. "
+    '"pronunciation" must be a phonetic transcription of the target-language "word" that a reader '
+    "of the translation language can sound out using that language's own spelling conventions "
+    "(not IPA, not a transcription system for a third language) - e.g. for an English word shown "
+    "to a Russian speaker, write it out approximately in Cyrillic the way a Russian speaker would "
+    "read it aloud. Always attempt a pronunciation rather than leaving it null unless the script "
+    "makes this genuinely impossible. "
+    "verb_forms MUST be set whenever part_of_speech is \"verb\" - include every commonly-taught "
+    "inflected form for that specific target language (do not force English's forms onto other "
+    "languages, and do not invent a form you are not confident about, but do not omit the field "
+    "entirely for a verb either)."
 )
 
 _GENERATE_WORDS_SYSTEM = (
