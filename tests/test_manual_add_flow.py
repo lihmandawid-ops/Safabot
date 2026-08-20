@@ -326,3 +326,39 @@ async def test_explain_word_button_with_ai_configured_shows_real_explanation(han
     text = q.callback_query.message.reply_text.call_args[0][0]
     assert "Means to move from one place to another." in text
     assert "I go home." in text
+
+
+async def test_explain_word_button_truncates_a_long_ai_explanation(handler_db, monkeypatch):
+    """Bugfix stage, real-Telegram feedback: 💡 Как использовать? must stay
+    a short chat message, not a wall of text - the AI is asked to be
+    brief, but this is the guaranteed outcome regardless of compliance."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    long_explanation = "This word can mean many different things. " * 20  # far over 200 chars
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            import json
+            return json.dumps({"explanation": long_explanation, "examples": []})
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("handlers.dictionary.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    await dictionary_handler.start_search(_message("dummy"), context)
+    await dictionary_handler.handle_search_query(_message("go"), context, "go")
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
+
+    q = _query(f"card:usage:{word.id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+    text = q.callback_query.message.reply_text.call_args[0][0]
+    assert len(text) <= 200

@@ -28,11 +28,16 @@ from services import dictionary_service, user_word_service, word_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
 from utils.i18n import t
-from utils.text import split_word_batch
+from utils.text import split_word_batch, truncate_text
 from utils.word_display import render_forms_text, render_word_card_text, status_label
 
 _LANG = "ru"
 MODE = "dictionary"
+# Bugfix stage, real-Telegram feedback: 💡 Как использовать? must stay a
+# short chat message rather than a wall of text - the prompt asks the AI
+# to be brief, this is the guaranteed-outcome safety net regardless of
+# how well the model actually complies.
+_USAGE_EXPLANATION_MAX_LENGTH = 200
 
 
 async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE, *, entry_source: str = "search") -> None:
@@ -170,12 +175,13 @@ async def _explain_word_text(card, current, user) -> str:
     when AI is unavailable), and only as a last resort to a placeholder.
     """
     try:
-        return await get_ai_service().explain_word(
+        explanation = await get_ai_service().explain_word(
             card.word.word, language_code=current.language_code,
             translation_language=current.translation_language,
             level=current.level, interface_language=user.interface_language,
             user_id=user.id,
         )
+        return truncate_text(explanation, _USAGE_EXPLANATION_MAX_LENGTH)
     except AIConfigurationError:
         pass
     except AIError:

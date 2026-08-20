@@ -334,8 +334,11 @@ class LiveAIService(AIService):
             f"Translate into language code: {translation_language}\n"
             f"Learner level: {level}\n"
             f"Respond in this language (ISO 639-1): {interface_language}\n"
-            "Cover: main meanings, differences between meanings if there are several, typical "
-            "context, common collocations, common mistakes learners make, and a few simple examples."
+            "This will be shown as a short chat message, not an article - keep it VERY brief: "
+            "at most one short sentence covering the single most useful thing to know (the most "
+            "important nuance, a common mistake, or a typical collocation - whichever matters "
+            "most for this word), plus at most one short example if it fits. Do not try to cover "
+            "every meaning or list multiple points."
         )
         result = await self._complete("explain_word", user_id, _EXPLAIN_SYSTEM, user, _parse_explanation_response)
         return _format_explanation(result)

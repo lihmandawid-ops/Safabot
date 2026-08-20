@@ -43,3 +43,15 @@ def parse_number_list(raw: str) -> list[int]:
     if any(n <= 0 for n in numbers):
         raise ValueError("numbers must be positive")
     return numbers
+
+
+def truncate_text(text: str, max_length: int) -> str:
+    """Cuts `text` down to `max_length` characters (ellipsis included) at
+    a word boundary where possible - a defensive safety net for AI output
+    a prompt asked to be short but that isn't guaranteed to comply (bugfix
+    stage: 💡 Как использовать? must stay a short chat message, not a
+    wall of text, regardless of what the model actually returns)."""
+    if len(text) <= max_length:
+        return text
+    cut = text[: max_length - 1].rsplit(" ", 1)[0]
+    return f"{cut}…"
