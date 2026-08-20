@@ -25,6 +25,8 @@ from keyboards.dictionary import (
     word_card_keyboard,
 )
 from services import dictionary_service, user_word_service, word_service
+from services.ai_errors import AIConfigurationError, AIError
+from services.ai_service import get_ai_service
 from utils.i18n import t
 from utils.text import split_word_batch
 from utils.word_display import render_forms_text, render_word_card_text, status_label
@@ -73,7 +75,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         raw_words = split_word_batch(text)
         if len(raw_words) > 1:
-            await _handle_batch_add(
+            await add_word_batch(
                 update.message.reply_text, session,
                 user=user, current=current, raw_words=raw_words,
                 source=_word_source(_entry_source(context)),
@@ -84,6 +86,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         results = await dictionary_service.lookup_word(
             session, language_code=current.language_code,
             translation_language=current.translation_language, raw_word=query,
+            user_id=user.id, user_level=current.level,
         )
 
         if not results:
@@ -99,11 +102,18 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
-async def _handle_batch_add(send, session, *, user, current, raw_words: list[str], source: str) -> None:
+async def add_word_batch(send, session, *, user, current, raw_words: list[str], source: str) -> None:
     """Bugfix spec: "поддержать одновременный ввод нескольких слов" with a
     numbered ✅/⚠️/❌ summary, reusing dictionary_service.lookup_word and
     user_word_service.add_word_to_learning for every entry - the exact
     same code path a single-word add uses, just looped.
+
+    Public (not underscore-prefixed) because handlers/text_analysis.py's
+    "⭐ Добавить все/выбранные" reuses this exact function for words
+    picked out of an AI text analysis, instead of a second add-multiple-
+    words implementation (AI-integration spec section 16: "использовать
+    существующий UserWordService, не создавать отдельную систему
+    добавления слов").
     """
     added: list[tuple[int, str, str]] = []
     already: list[tuple[int, str, str]] = []
@@ -114,6 +124,7 @@ async def _handle_batch_add(send, session, *, user, current, raw_words: list[str
         results = await dictionary_service.lookup_word(
             session, language_code=current.language_code,
             translation_language=current.translation_language, raw_word=raw_word, limit=1,
+            user_id=user.id, user_level=current.level,
         )
         if not results:
             failed.append((position, raw_word))
@@ -151,6 +162,27 @@ async def _handle_batch_add(send, session, *, user, current, raw_words: list[str
 
     keyboard = batch_resume_keyboard(paused_buttons) if paused_buttons else None
     await send("\n".join(lines), reply_markup=keyboard)
+
+
+async def _explain_word_text(card, current, user) -> str:
+    """💡 Как использовать? (AI-integration spec section 10). Falls back to
+    the word's local usage_note (section 28: Dictionary must never break
+    when AI is unavailable), and only as a last resort to a placeholder.
+    """
+    try:
+        return await get_ai_service().explain_word(
+            card.word.word, language_code=current.language_code,
+            translation_language=current.translation_language,
+            level=current.level, interface_language=user.interface_language,
+            user_id=user.id,
+        )
+    except AIConfigurationError:
+        pass
+    except AIError:
+        pass
+
+    notes = [tr.usage_note for tr in card.translations if tr.usage_note]
+    return notes[0] if notes else t("card.usage_placeholder", _LANG)
 
 
 async def _send_card(send, session, word_id: int, translation_language: str) -> None:
@@ -227,9 +259,11 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
         elif data.startswith("card:usage:"):
             word_id = int(data.removeprefix("card:usage:"))
             card = await word_service.get_word_card(session, word_id=word_id, translation_language=current.translation_language)
-            notes = [tr.usage_note for tr in card.translations if tr.usage_note] if card else []
-            text = notes[0] if notes else t("card.usage_placeholder", _LANG)
-            await query.answer(text, show_alert=True)
+            await query.answer()
+            if card is None:
+                await query.message.reply_text(t("card.usage_placeholder", _LANG))
+                return
+            await query.message.reply_text(await _explain_word_text(card, current, user))
 
         elif data.startswith("dict:resume:"):
             user_word_id = int(data.removeprefix("dict:resume:"))

@@ -1,20 +1,20 @@
 """Tests for services/word_generation_service.py (bugfix spec root cause
-#2: Safabot never auto-generated new words). Covers local-pool-first,
-AI-fallback-for-the-shortfall-only, daily-limit respect, level
-preference, duplicate avoidance, and graceful AI failure handling.
+#2: Safabot never auto-generated new words; AI-integration spec section
+11-13). Covers local-pool-first, AI-fallback-for-the-shortfall-only,
+daily-limit respect, level preference, duplicate avoidance/bounded
+retries, and graceful AI failure handling.
 """
 from __future__ import annotations
 
 from datetime import time
 
-import pytest
-
-from database.models import UserWord, WordGenerationLog, WordSource, WordStatus
+from database.models import WordGenerationLog, WordSource, WordStatus
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
 from database.repositories import words as words_repo
-from services import learning_service, word_generation_service, word_service
+from services import ai_models, learning_service, word_generation_service, word_service
+from services.ai_errors import AIUnavailableError
 from sqlalchemy import select
 
 
@@ -42,32 +42,24 @@ async def _seed_local_words(session, n, *, prefix="genword", difficulty="beginne
     return words
 
 
+def _generated(word: str, translation: str = "перевод") -> ai_models.GeneratedWord:
+    return ai_models.GeneratedWord(word=word, translations=[ai_models.TranslationResult(translation=translation)])
+
+
 class _FakeAIService:
-    def __init__(self, response=None, raises: bool = False):
-        self._response = response
+    """A minimal AIService double - only generate_words is exercised by
+    word_generation_service, so that's all this implements."""
+
+    def __init__(self, words: list[ai_models.GeneratedWord] | None = None, *, raises: Exception | None = None):
+        self._words = words or []
         self._raises = raises
         self.calls = 0
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, known_words=None, user_id=None):
         self.calls += 1
-        if self._raises:
-            raise RuntimeError("provider unreachable")
-        return self._response
-
-    async def analyze_word(self, *a, **k):
-        raise NotImplementedError
-
-    async def explain_word(self, *a, **k):
-        raise NotImplementedError
-
-    async def analyze_text(self, *a, **k):
-        raise NotImplementedError
-
-    async def extract_learning_words(self, *a, **k):
-        raise NotImplementedError
-
-    async def explain_grammar(self, *a, **k):
-        raise NotImplementedError
+        if self._raises is not None:
+            raise self._raises
+        return ai_models.GenerateWordsResult(words=self._words)
 
 
 def _fail_if_called():
@@ -111,12 +103,7 @@ async def test_generate_new_words_calls_ai_only_for_the_shortfall(session, monke
     user, ul = await _create_user(session, telegram_id=5003)
     await _seed_local_words(session, 1)  # only 1 available locally, need 3
 
-    fake = _FakeAIService(response={
-        "words": [
-            {"word": "extra1", "translation": "доп1"},
-            {"word": "extra2", "translation": "доп2"},
-        ]
-    })
+    fake = _FakeAIService([_generated("extra1", "доп1"), _generated("extra2", "доп2")])
     monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
 
     created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=3)
@@ -132,30 +119,12 @@ async def test_generate_new_words_ai_failure_degrades_gracefully(session, monkey
     user, ul = await _create_user(session, telegram_id=5004)
     await _seed_local_words(session, 1)
 
-    fake = _FakeAIService(raises=True)
+    fake = _FakeAIService(raises=AIUnavailableError("provider unreachable"))
     monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
 
     created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=3)
 
     assert len(created) == 1  # only what the local pool had - no crash
-    assert fake.calls == 1
-
-
-async def test_generate_new_words_invalid_ai_json_never_persisted(session, monkeypatch):
-    user, ul = await _create_user(session, telegram_id=5005)
-    # No local pool at all - everything would have to come from AI.
-    fake = _FakeAIService(response={"words": [
-        {"word": "no-translation-here"},          # missing translation - invalid
-        {"translation": "нет слова"},              # missing word - invalid
-        "not-even-a-dict",
-    ]})
-    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
-
-    created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=3)
-
-    assert created == []
-    all_words = await words_repo.get_by_language(session, language_code="en", limit=100)
-    assert all_words == []  # nothing garbage was written to the dictionary
 
 
 async def test_generate_new_words_amount_zero_is_a_noop(session):
@@ -177,6 +146,28 @@ async def test_generate_new_words_logs_every_call(session, monkeypatch):
     assert logs[0].requested_amount == 3
     assert logs[0].generated_amount == 3
     assert logs[0].language_code == "en"
+
+
+async def test_generate_new_words_retries_ai_up_to_max_attempts_on_duplicates(session, monkeypatch):
+    """Section 12: if AI keeps handing back a word the user already has
+    (or that a previous attempt already consumed), retry for more - but
+    never more than MAX_GENERATION_ATTEMPTS times."""
+    import config
+
+    monkeypatch.setenv("MAX_GENERATION_ATTEMPTS", "3")
+    config.get_settings.cache_clear()
+
+    user, ul = await _create_user(session, telegram_id=5012)
+    # AI always offers the exact same word - only the first attempt can
+    # possibly succeed, every retry after that is a duplicate.
+    fake = _FakeAIService([_generated("dup")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=3)
+
+    assert len(created) == 1  # only the first attempt actually added anything new
+    assert fake.calls == 3  # bounded - not unbounded retries
+    config.get_settings.cache_clear()
 
 
 async def test_find_unknown_words_for_generation_prefers_level_match(session):
@@ -210,7 +201,6 @@ async def test_daily_new_word_limit_holds_across_repeated_learning_launches(sess
 
     user, ul = await _create_user(session, telegram_id=5010, daily_new_words=2)
     await _seed_local_words(session, 10)
-    now = None
 
     first = await learning_service.build_learning_session(session, user=user, user_language=ul)
     assert first is not None

@@ -1,78 +1,68 @@
-"""Word lookup: local dictionary first, AI provider as fallback (bugfix
-spec, root cause #1 - "пользователь не может нормально добавлять
-собственные слова"). Every "add a word" entry point (📖 Словарь and
-⭐ Мои слова → ➕ Добавить слово) calls lookup_word() here rather than
-word_service.search_words() directly, so "fall back to a provider when the
-local dictionary has nothing" lives in exactly one place.
+"""Word lookup: local dictionary first, AI as fallback (bugfix spec, root
+cause #1 - "пользователь не может нормально добавлять собственные
+слова"; AI-integration spec section 7). Every "add a word" entry point
+(📖 Словарь and ⭐ Мои слова → ➕ Добавить слово) calls lookup_word() here
+rather than word_service.search_words() directly, so "fall back to AI
+when the local dictionary has nothing" lives in exactly one place.
 
 DictionaryProvider is the swappable interface (same philosophy as
 services/repetition_service.py's pure algorithm and services/ai_service.py's
 AIService): AIDictionaryProvider wraps services.ai_service.get_ai_service()
-and is the only implementation today, selected via config.get_settings().
-A provider is never called directly from a handler - only through
-lookup_word().
+and is the only implementation today, selected via config.get_settings()
+(through get_ai_service() - AI_ENABLED/AI_API_KEY decide whether that's a
+real provider or NotConfiguredAIService). A provider is never called
+directly from a handler - only through lookup_word().
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Word
 from database.repositories import words as words_repo
-from services import ai_word_schema, word_service
+from services import ai_models, word_service
+from services.ai_errors import AIError
 from services.ai_service import get_ai_service
+from utils.logging import get_logger
 
-
-@dataclass
-class WordData:
-    """A validated word ready to be persisted as a Word row (the same
-    shape services/ai_word_schema.WordEntry produces)."""
-
-    word: str
-    translations: list[str] = field(default_factory=list)
-    part_of_speech: str | None = None
-    phonetic: str | None = None
-    examples: list[ai_word_schema.ExampleEntry] = field(default_factory=list)
-    difficulty: str | None = None
-    category: str | None = None
+logger = get_logger(__name__)
 
 
 class DictionaryProvider(ABC):
     @abstractmethod
-    async def lookup(self, raw_word: str, *, language_code: str, translation_language: str) -> WordData | None:
+    async def lookup(
+        self, raw_word: str, *, language_code: str, translation_language: str,
+        user_level: str | None, user_id: int,
+    ) -> ai_models.GeneratedWord | None:
         """A single best-effort match for `raw_word`, or None if the
-        provider has nothing (including "not configured" or "call
-        failed") - callers must treat None as "no fallback available",
-        never as an error to propagate."""
+        provider has nothing (not configured, rate-limited, network
+        failure, invalid response, ...) - callers must treat None as "no
+        fallback available", never as an error to propagate. The reason is
+        logged here so it's not lost, but the user only ever sees a plain
+        "not found"."""
 
 
 class AIDictionaryProvider(DictionaryProvider):
-    """Wraps services.ai_service.get_ai_service(). Never raises: a
-    NotConfiguredAIService (AI_PROVIDER=none, today's default) or any
-    provider failure is swallowed and reported as "nothing found" so the
-    user still gets a clear "not found" message instead of a crash.
+    """Wraps services.ai_service.get_ai_service(). Never raises: any
+    AIError (not configured, auth, timeout, rate limit, invalid response,
+    ...) is swallowed and reported as "nothing found" so the user still
+    gets a clear "not found" message instead of a crash (spec section 28
+    - Dictionary must fall back to the local database, never break).
     """
 
-    async def lookup(self, raw_word: str, *, language_code: str, translation_language: str) -> WordData | None:
+    async def lookup(
+        self, raw_word: str, *, language_code: str, translation_language: str,
+        user_level: str | None, user_id: int,
+    ) -> ai_models.GeneratedWord | None:
         try:
-            raw = await get_ai_service().analyze_word(raw_word, language_code=language_code)
-        except Exception:
+            return await get_ai_service().lookup_word(
+                raw_word, language_code=language_code, translation_language=translation_language,
+                user_level=user_level, user_id=user_id,
+            )
+        except AIError as exc:
+            logger.info("Dictionary AI fallback unavailable for %r: %s", language_code, type(exc).__name__)
             return None
-
-        entry = ai_word_schema.parse_word_entry(raw)
-        if entry is None:
-            return None
-        return WordData(
-            word=entry.word,
-            translations=entry.translations,
-            part_of_speech=entry.part_of_speech,
-            phonetic=entry.phonetic,
-            examples=entry.examples,
-            difficulty=entry.difficulty,
-            category=entry.category,
-        )
 
 
 def get_dictionary_provider() -> DictionaryProvider:
@@ -85,13 +75,16 @@ async def lookup_word(
     language_code: str,
     translation_language: str,
     raw_word: str,
+    user_id: int,
+    user_level: str | None = None,
     limit: int = 5,
 ) -> list[Word]:
     """Local matches first; if there are none, ask the configured
     DictionaryProvider for a single fallback match and persist it as a
-    real Word row (so the next lookup of the same word is local again).
-    Returns [] only when neither the local dictionary nor the provider has
-    anything - the caller shows "not found" in that case only.
+    real Word row (so the next lookup of the same word is local again -
+    spec section 8: "AI не вызывается каждый раз"). Returns [] only when
+    neither the local dictionary nor the provider has anything - the
+    caller shows "not found" in that case only.
     """
     local = await word_service.search_words(session, language_code=language_code, query=raw_word, limit=limit)
     if local:
@@ -100,14 +93,19 @@ async def lookup_word(
     provider_word = await _lookup_and_persist(
         session, provider=get_dictionary_provider(),
         raw_word=raw_word, language_code=language_code, translation_language=translation_language,
+        user_level=user_level, user_id=user_id,
     )
     return [provider_word] if provider_word is not None else []
 
 
 async def _lookup_and_persist(
-    session: AsyncSession, *, provider: DictionaryProvider, raw_word: str, language_code: str, translation_language: str
+    session: AsyncSession, *, provider: DictionaryProvider, raw_word: str, language_code: str,
+    translation_language: str, user_level: str | None, user_id: int,
 ) -> Word | None:
-    data = await provider.lookup(raw_word, language_code=language_code, translation_language=translation_language)
+    data = await provider.lookup(
+        raw_word, language_code=language_code, translation_language=translation_language,
+        user_level=user_level, user_id=user_id,
+    )
     if data is None:
         return None
 
@@ -116,6 +114,7 @@ async def _lookup_and_persist(
         language_code=language_code,
         word=data.word,
         part_of_speech=data.part_of_speech,
+        pronunciation=data.pronunciation,
         phonetic=data.phonetic,
         difficulty=data.difficulty,
         category=data.category,
@@ -128,10 +127,14 @@ async def _lookup_and_persist(
 
     for translation in data.translations:
         await words_repo.add_translation(
-            session, word_id=word.id, language_code=translation_language, translation=translation
+            session, word_id=word.id, language_code=translation_language,
+            translation=translation.translation, usage_note=translation.usage_note,
         )
     for example in data.examples:
         await words_repo.add_example(session, word_id=word.id, example_text=example.text, translation=example.translation)
+    if data.part_of_speech == "verb" and data.verb_forms:
+        for form_type, form in data.verb_forms.items():
+            await words_repo.add_form(session, word_id=word.id, form_type=form_type, form=form)
 
     # `word` only has its bare fields set in memory - translations/examples
     # were inserted via words_repo directly, never through word.translations

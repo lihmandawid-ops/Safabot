@@ -248,3 +248,81 @@ async def test_manual_add_of_paused_word_offers_resume(handler_db):
     q.callback_query.message.reply_text.assert_awaited_once()
     _, kwargs = q.callback_query.message.reply_text.call_args
     assert kwargs["reply_markup"] is not None  # 🔄 Вернуть в повторение button
+
+
+async def test_explain_word_button_without_ai_falls_back_to_local_usage_note(handler_db):
+    """AI-integration spec section 28: 💡 Как использовать? must never
+    break just because AI isn't configured (no AI_API_KEY in this
+    fixture's environment) - it falls back to the word's own usage_note
+    when one exists locally."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_service import get_ai_service
+
+    get_ai_service.cache_clear()
+
+    context = SimpleNamespace(user_data={})
+    await dictionary_handler.start_search(_message("dummy"), context)
+    await dictionary_handler.handle_search_query(_message("go"), context, "go")
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
+
+    q = _query(f"card:usage:{word.id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+    q.callback_query.message.reply_text.assert_awaited_once()
+    text = q.callback_query.message.reply_text.call_args[0][0]
+    assert "go to, go on, go out" in text  # "go"'s seeded usage_note
+
+
+async def test_explain_word_button_without_ai_or_usage_note_shows_not_configured(handler_db):
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_service import get_ai_service
+
+    get_ai_service.cache_clear()
+
+    context = SimpleNamespace(user_data={})
+    await dictionary_handler.start_search(_message("dummy"), context)
+    await dictionary_handler.handle_search_query(_message("make"), context, "make")  # no usage_note in seed data
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="make")
+
+    q = _query(f"card:usage:{word.id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+    q.callback_query.message.reply_text.assert_awaited_once()
+    text = q.callback_query.message.reply_text.call_args[0][0]
+    assert "не настроены" in text
+
+
+async def test_explain_word_button_with_ai_configured_shows_real_explanation(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            return '{"explanation": "Means to move from one place to another.", "examples": ["I go home."]}'
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("handlers.dictionary.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    await dictionary_handler.start_search(_message("dummy"), context)
+    await dictionary_handler.handle_search_query(_message("go"), context, "go")
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
+
+    q = _query(f"card:usage:{word.id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+    q.callback_query.message.reply_text.assert_awaited_once()
+    text = q.callback_query.message.reply_text.call_args[0][0]
+    assert "Means to move from one place to another." in text
+    assert "I go home." in text

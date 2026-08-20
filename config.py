@@ -33,6 +33,11 @@ def _get_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def _get_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value else default
+
+
 @dataclass(frozen=True)
 class PlanLimits:
     """Feature limits per subscription plan (spec section 26).
@@ -65,6 +70,14 @@ class Settings:
     default_evening_time: str
     ai_provider: str
     ai_api_key: str | None
+    ai_model: str
+    ai_base_url: str | None
+    ai_enabled: bool
+    ai_timeout_seconds: float
+    max_ai_retries: int
+    ai_requests_per_minute: int
+    ai_requests_per_day: int
+    max_generation_attempts: int
     ocr_api_key: str | None
     plan_limits: PlanLimits = field(default_factory=PlanLimits)
 
@@ -93,7 +106,21 @@ def get_settings() -> Settings:
         default_morning_time=os.getenv("DEFAULT_MORNING_TIME", "09:00"),
         default_afternoon_time=os.getenv("DEFAULT_AFTERNOON_TIME", "14:00"),
         default_evening_time=os.getenv("DEFAULT_EVENING_TIME", "20:00"),
+        # AI (services/ai_service.py): AI_API_KEY is the only thing that
+        # actually gates whether AI features work - AI_ENABLED is an
+        # explicit kill switch on top of that (section 27: AI_ENABLED=false
+        # must keep the bot fully usable on the local database alone, e.g.
+        # for offline development). Neither missing nor invalid AI config
+        # may ever prevent the bot from starting - see get_ai_service().
         ai_provider=os.getenv("AI_PROVIDER", "none"),
         ai_api_key=os.getenv("AI_API_KEY") or None,
+        ai_model=os.getenv("AI_MODEL", "gpt-4o-mini"),
+        ai_base_url=os.getenv("AI_BASE_URL") or None,
+        ai_enabled=_get_bool("AI_ENABLED", True),
+        ai_timeout_seconds=_get_float("AI_TIMEOUT_SECONDS", 30.0),
+        max_ai_retries=_get_int("MAX_AI_RETRIES", 2),
+        ai_requests_per_minute=_get_int("AI_REQUESTS_PER_MINUTE", 5),
+        ai_requests_per_day=_get_int("AI_REQUESTS_PER_DAY", 200),
+        max_generation_attempts=_get_int("MAX_GENERATION_ATTEMPTS", 3),
         ocr_api_key=os.getenv("OCR_API_KEY") or None,
     )

@@ -22,6 +22,7 @@ from handlers.learning import learning_callback_handler
 from handlers.menu import main_menu_handler
 from handlers.settings import settings_callback_handler
 from handlers.start import start_conversation_handler
+from handlers.text_analysis import text_analysis_callback_handler
 from handlers.words import words_callback_handler
 from scheduler.notifications import register_notification_jobs
 from utils.logging import configure_logging, get_logger
@@ -75,6 +76,7 @@ def build_application() -> Application:
     application.add_handler(dictionary_callback_handler)
     application.add_handler(words_callback_handler)
     application.add_handler(learning_callback_handler)
+    application.add_handler(text_analysis_callback_handler)
     application.add_handler(main_menu_handler)
     application.add_error_handler(on_error)
 

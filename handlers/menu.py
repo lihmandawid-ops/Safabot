@@ -18,13 +18,13 @@ from handlers import dictionary as dictionary_handler
 from handlers import learning as learning_handler
 from handlers import review as review_handler
 from handlers import settings as settings_handler
+from handlers import text_analysis as text_analysis_handler
 from handlers import words as words_handler
 from keyboards import main_menu
 from utils.i18n import t
 
 _COMING_SOON: dict[str, str] = {
     main_menu.PARSE_PHOTO: "Разбор фото (Этап 15)",
-    main_menu.PARSE_TEXT: "Разбор текста (Этап 14, AI)",
     main_menu.PARSE_VOICE: "Разбор голоса (Этап 16)",
     main_menu.PROGRESS: "Мой прогресс (Этап 11)",
     main_menu.PRO: "PRO-подписка (Этап 13)",
@@ -61,6 +61,11 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await review_handler.show_review_menu(update, context)
         return
 
+    if text == main_menu.PARSE_TEXT:
+        context.user_data.pop("mode", None)
+        await text_analysis_handler.start_text_analysis(update, context)
+        return
+
     label = _COMING_SOON.get(text)
     if label is not None:
         context.user_data.pop("mode", None)
@@ -73,6 +78,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if mode == words_handler.MODE:
         await words_handler.handle_text_input(update, context, text)
+        return
+    if mode == text_analysis_handler.MODE:
+        await text_analysis_handler.handle_text_input(update, context, text)
         return
 
     await update.message.reply_text(t("menu.unknown_command", _LANG))
