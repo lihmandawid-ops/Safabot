@@ -198,6 +198,7 @@ async def test_analyze_text_without_ai_configured_shows_friendly_message(handler
 async def test_analyze_text_rejects_text_over_the_length_cap(handler_db, monkeypatch):
     """AI-integration spec section 22: never send AI a huge context - a
     too-long text is rejected before any AI call is attempted."""
+    import config
     from handlers import text_analysis as text_analysis_handler
 
     def _fail_if_called():
@@ -208,10 +209,11 @@ async def test_analyze_text_rejects_text_over_the_length_cap(handler_db, monkeyp
     context = SimpleNamespace(user_data={})
     await text_analysis_handler.start_text_analysis(_message("dummy"), context)
 
-    too_long = "word " * (text_analysis_handler._MAX_TEXT_LENGTH // 4)
+    max_length = config.get_settings().max_text_length
+    too_long = "word " * (max_length // 4)
     update = _message(too_long)
     await text_analysis_handler.handle_text_input(update, context, too_long)
 
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.call_args[0][0]
-    assert str(text_analysis_handler._MAX_TEXT_LENGTH) in text
+    assert str(max_length) in text

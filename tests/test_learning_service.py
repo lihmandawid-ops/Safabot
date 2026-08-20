@@ -12,9 +12,10 @@ from database.repositories import sessions as sessions_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
-from database.models import WordStatus
+from database.models import WordGenerationLog, WordStatus
 from services import learning_service, word_service
 from services.repetition_service import ReviewGrade
+from sqlalchemy import select
 
 NOW = datetime(2026, 6, 15, 10, 0, 0)
 
@@ -232,6 +233,81 @@ async def test_streak_resets_after_a_gap(session):
     await learning_service.finish_session_if_complete(session, user, s2, now=day3)
     assert user.current_streak == 1  # reset, not 2
     assert user.longest_streak == 1
+
+
+async def test_mark_known_and_replace_masters_the_word_and_adds_a_replacement(session):
+    """Bugfix spec section 12: "🤔 Я это уже знаю" must not just skip the
+    word - it should be marked MASTERED immediately (never touched by the
+    normal repetition ladder) and a replacement should be slotted in so
+    the day's total doesn't shrink."""
+    user, ul = await _create_user(session, telegram_id=3200, daily_new_words=2)
+    words = await _make_words(session, 2, prefix="known_")
+    await _add_as_new(session, user.id, words)
+    await _make_words(session, 3, prefix="pool_")  # local pool for the replacement
+    await session.commit()
+
+    learning_session = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+    assert learning_session.total_words == 2
+    known_uw_id = learning_session.items[0].user_word_id
+
+    item = await learning_service.mark_known_and_replace(
+        session, user=user, user_language=ul, learning_session=learning_session, user_word_id=known_uw_id,
+    )
+    await session.commit()
+
+    assert item is not None
+    assert item.completed is True
+    assert item.rating == "known"
+
+    known_uw = await user_words_repo.get_by_id(session, known_uw_id)
+    assert known_uw.status == WordStatus.MASTERED
+
+    # A replacement was appended - the session still has something left to do.
+    assert learning_session.total_words == 3
+    remaining = sessions_repo.next_incomplete_item(learning_session)
+    assert remaining is not None
+    assert remaining.user_word_id != known_uw_id
+
+    result = await session.execute(
+        select(WordGenerationLog).where(WordGenerationLog.user_id == user.id, WordGenerationLog.trigger == "replacement")
+    )
+    assert len(result.scalars().all()) == 1
+
+
+async def test_mark_known_and_replace_rejects_a_due_review_item(session):
+    """The button only ever appears on a NEW word's card (reveal_keyboard's
+    is_new_word gate) - this is the server-side half of that same rule."""
+    user, ul = await _create_user(session, telegram_id=3300, daily_new_words=4)
+    due_word = (await _make_words(session, 1, prefix="due_"))[0]
+    uw = await user_words_repo.add_word(session, user_id=user.id, word_id=due_word.id, language_code="en")
+    uw.status = WordStatus.REVIEW
+    uw.next_review_at = NOW - timedelta(hours=1)
+    await session.commit()
+
+    learning_session = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+    result = await learning_service.mark_known_and_replace(
+        session, user=user, user_language=ul, learning_session=learning_session, user_word_id=uw.id,
+    )
+    assert result is None
+
+
+async def test_mark_known_and_replace_handles_no_replacement_available(session):
+    """No local pool and no AI configured - generate_new_words legitimately
+    returns [] (spec: degrade gracefully, never break the session)."""
+    user, ul = await _create_user(session, telegram_id=3400, daily_new_words=4)
+    words = await _make_words(session, 1, prefix="only_")
+    await _add_as_new(session, user.id, words)
+    await session.commit()
+
+    learning_session = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+    uw_id = learning_session.items[0].user_word_id
+
+    item = await learning_service.mark_known_and_replace(
+        session, user=user, user_language=ul, learning_session=learning_session, user_word_id=uw_id,
+    )
+    assert item is not None
+    assert learning_session.total_words == 1  # no replacement could be added
+    assert sessions_repo.next_incomplete_item(learning_session) is None
 
 
 async def test_streak_does_not_double_count_same_local_day(session):

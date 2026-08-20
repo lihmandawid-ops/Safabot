@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import time
 
 from database.models import WordGenerationLog, WordSource, WordStatus
+from database.repositories import sessions as sessions_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
@@ -253,6 +254,103 @@ async def test_daily_new_word_limit_holds_across_repeated_learning_launches(sess
 
     second = await learning_service.build_learning_session(session, user=user, user_language=ul)
     assert second is None  # limit of 2 already used today, nothing due yet either
+
+
+async def test_generate_extra_words_adds_words_beyond_the_daily_new_words_quota(session):
+    """Bugfix spec sections 9-11: ➕ Ещё новые слова tops up on top of
+    daily_new_words, tracked under its own WordGenerationLog trigger."""
+    user, ul = await _create_user(session, telegram_id=5015, daily_new_words=2)
+    await _seed_local_words(session, 10)
+    await session.commit()
+
+    result = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+
+    assert len(result.words) == 4
+    assert result.limit_reached is False
+    assert all(uw.status == WordStatus.NEW for uw in result.words)
+
+    logs = (
+        await session.execute(select(WordGenerationLog).where(WordGenerationLog.user_id == user.id))
+    ).scalars().all()
+    assert len(logs) == 1
+    assert logs[0].trigger == "extra_request"
+
+
+async def test_generate_extra_words_respects_its_own_daily_cap(session, monkeypatch):
+    import config
+
+    monkeypatch.setenv("MAX_EXTRA_WORDS_PER_DAY", "4")
+    config.get_settings.cache_clear()
+
+    user, ul = await _create_user(session, telegram_id=5016, daily_new_words=2)
+    await _seed_local_words(session, 20)
+    await session.commit()
+
+    first = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+    await session.commit()
+    assert len(first.words) == 4
+    assert first.limit_reached is False
+
+    second = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+    assert second.words == []
+    assert second.limit_reached is True
+
+    config.get_settings.cache_clear()
+
+
+async def test_generate_extra_words_bounds_amount_to_whats_left_of_the_cap(session, monkeypatch):
+    import config
+
+    monkeypatch.setenv("MAX_EXTRA_WORDS_PER_DAY", "5")
+    config.get_settings.cache_clear()
+
+    user, ul = await _create_user(session, telegram_id=5017, daily_new_words=2)
+    await _seed_local_words(session, 20)
+    await session.commit()
+
+    first = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+    await session.commit()
+    assert len(first.words) == 4
+
+    second = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+    assert len(second.words) == 1  # only 1 left before hitting the cap of 5
+    assert second.limit_reached is False
+    assert second.remaining_today == 0
+
+    config.get_settings.cache_clear()
+
+
+async def test_get_new_words_for_today_reaches_extra_words_added_today(session):
+    """services/learning_service.py's get_new_words_for_today must widen
+    its search so words added via ➕ Ещё новые слова are actually reachable
+    in today's session, without disturbing the daily_new_words display cap
+    for users who never request extras (bugfix spec sections 9-11). This
+    checks the realistic order of events: the main daily portion is
+    already started (so it no longer counts as "new pool" candidates -
+    apply_review_result moves it off WordStatus.NEW) before the user asks
+    for extras, same as a real Telegram session."""
+    from services.repetition_service import ReviewGrade
+
+    user, ul = await _create_user(session, telegram_id=5018, daily_new_words=2)
+    await _seed_local_words(session, 10)
+    await session.commit()
+
+    main_session = await learning_service.build_learning_session(session, user=user, user_language=ul)
+    assert main_session.total_words == 2  # today's main portion, consumed below
+    item = sessions_repo.next_incomplete_item(main_session)
+    while item is not None:
+        await learning_service.record_review_answer(session, main_session, item.user_word_id, grade=ReviewGrade.GOOD)
+        item = sessions_repo.next_incomplete_item(main_session)
+    await learning_service.finish_session_if_complete(session, user, main_session)
+    await session.commit()
+
+    extra = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
+    await session.commit()
+    assert len(extra.words) == 4
+
+    result = await learning_service.get_new_words_for_today(session, user=user, user_language=ul)
+    assert len(result.words) == 4  # the day's main portion is used up; the 4 extras are reachable
+    assert {uw.id for uw in result.words} == {uw.id for uw in extra.words}
 
 
 async def test_generation_is_isolated_between_languages_for_the_same_user(session):

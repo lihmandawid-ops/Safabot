@@ -200,9 +200,21 @@ _EXTRACT_WORDS_SYSTEM = (
 )
 
 
+def _strip_markdown_fence(raw: str) -> str:
+    """Some models occasionally wrap JSON-mode output in a ```json ... ```
+    fence despite being told not to - cheap enough to always check for and
+    strip before parsing, real-world defensive programming that costs
+    nothing when the response is already clean."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```json").removeprefix("```").strip()
+        text = text.removesuffix("```").strip()
+    return text
+
+
 def _parse_json(raw: str) -> object:
     try:
-        return json.loads(raw)
+        return json.loads(_strip_markdown_fence(raw))
     except json.JSONDecodeError as exc:
         raise AIInvalidResponseError("AI returned invalid JSON") from exc
 

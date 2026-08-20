@@ -55,17 +55,29 @@ German, Hebrew, Spanish, French, Italian, Ukrainian); один пользова�
   [«Ядро обучения»](#ядро-обучения-интервальное-повторение--уведомления) ниже.
 - **AI** подключён как необязательный интеллектуальный слой
   (`services/ai_service.py` + `services/ai_provider.py`, OpenAI-совместимый
-  Chat Completions API): поиск незнакомых слов в 📖 Словарь/➕ Добавить
-  слово, автогенерация новых слов в 📚 Учить слова, `💡 Как использовать?`
-  и раздел **📝 Разобрать текст**. Работает полностью на локальной базе
-  без ключа (`AI_API_KEY` пуст) — бот не падает и не зависает, просто AI-
-  функции показывают понятное сообщение. Подробности — в разделе
+  Chat Completions API, по умолчанию — DeepSeek): поиск незнакомых слов в
+  📖 Словарь/➕ Добавить слово, автогенерация новых слов в 📚 Учить слова,
+  `💡 Как использовать?` и раздел **📝 Разобрать текст**. Работает
+  полностью на локальной базе без ключа (`AI_API_KEY` пуст) — бот не
+  падает и не зависает, просто AI-функции показывают понятное сообщение.
+  Подробности — в разделе
   [«AI: как это устроено и как подключить»](#ai-как-это-устроено-и-как-подключить) ниже.
+- **Этап исправления функций (bugfix stage)**:
+  **➕ Ещё новые слова** — после дневной порции можно запросить
+  дополнительные слова (+2/+4/+8) сверх обычного дневного лимита, под
+  отдельным лимитом `MAX_EXTRA_WORDS_PER_DAY`; **🤔 Я это уже знаю** —
+  на карточке нового (ещё не изученного) слова можно сразу отметить его
+  выученным и получить замену; **📷 Разобрать фото** и **🎤 Разобрать
+  голос** теперь по-настоящему скачивают файл из Telegram, распознают его
+  через отдельные `OCRService`/`SpeechToTextService` (архитектурно
+  независимые от AI-провайдера — см.
+  [«Распознавание фото и голоса (OCR/STT)»](#распознавание-фото-и-голоса-ocrstt)
+  ниже) и прогоняют результат через тот же пайплайн, что и
+  📝 Разбор текста.
 
-Разделы «Мой прогресс», разбор фото/голоса и PRO отвечают понятным
-сообщением «раздел в разработке» — они запланированы на следующие этапы
-(см. `handlers/menu.py` и `services/*.py`, где у каждого нереализованного
-раздела есть чёткий TODO с номером этапа).
+Разделы «Мой прогресс» и PRO отвечают понятным сообщением «раздел в
+разработке» — они запланированы на следующие этапы (см. `handlers/menu.py`,
+где у каждого нереализованного раздела есть чёткий TODO с номером этапа).
 
 ## Требования
 
@@ -179,16 +191,17 @@ safabot/
 │   ├── review.py                 # 🔄 Повторить: тот же цикл, только due-слова (реализовано)
 │   ├── text_analysis.py          # 📝 Разобрать текст: AI-разбор + добавление слов (реализовано)
 │   ├── grammar.py                # ✏️ Грамматика: свободный вопрос → explain_grammar() (реализовано)
-│   └── progress.py, media.py, payments.py   # заглушки со ссылкой на этап
+│   ├── media.py                  # 📷 Разобрать фото / 🎤 Разобрать голос: скачать → OCR/STT → analyze_text (реализовано)
+│   └── progress.py, payments.py   # заглушки со ссылкой на этап
 │
 ├── services/                 # бизнес-логика, независимая от Telegram
 │   ├── subscription_service.py   # trial / PRO-статус (реализовано)
 │   ├── word_service.py            # поиск, get_or_create, карточка слова (реализовано)
-│   ├── user_word_service.py       # add/pause/resume/delete, фильтры, поиск (реализовано)
+│   ├── user_word_service.py       # add/pause/resume/delete/mark_mastered, фильтры, поиск (реализовано)
 │   ├── dictionary_service.py      # локальный поиск + DictionaryProvider (AI) fallback (реализовано)
-│   ├── word_generation_service.py  # автогенерация новых слов: локальный пул + AI (реализовано)
+│   ├── word_generation_service.py  # автогенерация: локальный пул + AI, generate_extra_words() (реализовано)
 │   ├── repetition_service.py      # чистый алгоритм интервального повторения (реализовано)
-│   ├── learning_service.py        # сессии, дневной лимит, due-очередь, серия дней, автогенерация (реализовано)
+│   ├── learning_service.py        # сессии, дневной лимит, серия дней, mark_known_and_replace() (реализовано)
 │   ├── notification_service.py    # что и кому слать, идемпотентно (реализовано)
 │   ├── ai_service.py               # AIService: lookup_word/generate_words/explain_word/
 │   │                                # analyze_text/explain_grammar/extract_learning_words (реализовано)
@@ -196,7 +209,10 @@ safabot/
 │   ├── ai_models.py                # Pydantic-схемы AI-ответов (реализовано)
 │   ├── ai_errors.py                # AIError и подклассы (реализовано)
 │   ├── ai_diagnostics.py           # test_deepseek_connection() (реализовано)
-│   └── translation_service.py, ocr_service.py, speech_service.py  # заглушки
+│   ├── ocr_service.py, ocr_provider.py   # OCRService/OCRProvider + HttpOCRProvider (реализовано)
+│   ├── stt_service.py, stt_provider.py   # SpeechToTextService/Provider + HttpSpeechToTextProvider (реализовано)
+│   ├── media_errors.py             # OCRError/STTError и подклассы (реализовано)
+│   └── translation_service.py      # заглушка
 │
 ├── database/
 │   ├── database.py             # async engine/session (SQLite сейчас, Postgres — смена DATABASE_URL)
@@ -223,7 +239,7 @@ safabot/
 │
 ├── utils/
 │   ├── logging.py, languages.py, pagination.py, text.py, i18n.py,
-│   │   levels.py, timezones.py, word_display.py, time.py
+│   │   levels.py, timezones.py, word_display.py, time.py, media.py
 │
 ├── migrations/                # Alembic
 │   └── versions/
@@ -237,7 +253,8 @@ safabot/
     │   test_sessions.py, test_notifications.py,
     │   test_dictionary_service.py, test_word_generation_service.py,
     │   test_manual_add_flow.py, test_ai_service.py, test_text_analysis_flow.py,
-    │   test_ai_diagnostics.py, test_grammar_flow.py, test_word_display.py
+    │   test_ai_diagnostics.py, test_grammar_flow.py, test_word_display.py,
+    │   test_learning_handlers.py, test_media_services.py, test_media_handlers.py
     │   # реализовано
 ```
 
@@ -522,7 +539,7 @@ HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
 | Объяснение слова | Карточка → 💡 Как использовать? | `explain_word()` |
 | Разбор текста | 📝 Разобрать текст | `analyze_text()` |
 | Объяснение грамматики | ✏️ Грамматика (свободный вопрос, например «Why "went" not "goed"?») | `explain_grammar()` |
-| Извлечение слов из текста | заготовка для будущих OCR/голос-этапов | `extract_learning_words()` |
+| Извлечение слов из текста | зарезервированный метод, пока не вызывается ни одним handler-ом (📷/🎤 переиспользуют `analyze_text()` через `handle_text_input`, см. [«Распознавание фото и голоса (OCR/STT)»](#распознавание-фото-и-голоса-ocrstt)) | `extract_learning_words()` |
 
 Карточка слова (📖 Словарь, ➕ Добавить слово) показывает часть речи,
 произношение и значение (`Word.definition`) прямо в тексте карточки, не
@@ -591,6 +608,105 @@ _isolate_ai_config` (`autouse=True`): каждый тест по умолчан�
 ```bash
 pytest tests/test_ai_service.py tests/test_ai_diagnostics.py -v
 ```
+
+## Дополнительные новые слова и «Я это уже знаю»
+
+Часть исправлений bugfix-этапа: после того как дневная порция
+📚 Учить слова закончилась (или в любой момент — кнопка
+`learn:intro`/`📚 Учить слова` показывает актуальный экран), пользователь
+видит три кнопки: **📚 Учить слова** / **➕ Ещё новые слова** /
+**⭐ Мои слова**.
+
+**➕ Ещё новые слова** (`handlers/learning.py`, `services/
+word_generation_service.generate_extra_words()`):
+
+- Отдельный от `daily_new_words` (2/4/8 в день на язык) пул —
+  `MAX_EXTRA_WORDS_PER_DAY` (по умолчанию 20), тоже на язык и на
+  календарный день пользователя.
+- Нажатие показывает выбор количества (+2/+4/+8, `learn:extra:2/4/8`),
+  дальше используется тот же путь генерации, что и у обычной дневной
+  порции (локальный пул → AI-добор нехватки), только с
+  `trigger="extra_request"` в `WordGenerationLog`, чтобы лимиты не
+  смешивались.
+- Лимит исчерпан → «На сегодня достигнут лимит дополнительных слов.
+  Завтра можно будет добавить ещё.» вместо тихого недобора.
+- `services/learning_service.get_new_words_for_today()` расширяет поиск
+  уже добавленных, но ещё не показанных `NEW`-слов на количество
+  сегодняшних extra-слов, чтобы то, что было добавлено через
+  «➕ Ещё новые слова», реально попадало в текущую учебную сессию, а не
+  откладывалось на завтра.
+
+**🤔 Я это уже знаю → 🔄 Другое слово** (`services/
+learning_service.mark_known_and_replace()`):
+
+- Кнопка показывается только на лицевой стороне карточки **нового**
+  (ещё не изученного) слова — для слов, которые уже пришли на повторение,
+  её нет: они по определению уже не «совсем новые».
+- Нажатие сразу переводит `UserWord.status` в `MASTERED` (слово никогда
+  не попадает на обычную лестницу интервального повторения), закрывает
+  текущий элемент сессии оценкой `"known"` и пытается подставить один
+  замещающий элемент в конец сессии (`trigger="replacement"` в
+  `WordGenerationLog`) — так, чтобы дневной объём не уменьшался. Если
+  замену найти не удалось (пустой локальный пул и недоступный AI) —
+  сессия просто продолжается без замены, ошибка никогда не всплывает
+  пользователю.
+
+## Распознавание фото и голоса (OCR/STT)
+
+**📷 Разобрать фото** и **🎤 Разобрать голос** — теперь реальные
+Telegram-обработчики (`handlers/media.py`), а не заглушки: файл
+скачивается у Telegram, проверяется размер, распознаётся и результат
+уходит в тот же пайплайн, что и `📝 Разобрать текст`
+(`handlers/text_analysis.handle_text_input`) — перевод, ключевые слова,
+`⭐ Добавить все`/`⭐ Добавить выбранные` через `UserWordService`, без
+второй реализации «разобрать и предложить добавить».
+
+**Важно: распознавание — это НЕ DeepSeek.** Ни одна документация
+DeepSeek не заявляет поддержку изображений или голоса в чат-модели,
+поэтому bugfix-спецификация прямо требует не притворяться, что это
+работает — вместо этого раздельная архитектура:
+
+```
+handlers/media.py (скачать файл, проверить размер, удалить temp-файл)
+        │
+        ▼                                          ▼
+services/ocr_service.py                   services/stt_service.py
+  OCRService (интерфейс)                    SpeechToTextService (интерфейс)
+        │                                          │
+        ▼                                          ▼
+services/ocr_provider.py                  services/stt_provider.py
+  OCRProvider (интерфейс)                   SpeechToTextProvider (интерфейс)
+        │                                          │
+        ▼                                          ▼
+HttpOCRProvider                           HttpSpeechToTextProvider
+  (Chat Completions + image_url,            (`/audio/transcriptions`,
+   OpenAI-совместимый vision API)            Whisper-совместимый API)
+```
+
+- **`OCR_API_KEY`/`STT_API_KEY` не заданы по умолчанию.** Пока они пусты,
+  `get_ocr_service()`/`get_stt_service()` возвращают
+  `NotConfiguredOCRService`/`NotConfiguredSpeechToTextService`: реальное
+  скачивание файла из Telegram, проверка размера и удаление temp-файла всё
+  равно происходят, а на этапе распознавания пользователь получает честное
+  «Распознавание текста на фото/голосовых сообщений пока не настроено.» —
+  никогда не выдуманный результат.
+- **Независимая конфигурация от AI.** `OCR_PROVIDER`/`OCR_MODEL`/
+  `OCR_BASE_URL` и `STT_PROVIDER`/`STT_MODEL`/`STT_BASE_URL` — отдельные
+  переменные (см. `.env.example`); подключить реальный vision- или
+  Whisper-совместимый провайдер можно, не трогая `handlers/media.py`
+  вообще — только `.env`.
+- **Cost control:** `MAX_IMAGE_SIZE_BYTES` (по умолчанию 10 МБ) и
+  `MAX_AUDIO_SIZE_BYTES` (по умолчанию 20 МБ) — файл больше лимита
+  отклоняется ещё до полной загрузки в память (используется `file_size`
+  из ответа Telegram `getFile`), с понятным сообщением пользователю.
+- **Temp-файлы.** `utils/media.download_telegram_file()` скачивает файл
+  во временный файл и удаляет его в `finally` — гарантированно, даже при
+  ошибке скачивания или превышении размера уже после закачки. На сервере
+  никогда не остаются файлы пользователей.
+- Тесты (`tests/test_media_services.py`, `tests/test_media_handlers.py`)
+  используют моки `OCRProvider`/`SpeechToTextProvider` (как
+  `MockAIProvider` для AI) — ни один тест не обращается к реальному
+  внешнему API.
 
 ## Ядро обучения: интервальное повторение + уведомления
 

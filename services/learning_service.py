@@ -18,7 +18,8 @@ from config import get_settings
 from database.models import LearningSession, LearningSessionItem, User, UserLanguage, UserWord
 from database.repositories import learning as learning_repo
 from database.repositories import sessions as sessions_repo
-from services import word_generation_service
+from database.repositories import word_generation_logs as generation_logs_repo
+from services import user_word_service, word_generation_service
 from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import local_day_bounds, local_today, utc_now
 
@@ -59,27 +60,54 @@ async def get_remaining_new_word_quota(
     return max(0, user_language.daily_new_words - already_used)
 
 
+async def get_extra_words_used_today(
+    session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
+) -> int:
+    """How many words were already added today via ➕ Ещё новые слова
+    (bugfix spec section 9-11) - words_generation_service.generate_extra_words
+    tracks the same number against MAX_EXTRA_WORDS_PER_DAY; this is the
+    read side, used to make those words reachable in today's session (see
+    get_new_words_for_today)."""
+    now = now if now is not None else utc_now()
+    day_start, day_end = local_day_bounds(now, user.timezone)
+    return await generation_logs_repo.sum_generated_today(
+        session, user_id=user.id, language_code=user_language.language_code,
+        trigger="extra_request", day_start=day_start, day_end=day_end,
+    )
+
+
 async def get_new_words_for_today(
     session: AsyncSession, *, user: User, user_language: UserLanguage, now: datetime | None = None
 ) -> NewWordsResult:
     """Section 6: never exceed user_language.daily_new_words new words
-    per LOCAL calendar day, regardless of how many sessions that spans.
+    per LOCAL calendar day, regardless of how many sessions that spans -
+    PLUS whatever the user explicitly asked for via ➕ Ещё новые слова
+    (bugfix spec section 9-11), which lives under its own separate
+    MAX_EXTRA_WORDS_PER_DAY cap rather than daily_new_words. Extra words
+    are only ever added on explicit request (never auto-generated here) -
+    this just widens the search for already-added-but-not-yet-started NEW
+    words so an extra word doesn't get artificially held back to tomorrow.
 
     Bugfix spec (root cause #2): if the words the user already has sitting
-    as NEW aren't enough to fill today's remaining quota, top up the
+    as NEW aren't enough to fill today's remaining MAIN quota, top up the
     shortfall via word_generation_service before returning - this is the
     one place 📚 Учить слова's "not enough new words" gap gets closed, so
     every caller (build_learning_session, handlers/learning.py's intro
     screen) gets generation for free.
     """
     remaining = await get_remaining_new_word_quota(session, user=user, user_language=user_language, now=now)
-    if remaining == 0:
+    extra_today = await get_extra_words_used_today(session, user=user, user_language=user_language, now=now)
+    limit = remaining + extra_today
+    if limit == 0:
         return NewWordsResult(words=[], shortfall=False)
 
     existing = await learning_repo.get_new_word_candidates(
         session, user_id=user.id, language_code=user_language.language_code,
-        level=user_language.level, limit=remaining,
+        level=user_language.level, limit=limit,
     )
+    # Only the MAIN quota's shortfall triggers auto-generation here - extra
+    # words are generated exclusively on explicit request
+    # (generate_extra_words), never silently topped up in the background.
     shortfall = remaining - len(existing)
     if shortfall <= 0:
         return NewWordsResult(words=existing, shortfall=False)
@@ -194,6 +222,50 @@ async def record_review_answer(
     result = calculate_next_review(user_word.repetition_stage, user_word.interval_days, grade, now=now)
     await learning_repo.apply_review_result(session, user_word, result, now=now)
     await sessions_repo.complete_item(session, item, rating=grade.value)
+    return item
+
+
+async def mark_known_and_replace(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    learning_session: LearningSession,
+    user_word_id: int,
+) -> LearningSessionItem | None:
+    """🤔 Я это уже знаю (bugfix spec section 12): the user already knows a
+    NEW word before ever reviewing it. Marks it MASTERED right away
+    (never started on the normal repetition ladder), completes its session
+    item with a "known" rating so session_stats doesn't count it as wrong,
+    and tries to slot in exactly one replacement word at the end of the
+    session so today's total doesn't shrink - generation failing just
+    means one fewer word today, same degrade-gracefully rule as everywhere
+    else generation is used.
+
+    Returns None if `user_word_id` isn't the session's current item, or is
+    a due review rather than a new word (spec section 36 + reveal_keyboard
+    only shows the button for new words in the first place).
+    """
+    item = sessions_repo.next_incomplete_item(learning_session)
+    if item is None or item.user_word_id != user_word_id or not item.is_new_word:
+        return None
+
+    await user_word_service.mark_mastered(session, item.user_word)
+    await sessions_repo.complete_item(session, item, rating="known")
+
+    try:
+        replacements = await word_generation_service.generate_new_words(
+            session, user=user, user_language=user_language, amount=1, trigger="replacement"
+        )
+    except Exception:
+        replacements = []
+
+    if replacements:
+        next_position = max((i.position for i in learning_session.items), default=0) + 1
+        await sessions_repo.add_session_item(
+            session, learning_session=learning_session, user_word_id=replacements[0].id,
+            position=next_position, is_new_word=True,
+        )
     return item
 
 

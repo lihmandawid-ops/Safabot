@@ -18,6 +18,8 @@ reached AI at all, so usage/cost can be audited from one place.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User, UserLanguage, UserWord, WordSource
@@ -28,11 +30,24 @@ from services import ai_models, user_word_service, word_service
 from services.ai_errors import AIError
 from services.ai_service import get_ai_service
 from utils.logging import get_logger
+from utils.time import local_day_bounds, utc_now
 
 logger = get_logger(__name__)
 
 _ADD_OUTCOMES_COUNTED = {"created", "restored_from_deleted"}
 _KNOWN_WORDS_LIMIT = 150
+
+
+@dataclass
+class ExtraWordsResult:
+    """Result of an explicit "➕ Ещё новые слова" request (bugfix stage,
+    sections 9-11) - kept separate from generate_new_words' plain list
+    because the caller needs to tell "got some, ask again later for more"
+    apart from "hit today's extra-words cap, come back tomorrow"."""
+
+    words: list[UserWord] = field(default_factory=list)
+    limit_reached: bool = False
+    remaining_today: int = 0
 
 
 async def generate_new_words(
@@ -41,11 +56,18 @@ async def generate_new_words(
     user: User,
     user_language: UserLanguage,
     amount: int,
+    trigger: str = "daily_quota",
 ) -> list[UserWord]:
     """Adds up to `amount` new UserWord rows (status NEW, source
     GENERATED) for user_language, local words first, AI fallback for the
     shortfall. Returns however many it actually managed - 0 is a valid,
-    non-error result (empty local pool + no/failing AI)."""
+    non-error result (empty local pool + no/failing AI).
+
+    `trigger` only affects what gets written to WordGenerationLog - it
+    doesn't change the algorithm - so generate_extra_words() and the
+    "🤔 Я это уже знаю" replacement flow reuse this exact function instead
+    of a second local-pool/AI-fallback implementation.
+    """
     if amount <= 0:
         return []
 
@@ -77,6 +99,7 @@ async def generate_new_words(
         requested_amount=amount,
         generated_amount=len(created),
         provider=provider,
+        trigger=trigger,
     )
 
     # Every UserWord above only has its bare word_id set in memory - the
@@ -86,6 +109,42 @@ async def generate_new_words(
     # sessions_repo.create_session). Re-fetch through user_words_repo,
     # which does eager-load it, before handing anything back.
     return [await user_words_repo.get_by_id(session, uw.id) for uw in created]
+
+
+async def generate_extra_words(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    amount: int,
+    now=None,
+) -> ExtraWordsResult:
+    """➕ Ещё новые слова (bugfix spec sections 9-11): a user-initiated
+    top-up on top of the normal daily_new_words pace, bounded by its own
+    separate MAX_EXTRA_WORDS_PER_DAY cap so repeatedly pressing the button
+    can't drive unbounded DeepSeek usage. Reuses generate_new_words for
+    the actual local-pool/AI-fallback/dedup work - only the quota check is
+    new here.
+    """
+    from config import get_settings
+
+    settings = get_settings()
+    now = now if now is not None else utc_now()
+    day_start, day_end = local_day_bounds(now, user.timezone)
+
+    used_today = await generation_logs_repo.sum_generated_today(
+        session, user_id=user.id, language_code=user_language.language_code,
+        trigger="extra_request", day_start=day_start, day_end=day_end,
+    )
+    available = max(0, settings.max_extra_words_per_day - used_today)
+    if available <= 0:
+        return ExtraWordsResult(words=[], limit_reached=True, remaining_today=0)
+
+    bounded_amount = min(amount, available)
+    created = await generate_new_words(
+        session, user=user, user_language=user_language, amount=bounded_amount, trigger="extra_request"
+    )
+    return ExtraWordsResult(words=created, limit_reached=False, remaining_today=max(0, available - len(created)))
 
 
 async def _top_up_via_ai(

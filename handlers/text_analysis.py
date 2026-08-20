@@ -18,6 +18,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
+from config import get_settings
 from database.database import session_scope
 from database.models import WordSource
 from database.repositories import user_languages as user_languages_repo
@@ -31,11 +32,6 @@ from utils.text import parse_number_list
 
 _LANG = "ru"
 MODE = "text_analysis"
-
-# AI-integration spec section 22 ("ограничивать длину анализируемого
-# текста") - a generous cap for a learner-sized paragraph, small enough to
-# keep one analyze_text call cheap and fast regardless of what gets pasted in.
-_MAX_TEXT_LENGTH = 2000
 
 
 async def start_text_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,8 +79,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         # Not a number list - treat as a brand new text to analyze,
         # replacing whatever was cached from the previous one.
 
-    if len(text) > _MAX_TEXT_LENGTH:
-        await update.message.reply_text(t("text_analysis.too_long", _LANG, max_length=_MAX_TEXT_LENGTH))
+    max_length = get_settings().max_text_length
+    if len(text) > max_length:
+        await update.message.reply_text(t("text_analysis.too_long", _LANG, max_length=max_length))
         return
 
     async with session_scope() as session:

@@ -27,9 +27,39 @@ def continue_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(t("learning.button.continue", _LANG), callback_data="learn:continue")]])
 
 
-def reveal_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
+def reveal_keyboard(user_word_id: int, *, is_new_word: bool = False) -> InlineKeyboardMarkup:
+    """"🤔 Я это уже знаю" (bugfix stage section 12) only makes sense for a
+    word the user hasn't started learning yet - a due review is, by
+    definition, already something they're partway through."""
+    rows = [[InlineKeyboardButton(t("learning.button.reveal", _LANG), callback_data=f"learn:reveal:{user_word_id}")]]
+    if is_new_word:
+        rows.append([InlineKeyboardButton(t("learning.button.know", _LANG), callback_data=f"learn:know:{user_word_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def after_session_keyboard() -> InlineKeyboardMarkup:
+    """Shown once nothing more is due today (bugfix stage section 8/9):
+    lets the user immediately ask for more new words or jump to ⭐ Мои
+    слова, instead of having to go back to the plain-text main menu."""
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(t("learning.button.reveal", _LANG), callback_data=f"learn:reveal:{user_word_id}")]]
+        [
+            [InlineKeyboardButton(t("learning.button.learn_more", _LANG), callback_data="learn:intro")],
+            [InlineKeyboardButton(t("learning.button.extra", _LANG), callback_data="learn:extra")],
+            [InlineKeyboardButton(t("learning.button.mywords", _LANG), callback_data="learn:mywords")],
+        ]
+    )
+
+
+def extra_amount_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(t("learning.button.extra_2", _LANG), callback_data="learn:extra:2"),
+                InlineKeyboardButton(t("learning.button.extra_4", _LANG), callback_data="learn:extra:4"),
+                InlineKeyboardButton(t("learning.button.extra_8", _LANG), callback_data="learn:extra:8"),
+            ],
+            [InlineKeyboardButton(t("card.button.back", _LANG), callback_data="learn:intro")],
+        ]
     )
 
 

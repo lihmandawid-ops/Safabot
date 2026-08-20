@@ -23,13 +23,17 @@ from database.repositories import sessions as sessions_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from keyboards.learning import (
+    after_session_keyboard,
     continue_keyboard,
+    extra_amount_keyboard,
     rating_keyboard,
     reveal_keyboard,
     start_keyboard,
     start_review_keyboard,
 )
-from services import learning_service, word_service
+from handlers.words import MODE as WORDS_MODE
+from keyboards.words import filter_keyboard
+from services import learning_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import t
 from utils.languages import LANGUAGE_BY_CODE
@@ -94,7 +98,44 @@ async def _show_current_word(edit, learning_session, translation_language: str) 
     if item is None:
         await edit(t("learning.nothing_to_do", _LANG))
         return
-    await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id))
+    await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id, is_new_word=item.is_new_word))
+
+
+async def _compute_intro(session, user, current, *, include_new_words: bool) -> tuple[str, object | None]:
+    """Shared by the plain-text entry points (_show_intro) and the
+    "learn:intro" inline-button re-entry (bugfix spec section 8/9's
+    post-completion keyboard) - returns (text, reply_markup) so callers
+    can either reply_text or edit_message_text with it."""
+    active = await sessions_repo.get_active_session(session, user_id=user.id, language_code=current.language_code)
+    if active is not None and sessions_repo.next_incomplete_item(active) is not None:
+        remaining = active.total_words - active.completed_words
+        return t("learning.resume", _LANG, count=remaining), continue_keyboard()
+
+    due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code)
+    shortfall = False
+    if include_new_words:
+        new_words_result = await learning_service.get_new_words_for_today(session, user=user, user_language=current)
+        new_words = new_words_result.words
+        shortfall = new_words_result.shortfall
+    else:
+        new_words = []
+    total = len(due) + len(new_words)
+
+    if total == 0:
+        if include_new_words and shortfall:
+            # AI-integration spec section 20/28: distinguish "nothing
+            # to do" from "wanted to generate new words but couldn't" -
+            # never leave the user guessing why the count is 0.
+            return t("learning.generation_unavailable", _LANG), (after_session_keyboard() if include_new_words else None)
+        key = "learning.nothing_to_do" if include_new_words else "learning.nothing_due"
+        return t(key, _LANG), (after_session_keyboard() if include_new_words else None)
+
+    if include_new_words:
+        text = t("learning.ready", _LANG, count=total)
+        if shortfall:
+            text += "\n\n" + t("learning.generation_unavailable", _LANG)
+        return text, start_keyboard()
+    return t("learning.ready_review", _LANG, count=total), start_review_keyboard()
 
 
 async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, include_new_words: bool) -> None:
@@ -107,42 +148,8 @@ async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, inc
             await update.message.reply_text(t("card.no_language", _LANG))
             return
 
-        active = await sessions_repo.get_active_session(session, user_id=user.id, language_code=current.language_code)
-        if active is not None and sessions_repo.next_incomplete_item(active) is not None:
-            remaining = active.total_words - active.completed_words
-            await update.message.reply_text(
-                t("learning.resume", _LANG, count=remaining), reply_markup=continue_keyboard()
-            )
-            return
-
-        due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code)
-        shortfall = False
-        if include_new_words:
-            new_words_result = await learning_service.get_new_words_for_today(session, user=user, user_language=current)
-            new_words = new_words_result.words
-            shortfall = new_words_result.shortfall
-        else:
-            new_words = []
-        total = len(due) + len(new_words)
-
-        if total == 0:
-            if include_new_words and shortfall:
-                # AI-integration spec section 20/28: distinguish "nothing
-                # to do" from "wanted to generate new words but couldn't" -
-                # never leave the user guessing why the count is 0.
-                await update.message.reply_text(t("learning.generation_unavailable", _LANG))
-                return
-            key = "learning.nothing_to_do" if include_new_words else "learning.nothing_due"
-            await update.message.reply_text(t(key, _LANG))
-            return
-
-        if include_new_words:
-            text = t("learning.ready", _LANG, count=total)
-            if shortfall:
-                text += "\n\n" + t("learning.generation_unavailable", _LANG)
-            await update.message.reply_text(text, reply_markup=start_keyboard())
-        else:
-            await update.message.reply_text(t("learning.ready_review", _LANG, count=total), reply_markup=start_review_keyboard())
+        text, keyboard = await _compute_intro(session, user, current, include_new_words=include_new_words)
+        await update.message.reply_text(text, reply_markup=keyboard)
 
 
 async def show_learning_intro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -186,6 +193,68 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 session, user_id=user.id, language_code=current.language_code
             )
             await _show_current_word(edit, learning_session, current.translation_language)
+
+        elif data == "learn:intro":
+            await query.answer()
+            text, keyboard = await _compute_intro(session, user, current, include_new_words=True)
+            await edit(text, reply_markup=keyboard)
+
+        elif data == "learn:extra":
+            await query.answer()
+            await edit(t("learning.extra_prompt", _LANG), reply_markup=extra_amount_keyboard())
+
+        elif data.startswith("learn:extra:"):
+            amount = int(data.removeprefix("learn:extra:"))
+            await query.answer()
+            result = await word_generation_service.generate_extra_words(
+                session, user=user, user_language=current, amount=amount
+            )
+            if result.limit_reached:
+                text = t("learning.extra_limit_reached", _LANG)
+            elif not result.words:
+                text = t("learning.extra_unavailable", _LANG)
+            else:
+                text = t("learning.extra_added", _LANG, count=len(result.words))
+            await edit(text, reply_markup=after_session_keyboard())
+
+        elif data == "learn:mywords":
+            await query.answer()
+            context.user_data["mode"] = WORDS_MODE
+            context.user_data.pop("words_list", None)
+            context.user_data.pop("bulk_selection", None)
+            context.user_data.pop("words_submode", None)
+            await edit(t("words.choose_filter", _LANG), reply_markup=filter_keyboard())
+
+        elif data.startswith("learn:know:"):
+            user_word_id = int(data.removeprefix("learn:know:"))
+            learning_session = await sessions_repo.get_active_session(
+                session, user_id=user.id, language_code=current.language_code
+            )
+            if learning_session is None:
+                await query.answer()
+                await edit(t("learning.session_gone", _LANG))
+                return
+            item = await learning_service.mark_known_and_replace(
+                session, user=user, user_language=current, learning_session=learning_session, user_word_id=user_word_id
+            )
+            if item is None:
+                await query.answer()
+                await edit(t("learning.session_gone", _LANG))
+                return
+            await query.answer()
+            finished = await learning_service.finish_session_if_complete(session, user, learning_session)
+            if finished:
+                stats = sessions_repo.session_stats(learning_session)
+                await edit(
+                    t(
+                        "learning.completion", _LANG,
+                        total=stats["total_reviewed"], new_words=stats["new_words"],
+                        correct=stats["correct"], wrong=stats["wrong"], streak=user.current_streak,
+                    ),
+                    reply_markup=after_session_keyboard(),
+                )
+            else:
+                await _show_current_word(edit, learning_session, current.translation_language)
 
         elif data.startswith("learn:reveal:"):
             user_word_id = int(data.removeprefix("learn:reveal:"))
@@ -231,7 +300,8 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                         "learning.completion", _LANG,
                         total=stats["total_reviewed"], new_words=stats["new_words"],
                         correct=stats["correct"], wrong=stats["wrong"], streak=user.current_streak,
-                    )
+                    ),
+                    reply_markup=after_session_keyboard(),
                 )
             else:
                 await _show_current_word(edit, learning_session, current.translation_language)

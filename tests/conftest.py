@@ -39,13 +39,21 @@ def _isolate_ai_config(monkeypatch):
     that bypasses the factory entirely, so this override never interferes.
     """
     monkeypatch.setenv("AI_API_KEY", "")
+    monkeypatch.setenv("OCR_API_KEY", "")
+    monkeypatch.setenv("STT_API_KEY", "")
     import config
     config.get_settings.cache_clear()
     from services.ai_service import get_ai_service
+    from services.ocr_service import get_ocr_service
+    from services.stt_service import get_stt_service
     get_ai_service.cache_clear()
+    get_ocr_service.cache_clear()
+    get_stt_service.cache_clear()
     yield
     config.get_settings.cache_clear()
     get_ai_service.cache_clear()
+    get_ocr_service.cache_clear()
+    get_stt_service.cache_clear()
 
 
 @pytest_asyncio.fixture

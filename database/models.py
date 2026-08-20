@@ -512,6 +512,11 @@ class WordGenerationLog(Base):
     requested_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     generated_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    # What asked for this generation (bugfix stage): "daily_quota" (the
+    # normal 📚 Учить слова auto-fill), "extra_request" (➕ Ещё новые
+    # слова, counted separately against MAX_EXTRA_WORDS_PER_DAY), or
+    # "replacement" (🤔 Я это уже знаю's one-word swap).
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False, default="daily_quota")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

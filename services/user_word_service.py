@@ -69,6 +69,12 @@ async def resume_word(session: AsyncSession, user_word: UserWord) -> UserWord:
     return await user_words_repo.resume_word(session, user_word, status=target_status)
 
 
+async def mark_mastered(session: AsyncSession, user_word: UserWord) -> UserWord:
+    """🤔 Я это уже знаю (bugfix stage section 12): skip straight to
+    MASTERED instead of the normal repetition ladder."""
+    return await user_words_repo.mark_mastered(session, user_word)
+
+
 async def delete_word(session: AsyncSession, user_word: UserWord) -> UserWord:
     """Section 13: soft delete - the shared Word row and other users'
     UserWord rows for it are never touched."""

@@ -89,6 +89,15 @@ async def restore_word(session: AsyncSession, user_word: UserWord) -> UserWord:
     return user_word
 
 
+async def mark_mastered(session: AsyncSession, user_word: UserWord) -> UserWord:
+    """🤔 Я это уже знаю (bugfix stage section 12): the user already knows a
+    word before ever reviewing it, so it's counted as mastered immediately
+    rather than started on the normal repetition ladder."""
+    user_word.status = WordStatus.MASTERED
+    await session.flush()
+    return user_word
+
+
 async def get_user_words(
     session: AsyncSession,
     *,

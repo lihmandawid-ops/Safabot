@@ -65,6 +65,11 @@ class HttpAIProvider(AIProvider):
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.3,
+            # Explicit, generous cap - relying on a provider's own default
+            # risks a silently-truncated (and therefore invalid) JSON
+            # response for the larger prompts (8-word generation, a
+            # 2000-character text analysis).
+            "max_tokens": 4096,
         }
 
         try:
