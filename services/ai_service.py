@@ -180,7 +180,11 @@ _LOOKUP_WORD_SYSTEM = (
     "(not IPA, not a transcription system for a third language) - e.g. for an English word shown "
     "to a Russian speaker, write it out approximately in Cyrillic the way a Russian speaker would "
     "read it aloud. Always attempt a pronunciation rather than leaving it null unless the script "
-    "makes this genuinely impossible. "
+    "makes this genuinely impossible - this field is shown to the learner directly, so it must "
+    "almost never be null. "
+    '"phonetic" is a SEPARATE, standard IPA transcription of the same word (e.g. "/ɡoʊ/") - always '
+    "attempt it too when you can produce a real IPA transcription; leave it null only if you are "
+    "not confident in the exact IPA symbols, never fill it with the same content as \"pronunciation\". "
     "verb_forms MUST be set whenever part_of_speech is \"verb\" - include every commonly-taught "
     "inflected form for that specific target language (do not force English's forms onto other "
     "languages, and do not invent a form you are not confident about, but do not omit the field "
@@ -194,7 +198,12 @@ _GENERATE_WORDS_SYSTEM = (
     '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
     '"difficulty": str|null, "category": str|null, "verb_forms": object|null}, ... ]}. '
     "Return exactly the requested amount of DISTINCT words the learner does not already know. "
-    "Never repeat a word from the learner's known-words list."
+    "Never repeat a word from the learner's known-words list. "
+    'For each word, "pronunciation" must be a phonetic transcription using the translation '
+    "language's own spelling conventions (not IPA) so the learner can sound it out directly - "
+    'always attempt it, it is shown to the learner and must almost never be null. "phonetic" is a '
+    "separate, standard IPA transcription of the same word - attempt it too when confident, leave "
+    "it null otherwise, never duplicate \"pronunciation\" into it."
 )
 
 _EXPLAIN_SYSTEM = (

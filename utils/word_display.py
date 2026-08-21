@@ -12,6 +12,19 @@ def status_label(status: str) -> str:
     return t(f"card.status.{status}", get_current_language())
 
 
+def format_pronunciation(word) -> str | None:
+    """Combines Word.pronunciation (a readable, non-IPA transliteration -
+    e.g. "goh") with Word.phonetic (IPA - e.g. "/ɡoʊ/") when both exist,
+    so the IPA transcription the spec asks to keep alongside the
+    readable one (settings-improvements stage section 13) is actually
+    shown somewhere instead of being written to the database and never
+    read back. Returns None only when neither is set, so callers can
+    show their own "not available yet" placeholder."""
+    if word.pronunciation and word.phonetic:
+        return f"{word.pronunciation} [{word.phonetic}]"
+    return word.pronunciation or word.phonetic
+
+
 _POS_WITH_LABEL = {
     "noun", "verb", "adjective", "adverb", "pronoun",
     "preposition", "conjunction", "article", "particle", "phrase",
@@ -55,7 +68,8 @@ def render_word_card_text(card, *, status: str | None = None) -> str:
 
     lines.append("")
     lines.append(t("card.pronunciation_header", get_current_language()))
-    lines.append(card.word.pronunciation if card.word.pronunciation else t("card.no_pronunciation", get_current_language()))
+    pronunciation = format_pronunciation(card.word)
+    lines.append(pronunciation if pronunciation else t("card.no_pronunciation", get_current_language()))
 
     lines.append("")
     lines.append(t("card.definition_header", get_current_language()))

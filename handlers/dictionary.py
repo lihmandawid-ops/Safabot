@@ -18,6 +18,7 @@ from database.models import WordSource
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
+from database.repositories import words as words_repo
 from keyboards.dictionary import (
     batch_resume_keyboard,
     resume_offer_keyboard,
@@ -29,7 +30,7 @@ from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.text import split_word_batch, truncate_text
-from utils.word_display import render_forms_text, render_word_card_text, status_label
+from utils.word_display import format_pronunciation, render_forms_text, render_word_card_text, status_label
 
 MODE = "dictionary"
 # Bugfix stage, real-Telegram feedback: 💡 Как использовать? must stay a
@@ -99,7 +100,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         if len(results) == 1:
-            await _send_card(update.message.reply_text, session, results[0].id, current.translation_language)
+            await _send_card(update.message.reply_text, session, results[0].id, current.translation_language, user_id=user.id)
             return
 
         await update.message.reply_text(
@@ -191,10 +192,17 @@ async def _explain_word_text(card, current, user) -> str:
     return notes[0] if notes else t("card.usage_placeholder", get_current_language())
 
 
-async def _send_card(send, session, word_id: int, translation_language: str) -> None:
-    card = await word_service.get_word_card(session, word_id=word_id, translation_language=translation_language)
-    if card is None:
+async def _send_card(send, session, word_id: int, translation_language: str, *, user_id: int) -> None:
+    word = await words_repo.get_by_id(session, word_id)
+    if word is None:
         return
+    # Caller must have already answered the callback query - this can
+    # make a real AI call (settings-improvements stage section 13's
+    # on-demand pronunciation backfill), and a too-late answer() would be
+    # rejected by Telegram the same way any other slow AI-backed action
+    # in the bot would be.
+    await word_service.ensure_pronunciation(session, word, translation_language=translation_language, user_id=user_id)
+    card = word_service.build_word_card(word, translation_language=translation_language)
     await send(render_word_card_text(card), reply_markup=word_card_keyboard(word_id))
 
 
@@ -216,6 +224,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
                 session,
                 word_id,
                 current.translation_language,
+                user_id=user.id,
             )
 
         elif data == "dict:back":
@@ -255,9 +264,10 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
         elif data.startswith("card:pronounce:"):
             word_id = int(data.removeprefix("card:pronounce:"))
             card = await word_service.get_word_card(session, word_id=word_id)
+            pronunciation = format_pronunciation(card.word) if card else None
             text = (
-                t("card.pronunciation_line", get_current_language(), pronunciation=card.word.pronunciation)
-                if card and card.word.pronunciation
+                t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation)
+                if pronunciation
                 else t("card.pronunciation_placeholder", get_current_language())
             )
             await query.answer(text, show_alert=True)

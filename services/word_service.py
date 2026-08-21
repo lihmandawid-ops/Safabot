@@ -43,6 +43,30 @@ async def get_word_card(
     return build_word_card(word, translation_language=translation_language)
 
 
+async def ensure_pronunciation(session: AsyncSession, word: Word, *, translation_language: str, user_id: int) -> Word:
+    """On-demand AI backfill (settings-improvements stage section 13): a
+    Word row that predates reliable AI pronunciation generation, or where
+    generation genuinely returned null that one time, is not stuck
+    showing "not available" forever - the next time its card is actually
+    opened, one more attempt is made. A no-op (no AI call at all) when
+    pronunciation is already set, so this never re-asks for a word that
+    already has one. Swallows every AI failure the same way the normal
+    dictionary lookup does (services.dictionary_service.AIDictionaryProvider)
+    - a missing pronunciation must never turn into a visible error."""
+    if word.pronunciation:
+        return word
+
+    from services.dictionary_service import get_dictionary_provider
+
+    result = await get_dictionary_provider().lookup(
+        word.word, language_code=word.language_code, translation_language=translation_language,
+        user_level=None, user_id=user_id,
+    )
+    if result is None or (not result.pronunciation and not result.phonetic):
+        return word
+    return await words_repo.set_pronunciation(session, word, pronunciation=result.pronunciation, phonetic=result.phonetic)
+
+
 async def get_or_create_word(
     session: AsyncSession, *, language_code: str, word: str, **fields: object
 ) -> tuple[Word, bool]:

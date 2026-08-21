@@ -347,10 +347,18 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             uw_id = int(data.removeprefix("uw:card:"))
             user_word = await user_words_repo.get_by_id(session, uw_id)
             if user_word is not None and user_word.user_id == user.id:
+                await query.answer()
+                # query.answer() must come before this - ensure_pronunciation
+                # can make a real AI call (settings-improvements stage
+                # section 13's on-demand backfill), and Telegram rejects a
+                # too-late answer the same way a slow AI-backed action
+                # anywhere else in the bot would.
+                await word_service.ensure_pronunciation(
+                    session, user_word.word, translation_language=current.translation_language, user_id=user.id
+                )
                 card = await word_service.get_word_card(
                     session, word_id=user_word.word_id, translation_language=current.translation_language
                 )
-                await query.answer()
                 await edit(
                     render_word_card_text(card, status=user_word.status),
                     reply_markup=word_card_keyboard(user_word.word_id, back_callback=f"uw:card_back:{uw_id}"),

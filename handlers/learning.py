@@ -39,6 +39,7 @@ from services import learning_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
+from utils.word_display import format_pronunciation
 
 MODE = "learning"
 
@@ -54,9 +55,10 @@ async def _current_user_and_language(session, telegram_id: int):
 
 def _render_front(user_word: UserWord) -> str:
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
+    pronunciation_text = format_pronunciation(user_word.word)
     pronunciation = (
-        t("card.pronunciation_line", get_current_language(), pronunciation=user_word.word.pronunciation)
-        if user_word.word.pronunciation
+        t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation_text)
+        if pronunciation_text
         else t("card.pronunciation_placeholder", get_current_language())
     )
     return t(
@@ -69,9 +71,10 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
     card = word_service.build_word_card(user_word.word, translation_language=translation_language)
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
     translation_lang = LANGUAGE_BY_CODE.get(translation_language)
+    pronunciation_text = format_pronunciation(user_word.word)
     pronunciation = (
-        t("card.pronunciation_line", get_current_language(), pronunciation=user_word.word.pronunciation)
-        if user_word.word.pronunciation
+        t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation_text)
+        if pronunciation_text
         else t("card.pronunciation_placeholder", get_current_language())
     )
     translation_text = ", ".join(tr.translation for tr in card.translations)

@@ -112,6 +112,22 @@ async def get_verb_forms(session: AsyncSession, word_id: int) -> list[WordForm]:
     return list(result.scalars().all())
 
 
+async def set_pronunciation(
+    session: AsyncSession, word: Word, *, pronunciation: str | None, phonetic: str | None
+) -> Word:
+    """On-demand backfill (settings-improvements stage section 13) for a
+    Word row that predates reliable AI pronunciation generation, or where
+    the AI genuinely returned null once - never overwrites an existing
+    non-null value, so a manually-curated seed entry is never clobbered
+    by a later AI guess."""
+    if pronunciation and not word.pronunciation:
+        word.pronunciation = pronunciation
+    if phonetic and not word.phonetic:
+        word.phonetic = phonetic
+    await session.flush()
+    return word
+
+
 async def create(session: AsyncSession, *, language_code: str, word: str, **fields: Any) -> Word:
     normalized = fields.pop("normalized_word", None) or normalize_word(word)
     new_word = Word(language_code=language_code, word=word, normalized_word=normalized, **fields)

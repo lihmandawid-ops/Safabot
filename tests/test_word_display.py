@@ -12,7 +12,7 @@ from utils.word_display import render_word_card_text
 
 
 def _card(**word_fields):
-    defaults = dict(language_code="en", word="appointment", part_of_speech=None, pronunciation=None, definition=None)
+    defaults = dict(language_code="en", word="appointment", part_of_speech=None, pronunciation=None, phonetic=None, definition=None)
     defaults.update(word_fields)
     word = SimpleNamespace(**defaults)
     translations = [
@@ -88,6 +88,32 @@ def test_status_label_follows_interface_language_not_always_russian():
     set_current_language("en")
     assert status_label("mastered") == "✅ Mastered"
     set_current_language("ru")
+
+
+def test_format_pronunciation_combines_readable_and_ipa():
+    """settings-improvements stage section 13: Word.phonetic (IPA) was
+    being written by AI generation but never shown anywhere - it must
+    appear alongside the readable Word.pronunciation, not replace it."""
+    from types import SimpleNamespace
+
+    from utils.word_display import format_pronunciation
+
+    both = SimpleNamespace(pronunciation="goh", phonetic="/ɡoʊ/")
+    assert format_pronunciation(both) == "goh [/ɡoʊ/]"
+
+    readable_only = SimpleNamespace(pronunciation="goh", phonetic=None)
+    assert format_pronunciation(readable_only) == "goh"
+
+    ipa_only = SimpleNamespace(pronunciation=None, phonetic="/ɡoʊ/")
+    assert format_pronunciation(ipa_only) == "/ɡoʊ/"
+
+    neither = SimpleNamespace(pronunciation=None, phonetic=None)
+    assert format_pronunciation(neither) is None
+
+
+def test_card_shows_combined_pronunciation_and_ipa_when_both_set():
+    text = render_word_card_text(_card(pronunciation="uh-POYNT-ment", phonetic="/əˈpɔɪntmənt/"))
+    assert "uh-POYNT-ment [/əˈpɔɪntmənt/]" in text
 
 
 def test_card_headers_follow_interface_language():
