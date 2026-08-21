@@ -21,7 +21,7 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from keyboards.learning import start_keyboard
 from keyboards.review_now import notification_keyboard
-from services import learning_service
+from services import learning_service, pronunciation_service
 from utils.i18n import set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.logging import get_logger
@@ -106,13 +106,22 @@ async def _select_review_words(session, user, slot: str, current, now: datetime)
 
 
 def _review_reminder_content(words: list[UserWord], translation_language: str, language: str, slot: str) -> NotificationContent:
+    """Global pronunciation rule section 48: each word line gets its own
+    cached pronunciation, never a live AI backfill call here - this runs
+    in the scheduler's hot path, once per due user per poll tick, and
+    must never block on (or fail because of) an AI request. A word with
+    nothing cached yet simply keeps its plain "word — translation" line,
+    same as before; the 4-8 word count and one-message-per-slot shape are
+    both unchanged."""
     lines = [t("notification.review_list.header", language), ""]
     for i, uw in enumerate(words):
         translation = translation_for(uw, translation_language) or ""
         lang = LANGUAGE_BY_CODE.get(uw.word.language_code)
         flag = lang.flag if lang else ""
         emoji = _NUMBER_EMOJI[i] if i < len(_NUMBER_EMOJI) else f"{i + 1}."
-        lines.append(f"{emoji} {flag} {uw.word.word} — {translation}")
+        pronunciation = pronunciation_service.format_pronunciation(uw.word)
+        word_part = f"{uw.word.word} ({pronunciation})" if pronunciation else uw.word.word
+        lines.append(f"{emoji} {flag} {word_part} — {translation}")
     text = "\n".join(lines)
     return NotificationContent(text, notification_keyboard(slot), word_ids=[uw.id for uw in words])
 

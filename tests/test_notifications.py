@@ -111,6 +111,45 @@ async def test_morning_notification_sent_when_due_words_exist(notif_db):
     assert "1️⃣" in kwargs["text"]
 
 
+async def test_morning_notification_shows_cached_pronunciation_per_word(notif_db):
+    """Global pronunciation rule section 48: each word line gets its own
+    cached pronunciation - never a live AI call from the scheduler's hot
+    path, so this must come from an already-cached Word.pronunciation."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id)
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
+        await words_repo.set_pronunciation(s, word, pronunciation="goh", phonetic=None)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "go (goh)" in text
+
+
+async def test_morning_notification_word_line_plain_when_pronunciation_not_cached(notif_db):
+    """No cached pronunciation must never crash or block the send - the
+    line simply stays plain, exactly like before this feature."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "go —" in text
+    assert "go (" not in text
+
+
 async def test_no_notification_when_nothing_is_due(notif_db):
     from database.database import session_scope
     from services import notification_service
