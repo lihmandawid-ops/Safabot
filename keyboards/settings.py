@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from utils.goals import GOAL_CODES
 from utils.i18n import get_current_language, t
+from utils.industries import PRESET_INDUSTRIES
 from utils.languages import SUPPORTED_LANGUAGES, language_display_name
 from utils.levels import LEVEL_CODES
 from utils.timezones import TIMEZONE_CHOICES
+from utils.topics import PRESET_TOPICS
 
 NOTIFICATION_SLOT_TIME_OPTIONS: dict[str, tuple[str, ...]] = {
     "morning": ("06:00", "07:00", "08:00", "09:00", "10:00"),
@@ -32,6 +35,8 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.notifications_toggle", get_current_language()), callback_data="set:notif:toggle")],
             [InlineKeyboardButton(t("settings.menu.level", get_current_language()), callback_data="set:level:list")],
             [InlineKeyboardButton(t("settings.menu.timezone", get_current_language()), callback_data="set:tz:list")],
+            [InlineKeyboardButton(t("settings.menu.goal", get_current_language()), callback_data="set:goal:list")],
+            [InlineKeyboardButton(t("settings.menu.topics", get_current_language()), callback_data="set:topics:list")],
             [InlineKeyboardButton(t("settings.menu.subscription", get_current_language()), callback_data="set:sub")],
         ]
     )
@@ -152,4 +157,46 @@ def timezone_pick_keyboard() -> InlineKeyboardMarkup:
 def timezone_search_results_keyboard(iana_names: list[str]) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(name, callback_data=f"set:tz:pick:{name}")] for name in iana_names]
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:tz:list")])
+    return InlineKeyboardMarkup(rows)
+
+
+def goal_pick_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(t(f"goal.{code}", get_current_language()), callback_data=f"set:goal:pick:{code}")]
+        for code in GOAL_CODES
+    ]
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def industry_pick_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(t(f"industry.{code}", get_current_language()), callback_data=f"set:goal:industry:{code}")
+        for code in PRESET_INDUSTRIES
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(t("onboarding.button.other", get_current_language()), callback_data="set:goal:industry:other")])
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def topics_keyboard(selected_topics: list[str]) -> InlineKeyboardMarkup:
+    """One toggle button per preset topic (✅ prefix when selected), one
+    remove button per already-selected custom topic (anything in
+    `selected_topics` that isn't a preset code), an "add custom" entry,
+    and back - settings-improvements stage section 22."""
+    preset_set = set(PRESET_TOPICS)
+    rows = []
+    for code in PRESET_TOPICS:
+        label = t(f"topic.{code}", get_current_language())
+        if code in selected_topics:
+            label = f"✅ {label}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"set:topics:toggle:{code}")])
+
+    custom_topics = [topic for topic in selected_topics if topic not in preset_set]
+    for i, topic in enumerate(custom_topics):
+        rows.append([InlineKeyboardButton(f"✅ {topic}", callback_data=f"set:topics:removecustom:{i}")])
+
+    rows.append([InlineKeyboardButton(t("settings.topics_add_custom", get_current_language()), callback_data="set:topics:add_custom")])
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)

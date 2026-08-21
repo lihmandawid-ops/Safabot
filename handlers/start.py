@@ -28,6 +28,8 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     ConversationHandler,
+    MessageHandler,
+    filters,
 )
 
 from config import get_settings
@@ -44,7 +46,9 @@ from keyboards.language import (
 )
 from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
+from utils.goals import GOAL_CODES
 from utils.i18n import get_current_language, set_current_language, t
+from utils.industries import PRESET_INDUSTRIES
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.levels import LEVEL_CODES
 from utils.logging import get_logger
@@ -58,11 +62,15 @@ logger = get_logger(__name__)
     CHOOSING_TRANSLATION_LANGUAGE,
     CHOOSING_LEVEL,
     CHOOSING_DAILY_WORDS,
+    CHOOSING_GOAL,
+    CHOOSING_INDUSTRY,
     CHOOSING_TIMEZONE,
-) = range(6)
+) = range(8)
 
 LEVEL_PREFIX = "onb:level:"
 DAILY_WORDS_PREFIX = "onb:words:"
+GOAL_PREFIX = "onb:goal:"
+INDUSTRY_PREFIX = "onb:industry:"
 TIMEZONE_PREFIX = "onb:tz:"
 
 # settings-improvements stage: the FIRST screen (before any language is
@@ -87,6 +95,26 @@ def _daily_words_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(str(n), callback_data=f"{DAILY_WORDS_PREFIX}{n}") for n in options]]
     )
+
+
+def _goal_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(t(f"goal.{code}", get_current_language()), callback_data=f"{GOAL_PREFIX}{code}")]
+        for code in GOAL_CODES
+    ]
+    rows.append([InlineKeyboardButton(t("onboarding.button.skip", get_current_language()), callback_data=f"{GOAL_PREFIX}skip")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _industry_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(t(f"industry.{code}", get_current_language()), callback_data=f"{INDUSTRY_PREFIX}{code}")
+        for code in PRESET_INDUSTRIES
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(t("onboarding.button.other", get_current_language()), callback_data=f"{INDUSTRY_PREFIX}other")])
+    rows.append([InlineKeyboardButton(t("onboarding.button.skip", get_current_language()), callback_data=f"{INDUSTRY_PREFIX}skip")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _timezone_keyboard() -> InlineKeyboardMarkup:
@@ -199,7 +227,68 @@ async def choose_daily_words(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["daily_words"] = daily_words
 
     await query.edit_message_text(t("onboarding.daily_words_selected", get_current_language(), count=daily_words))
+    await query.message.reply_text(t("onboarding.choose_goal", get_current_language()), reply_markup=_goal_keyboard())
+    return CHOOSING_GOAL
+
+
+async def choose_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Settings-improvements stage section 18: optional, skippable - only
+    "work" leads anywhere further (a follow-up industry question,
+    section 20); every other choice (including skip) goes straight to
+    the timezone step, same as before this stage existed."""
+    query = update.callback_query
+    await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
+    code = query.data.removeprefix(GOAL_PREFIX)
+    goal = None if code == "skip" else code
+    context.user_data["learning_goal"] = goal
+
+    if goal == "work":
+        await query.edit_message_text(t("goal.work", get_current_language()))
+        await query.message.reply_text(
+            t("onboarding.choose_industry", get_current_language()), reply_markup=_industry_keyboard()
+        )
+        return CHOOSING_INDUSTRY
+
+    await query.edit_message_text(
+        t(f"goal.{goal}", get_current_language()) if goal else t("onboarding.button.skip", get_current_language())
+    )
     await query.message.reply_text(
+        t("onboarding.choose_timezone", get_current_language()), reply_markup=_timezone_keyboard()
+    )
+    return CHOOSING_TIMEZONE
+
+
+async def choose_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
+    code = query.data.removeprefix(INDUSTRY_PREFIX)
+
+    if code == "other":
+        await query.edit_message_text(t("onboarding.industry_custom_prompt", get_current_language()))
+        return CHOOSING_INDUSTRY
+
+    industry = None if code == "skip" else code
+    context.user_data["work_industry"] = industry
+    await query.edit_message_text(
+        t(f"industry.{industry}", get_current_language()) if industry else t("onboarding.button.skip", get_current_language())
+    )
+    await query.message.reply_text(
+        t("onboarding.choose_timezone", get_current_language()), reply_markup=_timezone_keyboard()
+    )
+    return CHOOSING_TIMEZONE
+
+
+async def choose_industry_custom(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Free-text answer to "✏️ Другое" (or typed directly without tapping
+    any preset button - both are equally valid ways to answer)."""
+    set_current_language(context.user_data.get("interface_language"))
+    from utils.topics import MAX_CUSTOM_TOPIC_LENGTH
+
+    industry = update.message.text.strip()[:MAX_CUSTOM_TOPIC_LENGTH]
+    context.user_data["work_industry"] = industry or None
+    await update.message.reply_text(
         t("onboarding.choose_timezone", get_current_language()), reply_markup=_timezone_keyboard()
     )
     return CHOOSING_TIMEZONE
@@ -218,6 +307,8 @@ async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     translation_language = context.user_data["translation_language"]
     level = context.user_data["level"]
     daily_words = context.user_data["daily_words"]
+    learning_goal = context.user_data.get("learning_goal")
+    work_industry = context.user_data.get("work_industry") if learning_goal == "work" else None
 
     morning = _parse_time(settings.default_morning_time)
     afternoon = _parse_time(settings.default_afternoon_time)
@@ -244,6 +335,8 @@ async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             translation_language=translation_language,
             level=level,
             daily_new_words=daily_words,
+            learning_goal=learning_goal,
+            work_industry=work_industry,
         )
         await subscription_service.start_trial(session, user)
 
@@ -295,6 +388,11 @@ start_conversation_handler = ConversationHandler(
         ],
         CHOOSING_LEVEL: [CallbackQueryHandler(choose_level, pattern=f"^{LEVEL_PREFIX}")],
         CHOOSING_DAILY_WORDS: [CallbackQueryHandler(choose_daily_words, pattern=f"^{DAILY_WORDS_PREFIX}")],
+        CHOOSING_GOAL: [CallbackQueryHandler(choose_goal, pattern=f"^{GOAL_PREFIX}")],
+        CHOOSING_INDUSTRY: [
+            CallbackQueryHandler(choose_industry, pattern=f"^{INDUSTRY_PREFIX}"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, choose_industry_custom),
+        ],
         CHOOSING_TIMEZONE: [CallbackQueryHandler(choose_timezone, pattern=f"^{TIMEZONE_PREFIX}")],
     },
     fallbacks=[CommandHandler("cancel", cancel)],

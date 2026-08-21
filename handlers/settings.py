@@ -32,6 +32,8 @@ from keyboards.settings import (
     add_language_words_keyboard,
     back_to_settings_keyboard,
     daily_words_pick_keyboard,
+    goal_pick_keyboard,
+    industry_pick_keyboard,
     interface_language_pick_keyboard,
     language_switch_keyboard,
     level_pick_keyboard,
@@ -40,6 +42,7 @@ from keyboards.settings import (
     settings_home_keyboard,
     timezone_pick_keyboard,
     timezone_search_results_keyboard,
+    topics_keyboard,
 )
 from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
@@ -47,10 +50,12 @@ from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
 from utils.timezones import TIMEZONE_BY_NAME, is_valid_timezone, search_timezones
+from utils.topics import MAX_CUSTOM_TOPIC_LENGTH, MAX_SELECTED_TOPICS, PRESET_TOPICS
 
 logger = get_logger(__name__)
 
 MODE = "settings_timezone_search"
+_PRESET_TOPIC_SET = set(PRESET_TOPICS)
 
 
 async def _build_summary(session, user) -> str:
@@ -69,6 +74,23 @@ async def _build_summary(session, user) -> str:
         t("settings.level", get_current_language(), level=t(f"level.{user.level}", get_current_language())),
         t("settings.daily_words", get_current_language(), count=user.daily_new_words),
         t("settings.timezone", get_current_language(), timezone=user.timezone),
+    ]
+    current_language = next((ul for ul in languages if ul.is_current), None)
+    if current_language is not None:
+        lines.append(
+            t("settings.current_goal", get_current_language(), goal=t(f"goal.{current_language.learning_goal}", get_current_language()))
+            if current_language.learning_goal
+            else t("settings.current_goal_none", get_current_language())
+        )
+        if current_language.selected_topics:
+            topic_labels = ", ".join(
+                t(f"topic.{topic}", get_current_language()) if topic in _PRESET_TOPIC_SET else topic
+                for topic in current_language.selected_topics
+            )
+            lines.append(t("settings.current_topics", get_current_language(), topics=topic_labels))
+        else:
+            lines.append(t("settings.current_topics_none", get_current_language()))
+    lines += [
         "",
         t("settings.notifications_on", get_current_language())
         if user.notifications_enabled
@@ -118,10 +140,21 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
-    """🔎 Другой часовой пояс (bugfix stage): the only free-text step in
-    Settings today, routed here via context.user_data["mode"] == MODE the
-    same way handlers/dictionary.py etc. handle their own free-text modes
-    (see handlers/menu.py's router)."""
+    """Every free-text step in Settings routes through here via
+    context.user_data["mode"] == MODE (same pattern handlers/dictionary.py
+    etc. use), branching further on "settings_submode" the same way
+    handlers/words.py's "words_submode" tells its own free-text handler
+    apart from plain number selection - 🔎 Другой часовой пояс (bugfix
+    stage) is the default/no-submode case, kept exactly as it was."""
+    submode = context.user_data.get("settings_submode")
+
+    if submode == "topics_custom":
+        await _handle_custom_topic_input(update, context, text)
+        return
+    if submode == "industry_custom":
+        await _handle_custom_industry_input(update, context, text)
+        return
+
     matches = search_timezones(text)
     if not matches:
         await update.message.reply_text(t("settings.timezone_search_empty", get_current_language()))
@@ -129,6 +162,59 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await update.message.reply_text(
         t("settings.timezone_search_results", get_current_language()), reply_markup=timezone_search_results_keyboard(matches)
     )
+
+
+async def _handle_custom_topic_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    context.user_data.pop("settings_submode", None)
+    context.user_data.pop("mode", None)
+    topic = text.strip()[:MAX_CUSTOM_TOPIC_LENGTH]
+    if not topic:
+        return
+
+    async with session_scope() as session:
+        user = await _get_user_or_warn_message(session, update)
+        if user is None:
+            return
+        current = await user_languages_repo.get_current_language(session, user.id)
+        if current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+        topics = list(current.selected_topics)
+        if topic not in topics:
+            if len(topics) >= MAX_SELECTED_TOPICS:
+                await update.message.reply_text(t("settings.topics_limit_reached", get_current_language(), max=MAX_SELECTED_TOPICS))
+                return
+            topics.append(topic)
+            await user_languages_repo.set_topics(session, current, topics=topics)
+        await update.message.reply_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+
+
+async def _handle_custom_industry_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    context.user_data.pop("settings_submode", None)
+    context.user_data.pop("mode", None)
+    industry = text.strip()[:MAX_CUSTOM_TOPIC_LENGTH]
+    if not industry:
+        return
+
+    async with session_scope() as session:
+        user = await _get_user_or_warn_message(session, update)
+        if user is None:
+            return
+        current = await user_languages_repo.get_current_language(session, user.id)
+        if current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+        await user_languages_repo.set_goal(session, current, learning_goal="work", work_industry=industry)
+        await update.message.reply_text(t("settings.industry_updated", get_current_language()))
+
+
+async def _get_user_or_warn_message(session, update: Update) -> object | None:
+    user = await users_repo.get_by_telegram_id(session, update.effective_user.id)
+    if user is None:
+        await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
+        return None
+    set_current_language(user.interface_language)
+    return user
 
 
 async def _get_user_or_warn(session, query) -> object | None:
@@ -163,6 +249,8 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         if data == "set:home":
             await query.answer()
+            context.user_data.pop("mode", None)
+            context.user_data.pop("settings_submode", None)
             await _render_home(query, session, user)
 
         elif data == "set:lang:list":
@@ -288,6 +376,102 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer(t("settings.daily_words_updated", get_current_language(), count=count))
             await _render_home(query, session, user)
 
+        elif data == "set:goal:list":
+            await query.answer()
+            await query.edit_message_text(
+                t("settings.pick_goal", get_current_language()), reply_markup=goal_pick_keyboard()
+            )
+
+        elif data.startswith("set:goal:pick:"):
+            goal = data.removeprefix("set:goal:pick:")
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            if goal == "work":
+                await user_languages_repo.set_goal(session, current, learning_goal=goal, work_industry=current.work_industry)
+                await query.answer()
+                await query.edit_message_text(
+                    t("settings.pick_industry", get_current_language()), reply_markup=industry_pick_keyboard()
+                )
+                return
+            # Any goal other than "work" must never keep a stale
+            # work_industry around (settings-improvements stage section
+            # 20 - the same rule handlers/start.py's onboarding flow
+            # follows for a freshly-created UserLanguage).
+            await user_languages_repo.set_goal(session, current, learning_goal=goal, work_industry=None)
+            await query.answer(t("settings.goal_updated", get_current_language()))
+            await _render_home(query, session, user)
+
+        elif data.startswith("set:goal:industry:"):
+            code = data.removeprefix("set:goal:industry:")
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            if code == "other":
+                context.user_data["mode"] = MODE
+                context.user_data["settings_submode"] = "industry_custom"
+                await query.answer()
+                await query.edit_message_text(t("onboarding.industry_custom_prompt", get_current_language()))
+                return
+            await user_languages_repo.set_goal(session, current, learning_goal="work", work_industry=code)
+            await query.answer(t("settings.industry_updated", get_current_language()))
+            await _render_home(query, session, user)
+
+        elif data == "set:topics:list":
+            await query.answer()
+            context.user_data.pop("mode", None)
+            context.user_data.pop("settings_submode", None)
+            current = await user_languages_repo.get_current_language(session, user.id)
+            topics = current.selected_topics if current is not None else []
+            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+
+        elif data.startswith("set:topics:toggle:"):
+            code = data.removeprefix("set:topics:toggle:")
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            topics = list(current.selected_topics)
+            if code in topics:
+                topics.remove(code)
+            elif len(topics) >= MAX_SELECTED_TOPICS:
+                await query.answer(t("settings.topics_limit_reached", get_current_language(), max=MAX_SELECTED_TOPICS), show_alert=True)
+                return
+            else:
+                topics.append(code)
+            await user_languages_repo.set_topics(session, current, topics=topics)
+            await query.answer()
+            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+
+        elif data.startswith("set:topics:removecustom:"):
+            index = int(data.removeprefix("set:topics:removecustom:"))
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            topics = list(current.selected_topics)
+            custom_topics = [topic for topic in topics if topic not in _PRESET_TOPIC_SET]
+            if 0 <= index < len(custom_topics):
+                topics.remove(custom_topics[index])
+                await user_languages_repo.set_topics(session, current, topics=topics)
+            await query.answer()
+            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+
+        elif data == "set:topics:add_custom":
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            if len(current.selected_topics) >= MAX_SELECTED_TOPICS:
+                await query.answer(t("settings.topics_limit_reached", get_current_language(), max=MAX_SELECTED_TOPICS), show_alert=True)
+                return
+            context.user_data["mode"] = MODE
+            context.user_data["settings_submode"] = "topics_custom"
+            await query.answer()
+            await query.edit_message_text(t("settings.topics_custom_prompt", get_current_language()))
+
         elif data == "set:notif:slots":
             await query.answer()
             await query.edit_message_text(
@@ -343,10 +527,12 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data == "set:tz:list":
             await query.answer()
             context.user_data.pop("mode", None)
+            context.user_data.pop("settings_submode", None)
             await query.edit_message_text(t("settings.pick_timezone", get_current_language()), reply_markup=timezone_pick_keyboard())
 
         elif data == "set:tz:search":
             await query.answer()
+            context.user_data.pop("settings_submode", None)
             context.user_data["mode"] = MODE
             await query.edit_message_text(t("settings.timezone_search_prompt", get_current_language()))
 
