@@ -27,42 +27,42 @@ from handlers.dictionary import add_word_batch
 from keyboards.text_analysis import results_keyboard, selection_keyboard
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 from utils.text import parse_number_list
 
-_LANG = "ru"
 MODE = "text_analysis"
 
 
 async def start_text_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["mode"] = MODE
     context.user_data.pop("text_analysis", None)
-    await update.message.reply_text(t("text_analysis.prompt", _LANG))
+    await update.message.reply_text(t("text_analysis.prompt", get_current_language()))
 
 
 async def _current_language(session, telegram_id: int):
     user = await users_repo.get_by_telegram_id(session, telegram_id)
     if user is None:
         return None, None
+    set_current_language(user.interface_language)
     current = await user_languages_repo.get_current_language(session, user.id)
     return user, current
 
 
 def _render_results(text: str, translation: str, key_words: list[tuple[str, str]], phrases: list[str]) -> str:
-    lines = [t("text_analysis.title", _LANG), "", text, translation]
+    lines = [t("text_analysis.title", get_current_language()), "", text, translation]
     if key_words:
         lines.append("")
-        lines.append(t("text_analysis.key_words_header", _LANG))
+        lines.append(t("text_analysis.key_words_header", get_current_language()))
         lines.extend(f"{i}. {word} — {translation}" for i, (word, translation) in enumerate(key_words, start=1))
     else:
         lines.append("")
-        lines.append(t("text_analysis.no_key_words", _LANG))
+        lines.append(t("text_analysis.no_key_words", get_current_language()))
     if phrases:
         lines.append("")
-        lines.append(t("text_analysis.phrases_header", _LANG))
+        lines.append(t("text_analysis.phrases_header", get_current_language()))
         lines.extend(f"- {phrase}" for phrase in phrases)
     lines.append("")
-    lines.append(t("text_analysis.select_hint", _LANG))
+    lines.append(t("text_analysis.select_hint", get_current_language()))
     return "\n".join(lines)
 
 
@@ -81,16 +81,16 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     max_length = get_settings().max_text_length
     if len(text) > max_length:
-        await update.message.reply_text(t("text_analysis.too_long", _LANG, max_length=max_length))
+        await update.message.reply_text(t("text_analysis.too_long", get_current_language(), max_length=max_length))
         return
 
     async with session_scope() as session:
         user, current = await _current_language(session, update.effective_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
         if current is None:
-            await update.message.reply_text(t("card.no_language", _LANG))
+            await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
         try:
@@ -101,11 +101,11 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             )
         except AIConfigurationError:
             context.user_data.pop("text_analysis", None)
-            await update.message.reply_text(t("ai.not_configured", _LANG))
+            await update.message.reply_text(t("ai.not_configured", get_current_language()))
             return
         except AIError:
             context.user_data.pop("text_analysis", None)
-            await update.message.reply_text(t("ai.generic_error", _LANG))
+            await update.message.reply_text(t("ai.generic_error", get_current_language()))
             return
 
         key_words = [(kw.word, kw.translation) for kw in result.key_words]
@@ -121,13 +121,13 @@ async def _handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     out_of_range = [n for n in numbers if n < 1 or n > len(words)]
     if out_of_range:
         await update.message.reply_text(
-            t("text_analysis.out_of_range", _LANG, numbers=", ".join(str(n) for n in out_of_range))
+            t("text_analysis.out_of_range", get_current_language(), numbers=", ".join(str(n) for n in out_of_range))
         )
         return
 
     selected = [words[n - 1] for n in numbers]
     context.user_data["text_analysis"]["selected"] = selected
-    lines = [t("text_analysis.selected_header", _LANG)]
+    lines = [t("text_analysis.selected_header", get_current_language())]
     lines.extend(f"{n}. {words[n - 1]}" for n in numbers)
     await update.message.reply_text("\n".join(lines), reply_markup=selection_keyboard())
 
@@ -137,12 +137,16 @@ async def handle_text_analysis_callback(update: Update, context: ContextTypes.DE
     data = query.data
     cache = context.user_data.get("text_analysis")
 
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, query.from_user.id)
+        set_current_language(user.interface_language if user else None)
+
     if data == "textan:cancel":
-        await query.answer(t("text_analysis.cancelled", _LANG))
+        await query.answer(t("text_analysis.cancelled", get_current_language()))
         return
 
     if cache is None:
-        await query.answer(t("text_analysis.expired", _LANG), show_alert=True)
+        await query.answer(t("text_analysis.expired", get_current_language()), show_alert=True)
         return
 
     if data == "textan:add_all":
@@ -153,14 +157,14 @@ async def handle_text_analysis_callback(update: Update, context: ContextTypes.DE
         return
 
     if not raw_words:
-        await query.answer(t("text_analysis.expired", _LANG), show_alert=True)
+        await query.answer(t("text_analysis.expired", get_current_language()), show_alert=True)
         return
 
     await query.answer()
     async with session_scope() as session:
         user, current = await _current_language(session, query.from_user.id)
         if user is None or current is None:
-            await query.message.reply_text(t("card.no_language", _LANG))
+            await query.message.reply_text(t("card.no_language", get_current_language()))
             return
         await add_word_batch(
             query.message.reply_text, session,

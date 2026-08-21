@@ -44,8 +44,8 @@ from keyboards.language import (
 )
 from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
-from utils.i18n import t
-from utils.languages import LANGUAGE_BY_CODE
+from utils.i18n import get_current_language, set_current_language, t
+from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.levels import LEVEL_CODES
 from utils.logging import get_logger
 from utils.timezones import TIMEZONE_CHOICES
@@ -65,16 +65,18 @@ LEVEL_PREFIX = "onb:level:"
 DAILY_WORDS_PREFIX = "onb:words:"
 TIMEZONE_PREFIX = "onb:tz:"
 
-# Onboarding always speaks Russian for now (spec section 6: interface
-# localization beyond ru is future work); user.interface_language is still
-# recorded so the rest of the bot is ready for it once more locales exist.
+# settings-improvements stage: the FIRST screen (before any language is
+# chosen at all) has no per-user language to read yet, so it stays in
+# this fallback - every screen from choose_interface_language onward uses
+# set_current_language(code) instead, so the rest of onboarding renders
+# in whichever language the user just picked.
 _LANG = "ru"
 
 
 def _level_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t(f"level.{code}", _LANG), callback_data=f"{LEVEL_PREFIX}{code}")]
+            [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"{LEVEL_PREFIX}{code}")]
             for code in LEVEL_CODES
         ]
     )
@@ -104,9 +106,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         existing = await users_repo.get_by_telegram_id(session, telegram_user.id)
 
     if existing is not None:
+        set_current_language(existing.interface_language)
         await update.message.reply_text(
-            t("onboarding.returning_user", _LANG, name=existing.first_name or telegram_user.first_name),
-            reply_markup=main_menu_keyboard(),
+            t("onboarding.returning_user", get_current_language(), name=existing.first_name or telegram_user.first_name),
+            reply_markup=main_menu_keyboard(get_current_language()),
         )
         return ConversationHandler.END
 
@@ -122,13 +125,14 @@ async def choose_interface_language(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     code = query.data.removeprefix(INTERFACE_LANGUAGE_PREFIX)
     context.user_data["interface_language"] = code
+    set_current_language(code)
     lang = LANGUAGE_BY_CODE[code]
 
     await query.edit_message_text(
-        t("onboarding.interface_language_selected", _LANG, flag=lang.flag, name=lang.name_ru)
+        t("onboarding.interface_language_selected", code, flag=lang.flag, name=language_display_name(lang, code))
     )
     await query.message.reply_text(
-        t("onboarding.choose_learning_language", _LANG), reply_markup=learning_language_keyboard()
+        t("onboarding.choose_learning_language", code), reply_markup=learning_language_keyboard()
     )
     return CHOOSING_LEARNING_LANGUAGE
 
@@ -136,15 +140,16 @@ async def choose_interface_language(update: Update, context: ContextTypes.DEFAUL
 async def choose_learning_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
     code = query.data.removeprefix(LEARNING_LANGUAGE_PREFIX)
     context.user_data["learning_language"] = code
     lang = LANGUAGE_BY_CODE[code]
 
     await query.edit_message_text(
-        t("onboarding.learning_language_selected", _LANG, flag=lang.flag, name=lang.name_ru)
+        t("onboarding.learning_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
     )
     await query.message.reply_text(
-        t("onboarding.choose_translation_language", _LANG),
+        t("onboarding.choose_translation_language", get_current_language()),
         reply_markup=translation_language_keyboard(exclude_learning_language=code),
     )
     return CHOOSING_TRANSLATION_LANGUAGE
@@ -153,33 +158,35 @@ async def choose_learning_language(update: Update, context: ContextTypes.DEFAULT
 async def choose_translation_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
     code = query.data.removeprefix(TRANSLATION_LANGUAGE_PREFIX)
 
     if code == context.user_data.get("learning_language"):
-        await query.answer(t("onboarding.translation_language_must_differ", _LANG), show_alert=True)
+        await query.answer(t("onboarding.translation_language_must_differ", get_current_language()), show_alert=True)
         return CHOOSING_TRANSLATION_LANGUAGE
 
     context.user_data["translation_language"] = code
     lang = LANGUAGE_BY_CODE[code]
 
     await query.edit_message_text(
-        t("onboarding.translation_language_selected", _LANG, flag=lang.flag, name=lang.name_ru)
+        t("onboarding.translation_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
     )
-    await query.message.reply_text(t("onboarding.choose_level", _LANG), reply_markup=_level_keyboard())
+    await query.message.reply_text(t("onboarding.choose_level", get_current_language()), reply_markup=_level_keyboard())
     return CHOOSING_LEVEL
 
 
 async def choose_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
     level = query.data.removeprefix(LEVEL_PREFIX)
     context.user_data["level"] = level
 
     await query.edit_message_text(
-        t("onboarding.level_selected", _LANG, level=t(f"level.{level}", _LANG))
+        t("onboarding.level_selected", get_current_language(), level=t(f"level.{level}", get_current_language()))
     )
     await query.message.reply_text(
-        t("onboarding.choose_daily_words", _LANG), reply_markup=_daily_words_keyboard()
+        t("onboarding.choose_daily_words", get_current_language()), reply_markup=_daily_words_keyboard()
     )
     return CHOOSING_DAILY_WORDS
 
@@ -187,12 +194,13 @@ async def choose_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def choose_daily_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
     daily_words = int(query.data.removeprefix(DAILY_WORDS_PREFIX))
     context.user_data["daily_words"] = daily_words
 
-    await query.edit_message_text(t("onboarding.daily_words_selected", _LANG, count=daily_words))
+    await query.edit_message_text(t("onboarding.daily_words_selected", get_current_language(), count=daily_words))
     await query.message.reply_text(
-        t("onboarding.choose_timezone", _LANG), reply_markup=_timezone_keyboard()
+        t("onboarding.choose_timezone", get_current_language()), reply_markup=_timezone_keyboard()
     )
     return CHOOSING_TIMEZONE
 
@@ -200,6 +208,7 @@ async def choose_daily_words(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    set_current_language(context.user_data.get("interface_language"))
     timezone = query.data.removeprefix(TIMEZONE_PREFIX)
 
     telegram_user = update.effective_user
@@ -245,14 +254,17 @@ async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text(
         t(
             "onboarding.registration_complete",
-            _LANG,
+            get_current_language(),
             flag=learning_lang.flag,
-            name=learning_lang.name_ru,
+            name=language_display_name(learning_lang),
             daily_words=daily_words,
             trial_days=trial_days,
         )
     )
-    await query.message.reply_text(t("onboarding.main_menu_ready", _LANG), reply_markup=main_menu_keyboard())
+    await query.message.reply_text(
+        t("onboarding.main_menu_ready", get_current_language()),
+        reply_markup=main_menu_keyboard(get_current_language()),
+    )
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -263,8 +275,9 @@ def _parse_time(value: str) -> time:
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    set_current_language(context.user_data.get("interface_language"))
     context.user_data.clear()
-    await update.message.reply_text(t("onboarding.cancelled", _LANG))
+    await update.message.reply_text(t("onboarding.cancelled", get_current_language()))
     return ConversationHandler.END
 
 

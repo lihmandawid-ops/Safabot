@@ -6,9 +6,7 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from utils.i18n import t
-
-_LANG = "ru"
+from utils.i18n import get_current_language, t
 
 
 def search_results_keyboard(words) -> InlineKeyboardMarkup:
@@ -27,10 +25,10 @@ def word_card_keyboard(word_id: int, *, back_callback: str = "dict:back") -> Inl
     already-sent message that still has the old button."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("card.button.add", _LANG), callback_data=f"card:add:{word_id}")],
-            [InlineKeyboardButton(t("card.button.usage", _LANG), callback_data=f"card:usage:{word_id}")],
-            [InlineKeyboardButton(t("card.button.forms", _LANG), callback_data=f"card:forms:{word_id}")],
-            [InlineKeyboardButton(t("card.button.back", _LANG), callback_data=back_callback)],
+            [InlineKeyboardButton(t("card.button.add", get_current_language()), callback_data=f"card:add:{word_id}")],
+            [InlineKeyboardButton(t("card.button.usage", get_current_language()), callback_data=f"card:usage:{word_id}")],
+            [InlineKeyboardButton(t("card.button.forms", get_current_language()), callback_data=f"card:forms:{word_id}")],
+            [InlineKeyboardButton(t("card.button.back", get_current_language()), callback_data=back_callback)],
         ]
     )
 
@@ -38,8 +36,8 @@ def word_card_keyboard(word_id: int, *, back_callback: str = "dict:back") -> Inl
 def resume_offer_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("dictionary.resume_yes", _LANG), callback_data=f"dict:resume:{user_word_id}")],
-            [InlineKeyboardButton(t("dictionary.resume_no", _LANG), callback_data=f"dict:resume_no:{user_word_id}")],
+            [InlineKeyboardButton(t("dictionary.resume_yes", get_current_language()), callback_data=f"dict:resume:{user_word_id}")],
+            [InlineKeyboardButton(t("dictionary.resume_no", get_current_language()), callback_data=f"dict:resume_no:{user_word_id}")],
         ]
     )
 
@@ -50,7 +48,7 @@ def batch_resume_keyboard(paused: list[tuple[int, str]]) -> InlineKeyboardMarkup
     section instead of making the user hunt for it in ⭐ Мои слова)."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("words.batch_resume_button", _LANG, word=word), callback_data=f"dict:resume:{uw_id}")]
+            [InlineKeyboardButton(t("words.batch_resume_button", get_current_language(), word=word), callback_data=f"dict:resume:{uw_id}")]
             for uw_id, word in paused
         ]
     )

@@ -37,12 +37,11 @@ from keyboards.words import (
     single_word_keyboard,
 )
 from services import user_word_service, word_service
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 from utils.pagination import paginate
 from utils.text import parse_number_list
 from utils.word_display import render_word_card_text, status_label
 
-_LANG = "ru"
 MODE = "my_words"
 PAGE_SIZE = 10
 
@@ -52,13 +51,14 @@ async def show_words_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.pop("words_list", None)
     context.user_data.pop("bulk_selection", None)
     context.user_data.pop("words_submode", None)
-    await update.message.reply_text(t("words.choose_filter", _LANG), reply_markup=filter_keyboard())
+    await update.message.reply_text(t("words.choose_filter", get_current_language()), reply_markup=filter_keyboard())
 
 
 async def _current_language(session, telegram_id: int):
     user = await users_repo.get_by_telegram_id(session, telegram_id)
     if user is None:
         return None, None
+    set_current_language(user.interface_language)
     current = await user_languages_repo.get_current_language(session, user.id)
     return user, current
 
@@ -72,7 +72,7 @@ def _translation_for(user_word: UserWord, translation_language: str) -> str:
 
 def _format_next_review(when: datetime | None) -> str:
     if when is None:
-        return t("words.manage_next_review_none", _LANG)
+        return t("words.manage_next_review_none", get_current_language())
     when_date = when.date() if isinstance(when, datetime) else when
     today = date.today()
     if when_date == today:
@@ -81,17 +81,17 @@ def _format_next_review(when: datetime | None) -> str:
         label = "завтра"
     else:
         label = when_date.strftime("%d.%m.%Y")
-    return t("words.manage_next_review", _LANG, when=label)
+    return t("words.manage_next_review", get_current_language(), when=label)
 
 
 def _render_list_text(items, translation_language: str, page: int, total_pages: int) -> str:
-    lines = [t("words.title", _LANG), ""]
+    lines = [t("words.title", get_current_language()), ""]
     for i, uw in enumerate(items, start=1):
         lines.append(f"{i}. {uw.word.word} — {_translation_for(uw, translation_language)}")
     if total_pages > 1:
-        lines.append(t("words.page_footer", _LANG, page=page, total=total_pages))
+        lines.append(t("words.page_footer", get_current_language(), page=page, total=total_pages))
     lines.append("")
-    lines.append(t("words.prompt_number", _LANG))
+    lines.append(t("words.prompt_number", get_current_language()))
     return "\n".join(lines)
 
 
@@ -103,7 +103,7 @@ async def _render_page(send, session, context, *, user_id: int, language_code: s
 
     if not page_obj.items:
         context.user_data.pop("words_list", None)
-        await send(t("words.empty", _LANG), reply_markup=list_keyboard(has_previous=False, has_next=False))
+        await send(t("words.empty", get_current_language()), reply_markup=list_keyboard(has_previous=False, has_next=False))
         return
 
     context.user_data["words_list"] = {
@@ -125,7 +125,7 @@ async def _render_search_results(send, session, context, *, user_id: int, langua
 
     if not items:
         context.user_data.pop("words_list", None)
-        await send(t("words.search_not_found", _LANG), reply_markup=list_keyboard(has_previous=False, has_next=False))
+        await send(t("words.search_not_found", get_current_language()), reply_markup=list_keyboard(has_previous=False, has_next=False))
         return
 
     context.user_data["words_list"] = {
@@ -136,18 +136,18 @@ async def _render_search_results(send, session, context, *, user_id: int, langua
         "page": 1,
         "ids": [uw.id for uw in items],
     }
-    lines = [t("words.search_results_header", _LANG), ""]
+    lines = [t("words.search_results_header", get_current_language()), ""]
     for i, uw in enumerate(items, start=1):
         lines.append(f"{i}. {uw.word.word} — {_translation_for(uw, translation_language)}")
     lines.append("")
-    lines.append(t("words.prompt_number", _LANG))
+    lines.append(t("words.prompt_number", get_current_language()))
     await send("\n".join(lines), reply_markup=list_keyboard(has_previous=False, has_next=False))
 
 
 async def _refresh_list(send, session, context, *, user_id: int) -> None:
     cache = context.user_data.get("words_list")
     if cache is None:
-        await send(t("words.list_expired", _LANG))
+        await send(t("words.list_expired", get_current_language()))
         return
     if cache["kind"] == "search":
         await _render_search_results(
@@ -171,15 +171,15 @@ async def _render_manage_screen(
     if user_word is None:
         return
     header = (
-        t("words.manage_header", _LANG, number=number, word=user_word.word.word)
+        t("words.manage_header", get_current_language(), number=number, word=user_word.word.word)
         if number is not None
         else user_word.word.word
     )
     lines = [
         header,
         "",
-        t("words.manage_translation", _LANG, translation=_translation_for(user_word, translation_language)),
-        t("words.manage_status", _LANG, status=status_label(user_word.status)),
+        t("words.manage_translation", get_current_language(), translation=_translation_for(user_word, translation_language)),
+        t("words.manage_status", get_current_language(), status=status_label(user_word.status)),
         _format_next_review(user_word.next_review_at),
     ]
     await send("\n".join(lines), reply_markup=single_word_keyboard(user_word.id))
@@ -189,10 +189,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     async with session_scope() as session:
         user, current = await _current_language(session, update.effective_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
         if current is None:
-            await update.message.reply_text(t("card.no_language", _LANG))
+            await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
         if context.user_data.get("words_submode") == "search":
@@ -206,13 +206,13 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
         cache = context.user_data.get("words_list")
         if cache is None:
-            await update.message.reply_text(t("words.list_expired", _LANG))
+            await update.message.reply_text(t("words.list_expired", get_current_language()))
             return
 
         try:
             numbers = parse_number_list(text)
         except ValueError:
-            await update.message.reply_text(t("words.invalid_number", _LANG))
+            await update.message.reply_text(t("words.invalid_number", get_current_language()))
             return
 
         ids = cache["ids"]
@@ -220,7 +220,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if out_of_range:
             key = "words.bulk_out_of_range" if len(numbers) > 1 else "words.number_out_of_range"
             await update.message.reply_text(
-                t(key, _LANG, numbers=", ".join(str(n) for n in out_of_range))
+                t(key, get_current_language(), numbers=", ".join(str(n) for n in out_of_range))
             )
             return
 
@@ -235,7 +235,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         context.user_data["bulk_selection"] = selected_ids
         selected_words = await user_words_repo.get_user_words(session, user_id=user.id, language_code=current.language_code)
         by_id = {uw.id: uw for uw in selected_words}
-        lines = [t("words.bulk_header", _LANG)]
+        lines = [t("words.bulk_header", get_current_language())]
         for n in numbers:
             uw = by_id.get(ids[n - 1])
             if uw is not None:
@@ -250,7 +250,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
     async with session_scope() as session:
         user, current = await _current_language(session, query.from_user.id)
         if user is None or current is None:
-            await query.answer(t("card.no_language", _LANG), show_alert=True)
+            await query.answer(t("card.no_language", get_current_language()), show_alert=True)
             return
 
         edit = lambda text, reply_markup=None: query.edit_message_text(text, reply_markup=reply_markup)
@@ -258,7 +258,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if data == "words:filters":
             context.user_data.pop("words_list", None)
             await query.answer()
-            await edit(t("words.choose_filter", _LANG), reply_markup=filter_keyboard())
+            await edit(t("words.choose_filter", get_current_language()), reply_markup=filter_keyboard())
 
         elif data.startswith("words:filter:"):
             filter_code = data.removeprefix("words:filter:")
@@ -271,7 +271,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         elif data == "words:search":
             context.user_data["words_submode"] = "search"
             await query.answer()
-            await edit(t("words.search_prompt", _LANG))
+            await edit(t("words.search_prompt", get_current_language()))
 
         elif data == "words:add":
             # Reuses handlers/dictionary.py's free-text handler wholesale
@@ -285,14 +285,14 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data.pop("bulk_selection", None)
             context.user_data.pop("words_submode", None)
             await query.answer()
-            await edit(t("words.add_prompt", _LANG))
+            await edit(t("words.add_prompt", get_current_language()))
 
         elif data.startswith("words:page:"):
             direction = data.removeprefix("words:page:")
             cache = context.user_data.get("words_list")
             await query.answer()
             if cache is None or cache.get("kind") != "filter":
-                await edit(t("words.list_expired", _LANG))
+                await edit(t("words.list_expired", get_current_language()))
                 return
             new_page = cache["page"] + (1 if direction == "next" else -1)
             await _render_page(
@@ -309,7 +309,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             user_word = await user_words_repo.get_by_id(session, uw_id)
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.resume_word(session, user_word)
-                await query.answer(t("words.resumed_single", _LANG))
+                await query.answer(t("words.resumed_single", get_current_language()))
                 await _render_manage_screen(edit, session, uw_id, current.translation_language)
 
         elif data.startswith("uw:pause:"):
@@ -317,7 +317,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             user_word = await user_words_repo.get_by_id(session, uw_id)
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.pause_word(session, user_word)
-                await query.answer(t("words.paused_single", _LANG))
+                await query.answer(t("words.paused_single", get_current_language()))
                 await _render_manage_screen(edit, session, uw_id, current.translation_language)
 
         elif data.startswith("uw:delete:"):
@@ -326,7 +326,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             if user_word is not None and user_word.user_id == user.id:
                 await query.answer()
                 await edit(
-                    t("words.delete_confirm", _LANG, word=user_word.word.word),
+                    t("words.delete_confirm", get_current_language(), word=user_word.word.word),
                     reply_markup=delete_confirm_keyboard(uw_id),
                 )
 
@@ -335,7 +335,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             user_word = await user_words_repo.get_by_id(session, uw_id)
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.delete_word(session, user_word)
-                await query.answer(t("words.deleted", _LANG))
+                await query.answer(t("words.deleted", get_current_language()))
                 await _refresh_list(edit, session, context, user_id=user.id)
 
         elif data.startswith("uw:delete_cancel:"):
@@ -375,13 +375,13 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 count += 1
             context.user_data.pop("bulk_selection", None)
             key = "words.bulk_resumed" if data == "bulk:review" else "words.bulk_paused"
-            await query.answer(t(key, _LANG, count=count))
+            await query.answer(t(key, get_current_language(), count=count))
             await _refresh_list(edit, session, context, user_id=user.id)
 
         elif data == "bulk:delete":
             ids = context.user_data.get("bulk_selection") or []
             await query.answer()
-            await edit(t("words.delete_confirm_bulk", _LANG, count=len(ids)), reply_markup=bulk_delete_confirm_keyboard())
+            await edit(t("words.delete_confirm_bulk", get_current_language(), count=len(ids)), reply_markup=bulk_delete_confirm_keyboard())
 
         elif data == "bulk:delete_confirm":
             ids = context.user_data.get("bulk_selection") or []
@@ -393,12 +393,12 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 await user_word_service.delete_word(session, user_word)
                 count += 1
             context.user_data.pop("bulk_selection", None)
-            await query.answer(t("words.bulk_deleted", _LANG, count=count))
+            await query.answer(t("words.bulk_deleted", get_current_language(), count=count))
             await _refresh_list(edit, session, context, user_id=user.id)
 
         elif data == "bulk:cancel":
             context.user_data.pop("bulk_selection", None)
-            await query.answer(t("words.bulk_cancelled", _LANG))
+            await query.answer(t("words.bulk_cancelled", get_current_language()))
             await _refresh_list(edit, session, context, user_id=user.id)
 
 

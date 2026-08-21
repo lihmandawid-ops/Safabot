@@ -17,26 +17,26 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 
-_LANG = "ru"
 MODE = "grammar"
 
 
 async def start_grammar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["mode"] = MODE
-    await update.message.reply_text(t("grammar.prompt", _LANG))
+    await update.message.reply_text(t("grammar.prompt", get_current_language()))
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     async with session_scope() as session:
         user = await users_repo.get_by_telegram_id(session, update.effective_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
+        set_current_language(user.interface_language)
         current = await user_languages_repo.get_current_language(session, user.id)
         if current is None:
-            await update.message.reply_text(t("card.no_language", _LANG))
+            await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
         try:
@@ -48,10 +48,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 user_id=user.id,
             )
         except AIConfigurationError:
-            await update.message.reply_text(t("ai.not_configured", _LANG))
+            await update.message.reply_text(t("ai.not_configured", get_current_language()))
             return
         except AIError:
-            await update.message.reply_text(t("ai.generic_error", _LANG))
+            await update.message.reply_text(t("ai.generic_error", get_current_language()))
             return
 
         await update.message.reply_text(explanation)

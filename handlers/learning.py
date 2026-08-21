@@ -35,10 +35,9 @@ from handlers.words import MODE as WORDS_MODE
 from keyboards.words import filter_keyboard
 from services import learning_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 
-_LANG = "ru"
 MODE = "learning"
 
 
@@ -46,6 +45,7 @@ async def _current_user_and_language(session, telegram_id: int):
     user = await users_repo.get_by_telegram_id(session, telegram_id)
     if user is None:
         return None, None
+    set_current_language(user.interface_language)
     current = await user_languages_repo.get_current_language(session, user.id)
     return user, current
 
@@ -53,12 +53,12 @@ async def _current_user_and_language(session, telegram_id: int):
 def _render_front(user_word: UserWord) -> str:
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
     pronunciation = (
-        t("card.pronunciation_line", _LANG, pronunciation=user_word.word.pronunciation)
+        t("card.pronunciation_line", get_current_language(), pronunciation=user_word.word.pronunciation)
         if user_word.word.pronunciation
-        else t("card.pronunciation_placeholder", _LANG)
+        else t("card.pronunciation_placeholder", get_current_language())
     )
     return t(
-        "learning.card_front", _LANG,
+        "learning.card_front", get_current_language(),
         flag=lang.flag if lang else "", word=user_word.word.word, pronunciation=pronunciation,
     )
 
@@ -68,22 +68,22 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
     translation_lang = LANGUAGE_BY_CODE.get(translation_language)
     pronunciation = (
-        t("card.pronunciation_line", _LANG, pronunciation=user_word.word.pronunciation)
+        t("card.pronunciation_line", get_current_language(), pronunciation=user_word.word.pronunciation)
         if user_word.word.pronunciation
-        else t("card.pronunciation_placeholder", _LANG)
+        else t("card.pronunciation_placeholder", get_current_language())
     )
     translation_text = ", ".join(tr.translation for tr in card.translations)
 
     if card.examples:
         example = card.examples[0]
-        example_text = t("card.example_label", _LANG) + "\n" + example.example_text
+        example_text = t("card.example_label", get_current_language()) + "\n" + example.example_text
         if example.translation:
             example_text += "\n" + example.translation
     else:
-        example_text = t("card.no_examples", _LANG)
+        example_text = t("card.no_examples", get_current_language())
 
     return t(
-        "learning.card_back", _LANG,
+        "learning.card_back", get_current_language(),
         flag=lang.flag if lang else "", word=user_word.word.word, pronunciation=pronunciation,
         translation_flag=translation_lang.flag if translation_lang else "", translation=translation_text,
         example=example_text,
@@ -92,11 +92,11 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
 
 async def _show_current_word(edit, learning_session, translation_language: str) -> None:
     if learning_session is None:
-        await edit(t("learning.session_gone", _LANG))
+        await edit(t("learning.session_gone", get_current_language()))
         return
     item = sessions_repo.next_incomplete_item(learning_session)
     if item is None:
-        await edit(t("learning.nothing_to_do", _LANG))
+        await edit(t("learning.nothing_to_do", get_current_language()))
         return
     await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id, is_new_word=item.is_new_word))
 
@@ -109,7 +109,7 @@ async def _compute_intro(session, user, current, *, include_new_words: bool) -> 
     active = await sessions_repo.get_active_session(session, user_id=user.id, language_code=current.language_code)
     if active is not None and sessions_repo.next_incomplete_item(active) is not None:
         remaining = active.total_words - active.completed_words
-        return t("learning.resume", _LANG, count=remaining), continue_keyboard()
+        return t("learning.resume", get_current_language(), count=remaining), continue_keyboard()
 
     due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code)
     shortfall = False
@@ -126,26 +126,26 @@ async def _compute_intro(session, user, current, *, include_new_words: bool) -> 
             # AI-integration spec section 20/28: distinguish "nothing
             # to do" from "wanted to generate new words but couldn't" -
             # never leave the user guessing why the count is 0.
-            return t("learning.generation_unavailable", _LANG), (after_session_keyboard() if include_new_words else None)
+            return t("learning.generation_unavailable", get_current_language()), (after_session_keyboard() if include_new_words else None)
         key = "learning.nothing_to_do" if include_new_words else "learning.nothing_due"
-        return t(key, _LANG), (after_session_keyboard() if include_new_words else None)
+        return t(key, get_current_language()), (after_session_keyboard() if include_new_words else None)
 
     if include_new_words:
-        text = t("learning.ready", _LANG, count=total)
+        text = t("learning.ready", get_current_language(), count=total)
         if shortfall:
-            text += "\n\n" + t("learning.generation_unavailable", _LANG)
+            text += "\n\n" + t("learning.generation_unavailable", get_current_language())
         return text, start_keyboard()
-    return t("learning.ready_review", _LANG, count=total), start_review_keyboard()
+    return t("learning.ready_review", get_current_language(), count=total), start_review_keyboard()
 
 
 async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, include_new_words: bool) -> None:
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, update.effective_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
         if current is None:
-            await update.message.reply_text(t("card.no_language", _LANG))
+            await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
         text, keyboard = await _compute_intro(session, user, current, include_new_words=include_new_words)
@@ -170,7 +170,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, query.from_user.id)
         if user is None or current is None:
-            await query.answer(t("card.no_language", _LANG), show_alert=True)
+            await query.answer(t("card.no_language", get_current_language()), show_alert=True)
             return
 
         if data == "learn:start":
@@ -201,7 +201,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "learn:extra":
             await query.answer()
-            await edit(t("learning.extra_prompt", _LANG), reply_markup=extra_amount_keyboard())
+            await edit(t("learning.extra_prompt", get_current_language()), reply_markup=extra_amount_keyboard())
 
         elif data.startswith("learn:extra:"):
             amount = int(data.removeprefix("learn:extra:"))
@@ -210,11 +210,11 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 session, user=user, user_language=current, amount=amount
             )
             if result.limit_reached:
-                text = t("learning.extra_limit_reached", _LANG)
+                text = t("learning.extra_limit_reached", get_current_language())
             elif not result.words:
-                text = t("learning.extra_unavailable", _LANG)
+                text = t("learning.extra_unavailable", get_current_language())
             else:
-                text = t("learning.extra_added", _LANG, count=len(result.words))
+                text = t("learning.extra_added", get_current_language(), count=len(result.words))
             await edit(text, reply_markup=after_session_keyboard())
 
         elif data == "learn:mywords":
@@ -223,7 +223,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             context.user_data.pop("words_list", None)
             context.user_data.pop("bulk_selection", None)
             context.user_data.pop("words_submode", None)
-            await edit(t("words.choose_filter", _LANG), reply_markup=filter_keyboard())
+            await edit(t("words.choose_filter", get_current_language()), reply_markup=filter_keyboard())
 
         elif data.startswith("learn:know:"):
             # Answer the callback query BEFORE mark_known_and_replace, not
@@ -238,20 +238,20 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 session, user_id=user.id, language_code=current.language_code
             )
             if learning_session is None:
-                await edit(t("learning.session_gone", _LANG))
+                await edit(t("learning.session_gone", get_current_language()))
                 return
             item = await learning_service.mark_known_and_replace(
                 session, user=user, user_language=current, learning_session=learning_session, user_word_id=user_word_id
             )
             if item is None:
-                await edit(t("learning.session_gone", _LANG))
+                await edit(t("learning.session_gone", get_current_language()))
                 return
             finished = await learning_service.finish_session_if_complete(session, user, learning_session)
             if finished:
                 stats = sessions_repo.session_stats(learning_session)
                 await edit(
                     t(
-                        "learning.completion", _LANG,
+                        "learning.completion", get_current_language(),
                         total=stats["total_reviewed"], new_words=stats["new_words"],
                         correct=stats["correct"], wrong=stats["wrong"], streak=user.current_streak,
                     ),
@@ -268,7 +268,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             item = sessions_repo.next_incomplete_item(learning_session) if learning_session else None
             if item is None or item.user_word_id != user_word_id:
                 await query.answer()
-                await edit(t("learning.session_gone", _LANG))
+                await edit(t("learning.session_gone", get_current_language()))
                 return
             await query.answer()
             await edit(
@@ -286,13 +286,13 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             )
             if learning_session is None:
                 await query.answer()
-                await edit(t("learning.session_gone", _LANG))
+                await edit(t("learning.session_gone", get_current_language()))
                 return
 
             item = await learning_service.record_review_answer(session, learning_session, user_word_id, grade=grade)
             if item is None:
                 await query.answer()
-                await edit(t("learning.session_gone", _LANG))
+                await edit(t("learning.session_gone", get_current_language()))
                 return
 
             await query.answer()
@@ -301,7 +301,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 stats = sessions_repo.session_stats(learning_session)
                 await edit(
                     t(
-                        "learning.completion", _LANG,
+                        "learning.completion", get_current_language(),
                         total=stats["total_reviewed"], new_words=stats["new_words"],
                         correct=stats["correct"], wrong=stats["wrong"], streak=user.current_streak,
                     ),

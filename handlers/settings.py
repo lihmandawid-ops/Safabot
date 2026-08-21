@@ -41,15 +41,15 @@ from keyboards.settings import (
     timezone_pick_keyboard,
     timezone_search_results_keyboard,
 )
+from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
-from utils.i18n import t
-from utils.languages import LANGUAGE_BY_CODE
+from utils.i18n import get_current_language, set_current_language, t
+from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
 from utils.timezones import TIMEZONE_BY_NAME, is_valid_timezone, search_timezones
 
 logger = get_logger(__name__)
 
-_LANG = "ru"
 MODE = "settings_timezone_search"
 
 
@@ -58,43 +58,43 @@ async def _build_summary(session, user) -> str:
     interface_lang = LANGUAGE_BY_CODE.get(user.interface_language)
 
     lines = [
-        t("settings.title", _LANG),
+        t("settings.title", get_current_language()),
         "",
         t(
             "settings.interface_language",
-            _LANG,
+            get_current_language(),
             flag=interface_lang.flag if interface_lang else "",
-            name=interface_lang.name_ru if interface_lang else user.interface_language,
+            name=language_display_name(interface_lang) if interface_lang else user.interface_language,
         ),
-        t("settings.level", _LANG, level=t(f"level.{user.level}", _LANG)),
-        t("settings.daily_words", _LANG, count=user.daily_new_words),
-        t("settings.timezone", _LANG, timezone=user.timezone),
+        t("settings.level", get_current_language(), level=t(f"level.{user.level}", get_current_language())),
+        t("settings.daily_words", get_current_language(), count=user.daily_new_words),
+        t("settings.timezone", get_current_language(), timezone=user.timezone),
         "",
-        t("settings.notifications_on", _LANG)
+        t("settings.notifications_on", get_current_language())
         if user.notifications_enabled
-        else t("settings.notifications_off", _LANG),
-        t("settings.morning_time", _LANG, time=user.morning_time.strftime("%H:%M")),
-        t("settings.afternoon_time", _LANG, time=user.afternoon_time.strftime("%H:%M")),
-        t("settings.evening_time", _LANG, time=user.evening_time.strftime("%H:%M")),
+        else t("settings.notifications_off", get_current_language()),
+        t("settings.morning_time", get_current_language(), time=user.morning_time.strftime("%H:%M")),
+        t("settings.afternoon_time", get_current_language(), time=user.afternoon_time.strftime("%H:%M")),
+        t("settings.evening_time", get_current_language(), time=user.evening_time.strftime("%H:%M")),
         "",
-        t("settings.subscription", _LANG, status=t(f"subscription.status.{user.subscription_status}", _LANG)),
+        t("settings.subscription", get_current_language(), status=t(f"subscription.status.{user.subscription_status}", get_current_language())),
     ]
     if user.trial_end:
-        lines.append(t("settings.trial_until", _LANG, date=user.trial_end.isoformat()))
+        lines.append(t("settings.trial_until", get_current_language(), date=user.trial_end.isoformat()))
 
     if languages:
         lines.append("")
-        lines.append(t("settings.your_languages", _LANG))
+        lines.append(t("settings.your_languages", get_current_language()))
         for ul in languages:
             lang = LANGUAGE_BY_CODE.get(ul.language_code)
             lines.append(
                 t(
                     "settings.language_row",
-                    _LANG,
+                    get_current_language(),
                     flag=lang.flag if lang else "",
-                    name=lang.name_ru if lang else ul.language_code,
-                    level=t(f"level.{ul.level}", _LANG),
-                    current_marker=t("settings.current_marker", _LANG) if ul.is_current else "",
+                    name=language_display_name(lang) if lang else ul.language_code,
+                    level=t(f"level.{ul.level}", get_current_language()),
+                    current_marker=t("settings.current_marker", get_current_language()) if ul.is_current else "",
                 )
             )
 
@@ -107,8 +107,9 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     async with session_scope() as session:
         user = await users_repo.get_by_telegram_id(session, telegram_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
+        set_current_language(user.interface_language)
 
         user = await subscription_service.refresh_expired_trial(session, user)
         summary = await _build_summary(session, user)
@@ -123,17 +124,19 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     (see handlers/menu.py's router)."""
     matches = search_timezones(text)
     if not matches:
-        await update.message.reply_text(t("settings.timezone_search_empty", _LANG))
+        await update.message.reply_text(t("settings.timezone_search_empty", get_current_language()))
         return
     await update.message.reply_text(
-        t("settings.timezone_search_results", _LANG), reply_markup=timezone_search_results_keyboard(matches)
+        t("settings.timezone_search_results", get_current_language()), reply_markup=timezone_search_results_keyboard(matches)
     )
 
 
 async def _get_user_or_warn(session, query) -> object | None:
     user = await users_repo.get_by_telegram_id(session, query.from_user.id)
     if user is None:
-        await query.answer(t("settings.profile_not_found", _LANG), show_alert=True)
+        await query.answer(t("settings.profile_not_found", get_current_language()), show_alert=True)
+        return None
+    set_current_language(user.interface_language)
     return user
 
 
@@ -171,7 +174,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 else get_settings().plan_limits.free_max_languages
             )
             await query.edit_message_text(
-                t("settings.pick_current_language", _LANG),
+                t("settings.pick_current_language", get_current_language()),
                 reply_markup=language_switch_keyboard(languages, can_add_more=len(languages) < max_languages),
             )
 
@@ -183,11 +186,11 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 else get_settings().plan_limits.free_max_languages
             )
             if len(languages) >= max_languages:
-                await query.answer(t("settings.add_language_limit_reached", _LANG, max=max_languages), show_alert=True)
+                await query.answer(t("settings.add_language_limit_reached", get_current_language(), max=max_languages), show_alert=True)
                 return
             await query.answer()
             await query.edit_message_text(
-                t("settings.add_language_pick_learning", _LANG),
+                t("settings.add_language_pick_learning", get_current_language()),
                 reply_markup=settings_add_learning_language_keyboard(),
             )
 
@@ -196,7 +199,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             learning_code = data.removeprefix("set:addlang:learn:")
             lang = LANGUAGE_BY_CODE[learning_code]
             await query.edit_message_text(
-                t("settings.add_language_pick_translation", _LANG, flag=lang.flag, name=lang.name_ru),
+                t("settings.add_language_pick_translation", get_current_language(), flag=lang.flag, name=language_display_name(lang)),
                 reply_markup=settings_add_translation_language_keyboard(learning_language=learning_code),
             )
 
@@ -204,7 +207,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             learning_code, translation_code = data.removeprefix("set:addlang:trans:").split(":")
             await query.edit_message_text(
-                t("settings.pick_level", _LANG),
+                t("settings.pick_level", get_current_language()),
                 reply_markup=add_language_level_keyboard(learning_code, translation_code),
             )
 
@@ -213,7 +216,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             learning_code, translation_code, level = data.removeprefix("set:addlang:level:").split(":")
             options = get_settings().plan_limits.daily_new_words_options
             await query.edit_message_text(
-                t("settings.pick_daily_words", _LANG),
+                t("settings.pick_daily_words", get_current_language()),
                 reply_markup=add_language_words_keyboard(learning_code, translation_code, level, options),
             )
 
@@ -225,11 +228,11 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                     translation_language=translation_code, level=level, daily_new_words=int(count),
                 )
             except user_languages_repo.DuplicateUserLanguageError:
-                await query.answer(t("settings.add_language_duplicate", _LANG), show_alert=True)
+                await query.answer(t("settings.add_language_duplicate", get_current_language()), show_alert=True)
                 return
             await user_languages_repo.set_active_language(session, user_id=user.id, user_language_id=new_language.id)
             lang = LANGUAGE_BY_CODE[learning_code]
-            await query.answer(t("settings.add_language_added", _LANG, flag=lang.flag, name=lang.name_ru))
+            await query.answer(t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)))
             await _render_home(query, session, user)
 
         elif data.startswith("set:lang:pick:"):
@@ -241,9 +244,9 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer(
                 t(
                     "settings.current_language_updated",
-                    _LANG,
+                    get_current_language(),
                     flag=lang.flag if lang else "",
-                    name=lang.name_ru if lang else target.language_code,
+                    name=language_display_name(lang) if lang else target.language_code,
                 )
             )
             await _render_home(query, session, user)
@@ -251,22 +254,30 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data == "set:iface:list":
             await query.answer()
             await query.edit_message_text(
-                t("settings.pick_interface_language", _LANG),
+                t("settings.pick_interface_language", get_current_language()),
                 reply_markup=interface_language_pick_keyboard(),
             )
 
         elif data.startswith("set:iface:pick:"):
             code = data.removeprefix("set:iface:pick:")
             await users_repo.update_user(session, user, interface_language=code)
+            set_current_language(code)
             lang = LANGUAGE_BY_CODE[code]
-            await query.answer(t("settings.interface_language_updated", _LANG, flag=lang.flag, name=lang.name_ru))
+            await query.answer(t("settings.interface_language_updated", code, flag=lang.flag, name=language_display_name(lang, code)))
             await _render_home(query, session, user)
+            # The persistent reply keyboard at the bottom carries no
+            # callback_data - it only updates when a NEW ReplyKeyboardMarkup
+            # is sent, so the language switch has to explicitly resend it,
+            # not just edit the inline settings screen above.
+            await query.message.reply_text(
+                t("settings.main_menu_updated", code), reply_markup=main_menu_keyboard(code)
+            )
 
         elif data == "set:words:list":
             await query.answer()
             options = get_settings().plan_limits.daily_new_words_options
             await query.edit_message_text(
-                t("settings.pick_daily_words", _LANG), reply_markup=daily_words_pick_keyboard(options)
+                t("settings.pick_daily_words", get_current_language()), reply_markup=daily_words_pick_keyboard(options)
             )
 
         elif data.startswith("set:words:pick:"):
@@ -274,20 +285,20 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             current = await user_languages_repo.get_current_language(session, user.id)
             if current is not None:
                 await user_languages_repo.set_daily_new_words(session, current, count)
-            await query.answer(t("settings.daily_words_updated", _LANG, count=count))
+            await query.answer(t("settings.daily_words_updated", get_current_language(), count=count))
             await _render_home(query, session, user)
 
         elif data == "set:notif:slots":
             await query.answer()
             await query.edit_message_text(
-                t("settings.pick_notification_slot", _LANG), reply_markup=notification_slot_keyboard()
+                t("settings.pick_notification_slot", get_current_language()), reply_markup=notification_slot_keyboard()
             )
 
         elif data.startswith("set:notif:slot:"):
             await query.answer()
             slot = data.removeprefix("set:notif:slot:")
             await query.edit_message_text(
-                t("settings.pick_notification_time", _LANG), reply_markup=notification_time_keyboard(slot)
+                t("settings.pick_notification_time", get_current_language()), reply_markup=notification_time_keyboard(slot)
             )
 
         elif data.startswith("set:notif:time:"):
@@ -302,8 +313,8 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer(
                 t(
                     "settings.notification_time_updated",
-                    _LANG,
-                    slot=t(f"notification_slot.{slot}", _LANG),
+                    get_current_language(),
+                    slot=t(f"notification_slot.{slot}", get_current_language()),
                     time=parsed.strftime("%H:%M"),
                 )
             )
@@ -313,50 +324,50 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             new_value = not user.notifications_enabled
             await users_repo.update_user(session, user, notifications_enabled=new_value)
             await query.answer(
-                t("settings.notifications_toggled_on" if new_value else "settings.notifications_toggled_off", _LANG)
+                t("settings.notifications_toggled_on" if new_value else "settings.notifications_toggled_off", get_current_language())
             )
             await _render_home(query, session, user)
 
         elif data == "set:level:list":
             await query.answer()
             await query.edit_message_text(
-                t("settings.pick_level", _LANG), reply_markup=level_pick_keyboard()
+                t("settings.pick_level", get_current_language()), reply_markup=level_pick_keyboard()
             )
 
         elif data.startswith("set:level:pick:"):
             level = data.removeprefix("set:level:pick:")
             await users_repo.update_user(session, user, level=level)
-            await query.answer(t("settings.level_updated", _LANG, level=t(f"level.{level}", _LANG)))
+            await query.answer(t("settings.level_updated", get_current_language(), level=t(f"level.{level}", get_current_language())))
             await _render_home(query, session, user)
 
         elif data == "set:tz:list":
             await query.answer()
             context.user_data.pop("mode", None)
-            await query.edit_message_text(t("settings.pick_timezone", _LANG), reply_markup=timezone_pick_keyboard())
+            await query.edit_message_text(t("settings.pick_timezone", get_current_language()), reply_markup=timezone_pick_keyboard())
 
         elif data == "set:tz:search":
             await query.answer()
             context.user_data["mode"] = MODE
-            await query.edit_message_text(t("settings.timezone_search_prompt", _LANG))
+            await query.edit_message_text(t("settings.timezone_search_prompt", get_current_language()))
 
         elif data.startswith("set:tz:pick:"):
             iana_name = data.removeprefix("set:tz:pick:")
             if not is_valid_timezone(iana_name):
-                await query.answer(t("settings.timezone_search_empty", _LANG), show_alert=True)
+                await query.answer(t("settings.timezone_search_empty", get_current_language()), show_alert=True)
                 return
             context.user_data.pop("mode", None)
             await users_repo.update_user(session, user, timezone=iana_name)
             label = TIMEZONE_BY_NAME[iana_name].label if iana_name in TIMEZONE_BY_NAME else iana_name
-            await query.answer(t("settings.timezone_updated", _LANG, name=label))
+            await query.answer(t("settings.timezone_updated", get_current_language(), name=label))
             await _render_home(query, session, user)
 
         elif data == "set:sub":
             await query.answer()
             user = await subscription_service.refresh_expired_trial(session, user)
-            status_line = t("settings.subscription", _LANG, status=t(f"subscription.status.{user.subscription_status}", _LANG))
+            status_line = t("settings.subscription", get_current_language(), status=t(f"subscription.status.{user.subscription_status}", get_current_language()))
             lines = [status_line]
             if user.trial_end:
-                lines.append(t("settings.trial_until", _LANG, date=user.trial_end.isoformat()))
+                lines.append(t("settings.trial_until", get_current_language(), date=user.trial_end.isoformat()))
             await query.edit_message_text("\n".join(lines), reply_markup=back_to_settings_keyboard())
 
         else:

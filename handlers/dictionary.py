@@ -27,11 +27,10 @@ from keyboards.dictionary import (
 from services import dictionary_service, user_word_service, word_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 from utils.text import split_word_batch, truncate_text
 from utils.word_display import render_forms_text, render_word_card_text, status_label
 
-_LANG = "ru"
 MODE = "dictionary"
 # Bugfix stage, real-Telegram feedback: 💡 Как использовать? must stay a
 # short chat message rather than a wall of text - the prompt asks the AI
@@ -49,13 +48,14 @@ async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE, *, en
     context.user_data["mode"] = MODE
     context.user_data["dictionary_entry_source"] = entry_source
     prompt_key = "words.add_prompt" if entry_source == "manual" else "dictionary.prompt"
-    await update.message.reply_text(t(prompt_key, _LANG))
+    await update.message.reply_text(t(prompt_key, get_current_language()))
 
 
 async def _current_language(session, telegram_id: int):
     user = await users_repo.get_by_telegram_id(session, telegram_id)
     if user is None:
         return None, None
+    set_current_language(user.interface_language)
     current = await user_languages_repo.get_current_language(session, user.id)
     return user, current
 
@@ -72,10 +72,10 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     async with session_scope() as session:
         user, current = await _current_language(session, update.effective_user.id)
         if user is None:
-            await update.message.reply_text(t("settings.profile_not_found", _LANG))
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
             return
         if current is None:
-            await update.message.reply_text(t("card.no_language", _LANG))
+            await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
         raw_words = split_word_batch(text)
@@ -95,7 +95,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
         if not results:
-            await update.message.reply_text(t("dictionary.not_found", _LANG))
+            await update.message.reply_text(t("dictionary.not_found", get_current_language()))
             return
 
         if len(results) == 1:
@@ -103,7 +103,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         await update.message.reply_text(
-            t("dictionary.results_header", _LANG), reply_markup=search_results_keyboard(results)
+            t("dictionary.results_header", get_current_language()), reply_markup=search_results_keyboard(results)
         )
 
 
@@ -149,20 +149,20 @@ async def add_word_batch(send, session, *, user, current, raw_words: list[str], 
             if result.outcome == "offer_resume_paused":
                 paused_buttons.append((result.user_word.id, word.word))
 
-    lines = [t("words.batch_header", _LANG)]
+    lines = [t("words.batch_header", get_current_language())]
     if added:
         lines.append("")
-        lines.append(t("words.batch_added_header", _LANG, count=len(added)))
+        lines.append(t("words.batch_added_header", get_current_language(), count=len(added)))
         lines.extend(
             f"{i}. {word} — {translation}" if translation else f"{i}. {word}" for i, word, translation in added
         )
     if already:
         lines.append("")
-        lines.append(t("words.batch_already_header", _LANG, count=len(already)))
+        lines.append(t("words.batch_already_header", get_current_language(), count=len(already)))
         lines.extend(f"{i}. {word} ({status_label(status)})" for i, word, status in already)
     if failed:
         lines.append("")
-        lines.append(t("words.batch_failed_header", _LANG, count=len(failed)))
+        lines.append(t("words.batch_failed_header", get_current_language(), count=len(failed)))
         lines.extend(f"{i}. {raw_word}" for i, raw_word in failed)
 
     keyboard = batch_resume_keyboard(paused_buttons) if paused_buttons else None
@@ -188,7 +188,7 @@ async def _explain_word_text(card, current, user) -> str:
         pass
 
     notes = [tr.usage_note for tr in card.translations if tr.usage_note]
-    return notes[0] if notes else t("card.usage_placeholder", _LANG)
+    return notes[0] if notes else t("card.usage_placeholder", get_current_language())
 
 
 async def _send_card(send, session, word_id: int, translation_language: str) -> None:
@@ -205,7 +205,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
     async with session_scope() as session:
         user, current = await _current_language(session, query.from_user.id)
         if user is None or current is None:
-            await query.answer(t("card.no_language", _LANG), show_alert=True)
+            await query.answer(t("card.no_language", get_current_language()), show_alert=True)
             return
 
         if data.startswith("dict:open:"):
@@ -220,7 +220,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
 
         elif data == "dict:back":
             await query.answer()
-            await query.edit_message_text(t("dictionary.prompt", _LANG))
+            await query.edit_message_text(t("dictionary.prompt", get_current_language()))
 
         elif data.startswith("card:add:"):
             word_id = int(data.removeprefix("card:add:"))
@@ -229,36 +229,36 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
             )
             if result.outcome == "created":
                 result.user_word.source = _word_source(_entry_source(context))
-                await query.answer(t("dictionary.added", _LANG), show_alert=True)
+                await query.answer(t("dictionary.added", get_current_language()), show_alert=True)
             elif result.outcome == "restored_from_deleted":
                 result.user_word.source = _word_source(_entry_source(context))
-                await query.answer(t("dictionary.restored", _LANG), show_alert=True)
+                await query.answer(t("dictionary.restored", get_current_language()), show_alert=True)
             elif result.outcome == "offer_resume_paused":
                 await query.answer()
                 await query.message.reply_text(
-                    t("dictionary.offer_resume", _LANG), reply_markup=resume_offer_keyboard(result.user_word.id)
+                    t("dictionary.offer_resume", get_current_language()), reply_markup=resume_offer_keyboard(result.user_word.id)
                 )
             else:
                 # already_active: never a silent generic message (bugfix
                 # spec) - show the word's real current status so the user
                 # understands why nothing changed.
                 await query.answer(
-                    t("dictionary.already_active_status", _LANG, status=status_label(result.user_word.status)),
+                    t("dictionary.already_active_status", get_current_language(), status=status_label(result.user_word.status)),
                     show_alert=True,
                 )
 
         elif data.startswith("card:forms:"):
             word_id = int(data.removeprefix("card:forms:"))
             card = await word_service.get_word_card(session, word_id=word_id)
-            await query.answer(render_forms_text(card) if card else t("card.no_forms", _LANG), show_alert=True)
+            await query.answer(render_forms_text(card) if card else t("card.no_forms", get_current_language()), show_alert=True)
 
         elif data.startswith("card:pronounce:"):
             word_id = int(data.removeprefix("card:pronounce:"))
             card = await word_service.get_word_card(session, word_id=word_id)
             text = (
-                t("card.pronunciation_line", _LANG, pronunciation=card.word.pronunciation)
+                t("card.pronunciation_line", get_current_language(), pronunciation=card.word.pronunciation)
                 if card and card.word.pronunciation
-                else t("card.pronunciation_placeholder", _LANG)
+                else t("card.pronunciation_placeholder", get_current_language())
             )
             await query.answer(text, show_alert=True)
 
@@ -267,7 +267,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
             card = await word_service.get_word_card(session, word_id=word_id, translation_language=current.translation_language)
             await query.answer()
             if card is None:
-                await query.message.reply_text(t("card.usage_placeholder", _LANG))
+                await query.message.reply_text(t("card.usage_placeholder", get_current_language()))
                 return
             await query.message.reply_text(await _explain_word_text(card, current, user))
 
@@ -277,7 +277,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.resume_word(session, user_word)
                 await query.answer()
-                await query.edit_message_text(t("words.resumed_single", _LANG))
+                await query.edit_message_text(t("words.resumed_single", get_current_language()))
 
         elif data.startswith("dict:resume_no:"):
             await query.answer()

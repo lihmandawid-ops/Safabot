@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from utils.languages import SUPPORTED_LANGUAGES
+from utils.languages import SUPPORTED_LANGUAGES, language_display_name
 
 INTERFACE_LANGUAGE_PREFIX = "onb:iface:"
 LEARNING_LANGUAGE_PREFIX = "onb:learn:"
@@ -14,7 +14,7 @@ TRANSLATION_LANGUAGE_PREFIX = "onb:trans:"
 
 def _language_keyboard(callback_prefix: str, *, exclude: str | None = None) -> InlineKeyboardMarkup:
     buttons = [
-        InlineKeyboardButton(f"{lang.flag} {lang.name_ru}", callback_data=f"{callback_prefix}{lang.code}")
+        InlineKeyboardButton(f"{lang.flag} {language_display_name(lang)}", callback_data=f"{callback_prefix}{lang.code}")
         for lang in SUPPORTED_LANGUAGES
         if lang.code != exclude
     ]
@@ -50,7 +50,7 @@ def settings_add_learning_language_keyboard() -> InlineKeyboardMarkup:
 def settings_add_translation_language_keyboard(*, learning_language: str) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(
-            f"{lang.flag} {lang.name_ru}",
+            f"{lang.flag} {language_display_name(lang)}",
             callback_data=f"{ADD_LANGUAGE_TRANS_PREFIX}{learning_language}:{lang.code}",
         )
         for lang in SUPPORTED_LANGUAGES

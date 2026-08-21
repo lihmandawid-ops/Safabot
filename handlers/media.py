@@ -23,19 +23,32 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import get_settings
+from database.database import session_scope
+from database.repositories import users as users_repo
 from handlers import text_analysis as text_analysis_handler
 from services.media_errors import OCRConfigurationError, OCRError, STTConfigurationError, STTError
 from services.ocr_service import get_ocr_service
 from services.stt_service import get_stt_service
-from utils.i18n import t
+from utils.i18n import get_current_language, set_current_language, t
 from utils.logging import get_logger
 from utils.media import MediaDownloadError, MediaTooLargeError, download_telegram_file
 
-_LANG = "ru"
 logger = get_logger(__name__)
 
 
+async def _set_language_for(telegram_id: int) -> None:
+    """Photo/voice messages are registered as standalone MessageHandlers
+    in bot.py (bypassing handlers/menu.py's router entirely, since they
+    must fire on any incoming photo/voice regardless of menu state), so
+    unlike most handlers they need their own lookup to pick up the user's
+    interface_language."""
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, telegram_id)
+    set_current_language(user.interface_language if user else None)
+
+
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _set_language_for(update.effective_user.id)
     settings = get_settings()
     photo = update.message.photo[-1]  # PhotoSize list is ordered smallest -> largest
 
@@ -44,11 +57,11 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
             context.bot, photo.file_id, max_size_bytes=settings.max_image_size_bytes
         )
     except MediaTooLargeError:
-        await update.message.reply_text(t("media.photo_too_large", _LANG))
+        await update.message.reply_text(t("media.photo_too_large", get_current_language()))
         return
     except MediaDownloadError as exc:
         logger.warning("Photo download failed: %s", exc)
-        await update.message.reply_text(t("media.download_failed", _LANG))
+        await update.message.reply_text(t("media.download_failed", get_current_language()))
         return
 
     try:
@@ -56,22 +69,23 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
             image_bytes, mime_type="image/jpeg", user_id=update.effective_user.id
         )
     except OCRConfigurationError:
-        await update.message.reply_text(t("media.ocr_not_configured", _LANG))
+        await update.message.reply_text(t("media.ocr_not_configured", get_current_language()))
         return
     except OCRError as exc:
         logger.warning("OCR failed user_id=%s error=%s", update.effective_user.id, type(exc).__name__)
-        await update.message.reply_text(t("media.ocr_failed", _LANG))
+        await update.message.reply_text(t("media.ocr_failed", get_current_language()))
         return
 
     if not text.strip():
-        await update.message.reply_text(t("media.ocr_empty", _LANG))
+        await update.message.reply_text(t("media.ocr_empty", get_current_language()))
         return
 
-    await update.message.reply_text(t("media.photo_recognized", _LANG, text=text))
+    await update.message.reply_text(t("media.photo_recognized", get_current_language(), text=text))
     await text_analysis_handler.handle_text_input(update, context, text)
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _set_language_for(update.effective_user.id)
     settings = get_settings()
     voice = update.message.voice or update.message.audio
     mime_type = voice.mime_type or "audio/ogg"
@@ -82,11 +96,11 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             context.bot, voice.file_id, max_size_bytes=settings.max_audio_size_bytes
         )
     except MediaTooLargeError:
-        await update.message.reply_text(t("media.audio_too_large", _LANG))
+        await update.message.reply_text(t("media.audio_too_large", get_current_language()))
         return
     except MediaDownloadError as exc:
         logger.warning("Voice download failed: %s", exc)
-        await update.message.reply_text(t("media.download_failed", _LANG))
+        await update.message.reply_text(t("media.download_failed", get_current_language()))
         return
 
     try:
@@ -94,18 +108,18 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             audio_bytes, mime_type=mime_type, filename=filename, user_id=update.effective_user.id
         )
     except STTConfigurationError:
-        await update.message.reply_text(t("media.stt_not_configured", _LANG))
+        await update.message.reply_text(t("media.stt_not_configured", get_current_language()))
         return
     except STTError as exc:
         logger.warning("Speech-to-text failed user_id=%s error=%s", update.effective_user.id, type(exc).__name__)
-        await update.message.reply_text(t("media.stt_failed", _LANG))
+        await update.message.reply_text(t("media.stt_failed", get_current_language()))
         return
 
     if not text.strip():
-        await update.message.reply_text(t("media.stt_empty", _LANG))
+        await update.message.reply_text(t("media.stt_empty", get_current_language()))
         return
 
-    await update.message.reply_text(t("media.voice_recognized", _LANG, text=text))
+    await update.message.reply_text(t("media.voice_recognized", get_current_language(), text=text))
     await text_analysis_handler.handle_text_input(update, context, text)
 
 
@@ -113,9 +127,9 @@ async def prompt_for_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """📷 Разобрать фото main-menu button: just points the user at sending
     a photo - the actual processing (handle_photo_message) is wired to
     fire on any incoming photo regardless of menu state."""
-    await update.message.reply_text(t("media.photo_prompt", _LANG))
+    await update.message.reply_text(t("media.photo_prompt", get_current_language()))
 
 
 async def prompt_for_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """🎤 Разобрать голос main-menu button - same idea as prompt_for_photo."""
-    await update.message.reply_text(t("media.voice_prompt", _LANG))
+    await update.message.reply_text(t("media.voice_prompt", get_current_language()))
