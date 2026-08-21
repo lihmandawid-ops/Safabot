@@ -293,5 +293,29 @@
   "notification.afternoon.button": "▶️ Review",
   "notification.evening.due": "🌙 A quick review before bed.\n\n🔄 Remaining: {due_count} words.",
   "notification.evening.button": "▶️ Review",
-  "notification.evening.done": "✅ Today's learning is done!\n\nGreat work."
+  "notification.evening.done": "✅ Today's learning is done!\n\nGreat work.",
+
+  "quiz.no_words": "You don't have enough words for a quiz yet. Add a few words in 📖 Dictionary first!",
+  "quiz.no_mistakes": "No mistakes last time - great job!",
+  "quiz.progress": "Question {current} of {total}",
+  "quiz.prompt.word_to_translation": "🏆 How does this word translate: {value}?",
+  "quiz.prompt.translation_to_word": "🏆 Which word translates as: {value}?",
+  "quiz.prompt.mc_translation": "🏆 Pick the correct translation of: {value}",
+  "quiz.prompt.mc_word": "🏆 Pick the word that translates as: {value}",
+  "quiz.prompt.fill_in_blank": "🏆 Fill in the blank:\n\n{value}",
+  "quiz.reveal_answer": "Answer: {answer}",
+  "quiz.selfgrade_prompt": "Did you answer correctly?",
+  "quiz.feedback.correct": "✅ Correct!",
+  "quiz.feedback.wrong": "❌ Wrong. The correct answer is: {answer}",
+  "quiz.results": "🏆 Quiz finished!\n\n✅ Correct: {correct}\n❌ Mistakes: {wrong}\n🎯 Accuracy: {accuracy}%",
+
+  "quiz.button.start": "🏆 Quiz",
+  "quiz.button.reveal": "👁 Show answer",
+  "quiz.button.correct": "✅ Yes",
+  "quiz.button.wrong": "❌ No",
+  "quiz.button.next": "▶️ Next",
+  "quiz.button.finish": "🏁 Results",
+  "quiz.button.retry_wrong": "🔁 Retry mistakes",
+  "quiz.button.new_quiz": "🏆 New quiz",
+  "quiz.button.main_menu": "⬅️ Main menu"
 }

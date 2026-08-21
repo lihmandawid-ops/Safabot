@@ -293,5 +293,29 @@
   "notification.afternoon.button": "▶️ Повторить",
   "notification.evening.due": "🌙 Небольшое повторение перед сном.\n\n🔄 Осталось: {due_count} слов.",
   "notification.evening.button": "▶️ Повторить",
-  "notification.evening.done": "✅ Сегодняшнее обучение выполнено!\n\nОтличная работа."
+  "notification.evening.done": "✅ Сегодняшнее обучение выполнено!\n\nОтличная работа.",
+
+  "quiz.no_words": "У тебя пока недостаточно слов для викторины. Сначала добавь несколько слов в 📖 Словарь!",
+  "quiz.no_mistakes": "В прошлый раз не было ошибок — отличная работа!",
+  "quiz.progress": "Вопрос {current} из {total}",
+  "quiz.prompt.word_to_translation": "🏆 Как переводится слово: {value}?",
+  "quiz.prompt.translation_to_word": "🏆 Какое слово переводится как: {value}?",
+  "quiz.prompt.mc_translation": "🏆 Выбери правильный перевод слова: {value}",
+  "quiz.prompt.mc_word": "🏆 Выбери слово, которое переводится как: {value}",
+  "quiz.prompt.fill_in_blank": "🏆 Заполни пропуск:\n\n{value}",
+  "quiz.reveal_answer": "Ответ: {answer}",
+  "quiz.selfgrade_prompt": "Ты ответил(а) правильно?",
+  "quiz.feedback.correct": "✅ Верно!",
+  "quiz.feedback.wrong": "❌ Неверно. Правильный ответ: {answer}",
+  "quiz.results": "🏆 Викторина завершена!\n\n✅ Правильно: {correct}\n❌ Ошибок: {wrong}\n🎯 Точность: {accuracy}%",
+
+  "quiz.button.start": "🏆 Викторина",
+  "quiz.button.reveal": "👁 Показать ответ",
+  "quiz.button.correct": "✅ Да",
+  "quiz.button.wrong": "❌ Нет",
+  "quiz.button.next": "▶️ Далее",
+  "quiz.button.finish": "🏁 Результаты",
+  "quiz.button.retry_wrong": "🔁 Повторить ошибки",
+  "quiz.button.new_quiz": "🏆 Новая викторина",
+  "quiz.button.main_menu": "⬅️ Главное меню"
 }

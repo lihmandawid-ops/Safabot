@@ -44,6 +44,7 @@ def after_session_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("learning.button.old_words", get_current_language()), callback_data="learn:oldwords")],
+            [InlineKeyboardButton(t("quiz.button.start", get_current_language()), callback_data="quiz:start")],
             [InlineKeyboardButton(t("learning.button.learn_more", get_current_language()), callback_data="learn:intro")],
             [InlineKeyboardButton(t("learning.button.extra", get_current_language()), callback_data="learn:extra")],
             [InlineKeyboardButton(t("learning.button.mywords", get_current_language()), callback_data="learn:mywords")],
