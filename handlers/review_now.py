@@ -17,6 +17,12 @@ scoring and the mode hand-off all reuse existing machinery:
 - 🏆 Викторина: handed off entirely to handlers/quiz.py's existing state
   machine via quiz_service.build_quiz(only_word_ids=...) so there is only
   ever one quiz renderer in the codebase.
+- "revnow:notif:<slot>:<mode>" (tapped from a 🔔 automatic reminder built
+  by services/notification_service.py) re-reads the exact word_ids that
+  notification was logged with (NotificationLog.word_ids) instead of
+  re-running selection, so the words the user reviews are exactly the
+  ones they were shown - then joins the same _launch() used by the count/
+  mode pickers above.
 
 Word selection is re-run (not cached in user_data) between the count-pick
 and mode-pick callbacks: get_words_for_old_review is a deterministic
@@ -32,6 +38,8 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from database.database import session_scope
+from database.models import WordStatus
+from database.repositories import notifications as notifications_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
@@ -46,6 +54,9 @@ from keyboards.review_now import (
 )
 from services import learning_service, quiz_service, review_now_service
 from utils.i18n import get_current_language, set_current_language, t
+from utils.time import local_today, utc_now
+
+_REVIEWABLE_STATUSES = (WordStatus.LEARNING, WordStatus.REVIEW)
 
 
 async def _current_user_and_language(session, telegram_id: int):
@@ -199,6 +210,27 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
                 await _finish_flashcards(edit, context, state)
             else:
                 await _render_flashcard(edit, state)
+
+        elif data.startswith("revnow:notif:"):
+            await query.answer()
+            slot, mode_str = data.removeprefix("revnow:notif:").split(":")
+            scheduled_date = local_today(utc_now(), user.timezone)
+            word_ids = await notifications_repo.get_word_ids_for(
+                session, user_id=user.id, notification_type=slot, scheduled_date=scheduled_date,
+            )
+            words = []
+            for word_id in word_ids or []:
+                uw = await user_words_repo.get_by_id(session, word_id)
+                if uw is not None and uw.status in _REVIEWABLE_STATUSES:
+                    words.append(uw)
+            if not words:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            await _launch(session, edit, context, user, current, words, mode=mode_str)
+
+        elif data == "revnow:skip":
+            await query.answer()
+            await query.edit_message_reply_markup(reply_markup=None)
 
         elif data in ("revnow:cancel", "revnow:mainmenu"):
             await query.answer()

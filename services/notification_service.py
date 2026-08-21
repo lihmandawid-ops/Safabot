@@ -15,14 +15,18 @@ from datetime import datetime
 from telegram import InlineKeyboardMarkup
 
 from database.database import session_scope
+from database.models import UserWord
 from database.repositories import notifications as notifications_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
-from keyboards.learning import start_keyboard, start_review_keyboard
+from keyboards.learning import start_keyboard
+from keyboards.review_now import notification_keyboard
 from services import learning_service
 from utils.i18n import set_current_language, t
+from utils.languages import LANGUAGE_BY_CODE
 from utils.logging import get_logger
 from utils.time import local_hour_minute, local_today, utc_now
+from utils.word_display import translation_for
 
 logger = get_logger(__name__)
 
@@ -31,11 +35,27 @@ SLOT_AFTERNOON = "afternoon"
 SLOT_EVENING = "evening"
 SLOTS = (SLOT_MORNING, SLOT_AFTERNOON, SLOT_EVENING)
 
+# repetition-system stage section 9: at most 8 words in one automatic
+# reminder - matches keyboards.review_now's count picker's own cap so a
+# numbered emoji is always available.
+_NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣")
+
+# repetition-system stage section 26: the ⚙️ Настройки → 📚 Настройки
+# повторения word-count picker's choices - default 4.
+NOTIFICATION_WORD_COUNT_OPTIONS: tuple[int, ...] = (4, 6, 8)
+
+_SLOT_ENABLED_FIELD = {
+    SLOT_MORNING: "morning_enabled",
+    SLOT_AFTERNOON: "afternoon_enabled",
+    SLOT_EVENING: "evening_enabled",
+}
+
 
 @dataclass(frozen=True)
 class NotificationContent:
     text: str
     reply_markup: InlineKeyboardMarkup | None = None
+    word_ids: list[int] | None = None
 
 
 def _slot_time(user, slot: str):
@@ -43,9 +63,45 @@ def _slot_time(user, slot: str):
 
 
 def _is_due_now(user, slot: str, now: datetime) -> bool:
+    if not getattr(user, _SLOT_ENABLED_FIELD[slot]):
+        return False
     slot_time = _slot_time(user, slot)
     hour, minute = local_hour_minute(now, user.timezone)
     return (hour, minute) == (slot_time.hour, slot_time.minute)
+
+
+async def _select_review_words(session, user, slot: str, current, now: datetime) -> list[UserWord]:
+    """Repetition-system stage sections 9, 14, 15: up to
+    user.notification_word_count due words (LEARNING/REVIEW only - the
+    same status filter every other review path uses, so PAUSED/DELETED/
+    MASTERED/NEW never appear here), preferring words that were not in
+    the last reminder of this same slot when there is enough variety to
+    avoid repeating the exact same set."""
+    due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code, now=now)
+    count = user.notification_word_count
+    if len(due) <= count:
+        return due
+
+    recent = await notifications_repo.get_recent_word_ids(session, user_id=user.id, notification_type=slot, limit=1)
+    recent_ids = set(recent[0]) if recent else set()
+    fresh = [uw for uw in due if uw.id not in recent_ids]
+    if len(fresh) >= count:
+        return fresh[:count]
+    chosen_ids = {uw.id for uw in fresh}
+    filler = [uw for uw in due if uw.id not in chosen_ids]
+    return (fresh + filler)[:count]
+
+
+def _review_reminder_content(words: list[UserWord], translation_language: str, language: str, slot: str) -> NotificationContent:
+    lines = [t("notification.review_list.header", language), ""]
+    for i, uw in enumerate(words):
+        translation = translation_for(uw, translation_language) or ""
+        lang = LANGUAGE_BY_CODE.get(uw.word.language_code)
+        flag = lang.flag if lang else ""
+        emoji = _NUMBER_EMOJI[i] if i < len(_NUMBER_EMOJI) else f"{i + 1}."
+        lines.append(f"{emoji} {flag} {uw.word.word} — {translation}")
+    text = "\n".join(lines)
+    return NotificationContent(text, notification_keyboard(slot), word_ids=[uw.id for uw in words])
 
 
 async def _build_content(session, user, slot: str, now: datetime) -> NotificationContent | None:
@@ -53,9 +109,10 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
     32: never send a meaningless notification).
 
     set_current_language(user.interface_language) here, not just passing
-    it to t() explicitly, because start_keyboard()/start_review_keyboard()
-    (keyboards/learning.py) read the language back out of the same
-    ContextVar every other screen in the bot uses - settings-improvements
+    it to t() explicitly, because start_keyboard() (keyboards/learning.py)
+    and notification_keyboard() (keyboards/review_now.py) read the
+    language back out of the same ContextVar every other screen in the
+    bot uses - settings-improvements
     stage section 2's "every part of the UI must follow interface_language"
     applies to a notification's buttons exactly as much as its text.
     Safe to call per-iteration here even though this is a batch loop over
@@ -70,28 +127,28 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
     if current is None:
         return None
 
-    due = await learning_service.get_due_reviews(
-        session, user_id=user.id, language_code=current.language_code, now=now
-    )
+    due = await _select_review_words(session, user, slot, current, now)
+
+    # Repetition-system stage sections 10-11: whenever there is anything
+    # due, always use the compact per-word reminder - never the old
+    # "N words are due" phrasing, and never the full 📚 Учить слова flow -
+    # so the automatic ping stays a quick reminder in every slot, not a
+    # teaching session in disguise. A slot with nothing due keeps its own
+    # older behavior below (new-words announcement / silence / "done").
+    if due:
+        return _review_reminder_content(due, current.translation_language, language, slot)
 
     if slot == SLOT_MORNING:
         new_words = (await learning_service.get_new_words_for_today(session, user=user, user_language=current, now=now)).words
-        if not due and not new_words:
+        if not new_words:
             return None
-        if new_words:
-            text = t("notification.morning.with_new", language, new_count=len(new_words), due_count=len(due))
-        else:
-            text = t("notification.morning.reviews_only", language, due_count=len(due))
+        text = t("notification.morning.new_only", language, new_count=len(new_words))
         return NotificationContent(text, start_keyboard())
 
     if slot == SLOT_AFTERNOON:
-        if not due:
-            return None
-        return NotificationContent(t("notification.afternoon.text", language, due_count=len(due)), start_review_keyboard())
+        return None
 
     if slot == SLOT_EVENING:
-        if due:
-            return NotificationContent(t("notification.evening.due", language, due_count=len(due)), start_review_keyboard())
         if user.last_learning_date == local_today(now, user.timezone):
             return NotificationContent(t("notification.evening.done", language))
         return None
@@ -152,7 +209,9 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
             continue
 
         async with session_scope() as session:
-            await notifications_repo.log_sent(session, user_id=user.id, notification_type=slot, scheduled_date=scheduled_date)
+            await notifications_repo.log_sent(
+                session, user_id=user.id, notification_type=slot, scheduled_date=scheduled_date, word_ids=content.word_ids,
+            )
         sent_count += 1
 
     return sent_count

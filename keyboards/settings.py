@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from services.learning_service import REVIEW_MODE_CHOICES
+from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.goals import GOAL_CODES
 from utils.i18n import get_current_language, t
 from utils.industries import PRESET_INDUSTRIES
@@ -33,6 +35,7 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.daily_words", get_current_language()), callback_data="set:words:list")],
             [InlineKeyboardButton(t("settings.menu.notification_time", get_current_language()), callback_data="set:notif:slots")],
             [InlineKeyboardButton(t("settings.menu.notifications_toggle", get_current_language()), callback_data="set:notif:toggle")],
+            [InlineKeyboardButton(t("settings.menu.review_settings", get_current_language()), callback_data="set:revsettings:home")],
             [InlineKeyboardButton(t("settings.menu.level", get_current_language()), callback_data="set:level:list")],
             [InlineKeyboardButton(t("settings.menu.timezone", get_current_language()), callback_data="set:tz:list")],
             [InlineKeyboardButton(t("settings.menu.goal", get_current_language()), callback_data="set:goal:list")],
@@ -134,6 +137,64 @@ def notification_time_keyboard(slot: str) -> InlineKeyboardMarkup:
         for option in options
     ]
     rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def review_settings_keyboard(user) -> InlineKeyboardMarkup:
+    """⚙️ Настройки → 📚 Настройки повторения (repetition-system stage
+    section 26): word count for automatic reminders, independent per-slot
+    enable/disable toggles, and the saved on-demand review-mode
+    preference - reuses User.notification_word_count/morning_enabled/
+    afternoon_enabled/evening_enabled/review_mode rather than introducing
+    a parallel settings store."""
+    count_row = [
+        InlineKeyboardButton(
+            f"{'✅ ' if n == user.notification_word_count else ''}{n}",
+            callback_data=f"set:revsettings:count:{n}",
+        )
+        for n in NOTIFICATION_WORD_COUNT_OPTIONS
+    ]
+
+    slot_fields = (
+        ("morning", user.morning_enabled),
+        ("afternoon", user.afternoon_enabled),
+        ("evening", user.evening_enabled),
+    )
+    slot_rows = [
+        [
+            InlineKeyboardButton(
+                f"{'☑️' if enabled else '☐'} {t(f'notification_slot.{slot}', get_current_language())}",
+                callback_data=f"set:revsettings:slot:{slot}",
+            )
+        ]
+        for slot, enabled in slot_fields
+    ]
+
+    mode_labels = {
+        "flashcard": t("revnow.button.flashcard_mode", get_current_language()),
+        "quiz": t("revnow.button.quiz_mode", get_current_language()),
+        "mixed": t("revnow.button.mixed_mode", get_current_language()),
+    }
+    mode_rows = [
+        [
+            InlineKeyboardButton(
+                f"{'✅ ' if user.review_mode == mode else ''}{mode_labels[mode]}",
+                callback_data=f"set:revsettings:mode:{mode}",
+            )
+        ]
+        for mode in REVIEW_MODE_CHOICES
+    ]
+    mode_rows.append(
+        [
+            InlineKeyboardButton(
+                f"{'✅ ' if user.review_mode is None else ''}{t('settings.review_settings.mode.ask', get_current_language())}",
+                callback_data="set:revsettings:mode:ask",
+            )
+        ]
+    )
+
+    rows = [count_row, *slot_rows, *mode_rows]
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
 

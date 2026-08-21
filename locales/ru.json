@@ -56,6 +56,7 @@
   "settings.menu.daily_words": "📚 Количество слов",
   "settings.menu.notification_time": "⏰ Время уведомлений",
   "settings.menu.notifications_toggle": "🔔 Уведомления",
+  "settings.menu.review_settings": "📚 Настройки повторения",
   "settings.menu.level": "👤 Мой уровень",
   "settings.menu.subscription": "💎 Подписка",
   "settings.menu.back": "⬅️ Назад",
@@ -82,6 +83,15 @@
   "settings.notification_time_updated": "✅ Время обновлено: {slot} — {time}.",
   "settings.notifications_toggled_on": "🔔 Уведомления включены.",
   "settings.notifications_toggled_off": "🔕 Уведомления выключены.",
+  "settings.review_settings.header": "📚 Настройки повторения\n\nСколько слов присылать в напоминании и как их повторять:",
+  "settings.review_settings.count_label": "Слов в напоминании: {count}",
+  "settings.review_settings.mode_label": "Режим повторения: {mode}",
+  "settings.review_settings.mode.ask": "❓ Каждый раз спрашивать",
+  "settings.review_settings.count_updated": "✅ Слов в напоминании: {count}.",
+  "settings.review_settings.slot_toggled_on": "☑️ Включено: {slot}.",
+  "settings.review_settings.slot_toggled_off": "☐ Выключено: {slot}.",
+  "settings.review_settings.mode_updated": "✅ Режим повторения обновлён.",
+  "revnow.button.mixed_mode": "🔀 Смешанный",
   "settings.pick_timezone": "🌍 Часовой пояс\n\nВыбери свой часовой пояс:",
   "settings.timezone_updated": "✅ Часовой пояс изменён: {name}.",
   "settings.timezone_search_prompt": "Напиши город, страну или регион (например: Tel Aviv, New York, Berlin):",
@@ -286,14 +296,12 @@
 
   "learning.completion": "🎉 Отлично!\n\nСегодня:\n📚 Повторено: {total}\n🆕 Новых слов: {new_words}\n✅ Правильных: {correct}\n❌ Ошибок: {wrong}\n\n🔥 Серия: {streak} дней",
 
-  "notification.morning.with_new": "☀️ Доброе утро!\n\nТебя ждут новые слова и повторение.\n\n📚 Сегодня: {new_count} новых слов\n🔄 К повторению: {due_count} слов",
-  "notification.morning.reviews_only": "☀️ Доброе утро!\n\nСегодня новые слова закончились.\n\n🔄 К повторению: {due_count} слов.",
+  "notification.morning.new_only": "☀️ Доброе утро!\n\nТебя ждут новые слова.\n\n📚 Сегодня: {new_count} новых слов",
   "notification.morning.button": "▶️ Начать обучение",
-  "notification.afternoon.text": "🌤 Время повторить слова.\n\n🔄 Сейчас ждут повторения: {due_count} слов.",
   "notification.afternoon.button": "▶️ Повторить",
-  "notification.evening.due": "🌙 Небольшое повторение перед сном.\n\n🔄 Осталось: {due_count} слов.",
   "notification.evening.button": "▶️ Повторить",
   "notification.evening.done": "✅ Сегодняшнее обучение выполнено!\n\nОтличная работа.",
+  "notification.review_list.header": "🔔 Быстрое повторение",
 
   "quiz.no_words": "У тебя пока недостаточно слов для викторины. Сначала добавь несколько слов в 📖 Словарь!",
   "quiz.no_mistakes": "В прошлый раз не было ошибок — отличная работа!",
@@ -386,5 +394,7 @@
   "revnow.completed": "🎉 Повторение завершено!\n\nПовторено: {count}/{total}",
   "revnow.button.again": "🔁 Повторить ещё",
   "revnow.empty": "Пока нет слов для повторения.\n\nЗагляни в 📖 Словарь, чтобы добавить новые слова.",
-  "revnow.button.new_words": "➕ Новые слова"
+  "revnow.button.new_words": "➕ Новые слова",
+  "revnow.button.start_now": "▶️ Начать повторение",
+  "revnow.button.skip": "⏭️ Пропустить"
 }

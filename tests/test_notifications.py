@@ -106,7 +106,9 @@ async def test_morning_notification_sent_when_due_words_exist(notif_db):
     bot.send_message.assert_awaited_once()
     kwargs = bot.send_message.await_args.kwargs
     assert kwargs["chat_id"] == user.telegram_id
-    assert "К повторению" in kwargs["text"]
+    assert "Быстрое повторение" in kwargs["text"]
+    assert "go" in kwargs["text"]
+    assert "1️⃣" in kwargs["text"]
 
 
 async def test_no_notification_when_nothing_is_due(notif_db):
@@ -228,7 +230,7 @@ async def test_afternoon_notification_reviews_wording(notif_db):
 
     assert sent == 1
     text = bot.send_message.await_args.kwargs["text"]
-    assert "Время повторить" in text
+    assert "Быстрое повторение" in text
 
 
 async def test_evening_shows_completion_message_when_daily_session_done(notif_db):
@@ -310,10 +312,115 @@ async def test_notification_follows_users_interface_language(notif_db):
     await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
     kwargs = bot.send_message.await_args.kwargs
-    assert "Due for review" in kwargs["text"]
-    assert "К повторению" not in kwargs["text"]
+    assert "Quick review" in kwargs["text"]
+    assert "Быстрое повторение" not in kwargs["text"]
     button_text = kwargs["reply_markup"].inline_keyboard[0][0].text
-    assert button_text == "▶️ Start"
+    assert button_text == "▶️ Start review"
+
+
+async def test_notification_word_count_caps_the_word_list(notif_db):
+    """Repetition-system stage section 9: notification_word_count (4/6/8,
+    default 4) caps how many due words go into one automatic reminder,
+    even when more are actually due."""
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        for i in range(6):
+            await _add_due_word(s, user.id, word=f"word{i}")
+        await users_repo.update_user(s, user, notification_word_count=6)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    text = bot.send_message.await_args.kwargs["text"]
+    assert text.count("️⃣") == 6  # 6 numbered-emoji lines, not all 6 due words unbounded
+
+
+async def test_slot_can_be_individually_disabled(notif_db):
+    """Repetition-system stage section 13: morning/afternoon/evening can
+    each be toggled independently of the master notifications_enabled
+    switch."""
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id)
+        await users_repo.update_user(s, user, morning_enabled=False)
+
+    bot = AsyncMock()
+    sent = await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    assert sent == 0
+    bot.send_message.assert_not_awaited()
+
+
+async def test_paused_and_mastered_words_never_appear_in_reminder(notif_db):
+    from database.database import session_scope
+    from database.models import WordStatus
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        due = await _add_due_word(s, user.id, word="reviewme")
+        paused = await _add_due_word(s, user.id, word="pausedword")
+        paused.status = WordStatus.PAUSED
+        mastered = await _add_due_word(s, user.id, word="masteredword")
+        mastered.status = WordStatus.MASTERED
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "reviewme" in text
+    assert "pausedword" not in text
+    assert "masteredword" not in text
+
+
+async def test_tapping_start_review_on_notification_reviews_the_exact_words_shown(notif_db, monkeypatch):
+    """Repetition-system stage sections 15-17: the "▶️ Начать повторение"
+    button on a notification must launch a review of exactly the words
+    the notification listed (via NotificationLog.word_ids), not a fresh
+    re-selection that could land on a different set."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    from database.database import session_scope
+    from services import notification_service
+
+    from database.repositories import words as words_repo
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s, telegram_id=5200)
+        uw = await _add_due_word(s, user.id, word="notifyme")
+        await words_repo.add_translation(s, word_id=uw.word_id, language_code="ru", translation="уведомление")
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+    reply_markup = bot.send_message.await_args.kwargs["reply_markup"]
+    callback_data = reply_markup.inline_keyboard[0][0].callback_data
+    assert callback_data == "revnow:notif:morning:flashcard"
+
+    import handlers.review_now as review_now_handler
+
+    # The notification above was logged against MORNING_UTC's calendar
+    # day, not whatever day this test happens to run on - simulates the
+    # user tapping the button minutes later, on the same day it was sent.
+    monkeypatch.setattr(review_now_handler, "utc_now", lambda: MORNING_UTC)
+
+    q = _AsyncMock()
+    q.data = callback_data
+    q.message = _AsyncMock()
+    q.from_user = SimpleNamespace(id=5200)
+    context = SimpleNamespace(user_data={})
+    await review_now_handler.handle_review_now_callback(SimpleNamespace(callback_query=q), context)
+
+    state = context.user_data["revnow"]
+    assert [item["user_word_id"] for item in state["items"]] == [uw.id]
 
 
 async def test_one_users_corrupted_timezone_does_not_block_other_users(notif_db):

@@ -39,6 +39,7 @@ from keyboards.settings import (
     level_pick_keyboard,
     notification_slot_keyboard,
     notification_time_keyboard,
+    review_settings_keyboard,
     settings_home_keyboard,
     timezone_pick_keyboard,
     timezone_search_results_keyboard,
@@ -46,6 +47,8 @@ from keyboards.settings import (
 )
 from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
+from services.learning_service import REVIEW_MODE_CHOICES
+from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
@@ -511,6 +514,52 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 t("settings.notifications_toggled_on" if new_value else "settings.notifications_toggled_off", get_current_language())
             )
             await _render_home(query, session, user)
+
+        elif data == "set:revsettings:home":
+            await query.answer()
+            await query.edit_message_text(
+                t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
+            )
+
+        elif data.startswith("set:revsettings:count:"):
+            count = int(data.removeprefix("set:revsettings:count:"))
+            if count not in NOTIFICATION_WORD_COUNT_OPTIONS:
+                await query.answer()
+                return
+            await users_repo.update_user(session, user, notification_word_count=count)
+            await query.answer(t("settings.review_settings.count_updated", get_current_language(), count=count))
+            await query.edit_message_text(
+                t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
+            )
+
+        elif data.startswith("set:revsettings:slot:"):
+            slot = data.removeprefix("set:revsettings:slot:")
+            field_by_slot = {
+                "morning": "morning_enabled",
+                "afternoon": "afternoon_enabled",
+                "evening": "evening_enabled",
+            }
+            if slot not in field_by_slot:
+                await query.answer()
+                return
+            new_value = not getattr(user, field_by_slot[slot])
+            await users_repo.update_user(session, user, **{field_by_slot[slot]: new_value})
+            key = "settings.review_settings.slot_toggled_on" if new_value else "settings.review_settings.slot_toggled_off"
+            await query.answer(t(key, get_current_language(), slot=t(f"notification_slot.{slot}", get_current_language())))
+            await query.edit_message_text(
+                t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
+            )
+
+        elif data.startswith("set:revsettings:mode:"):
+            mode = data.removeprefix("set:revsettings:mode:")
+            if mode != "ask" and mode not in REVIEW_MODE_CHOICES:
+                await query.answer()
+                return
+            await users_repo.update_user(session, user, review_mode=None if mode == "ask" else mode)
+            await query.answer(t("settings.review_settings.mode_updated", get_current_language()))
+            await query.edit_message_text(
+                t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
+            )
 
         elif data == "set:level:list":
             await query.answer()

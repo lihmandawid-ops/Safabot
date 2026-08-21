@@ -56,6 +56,7 @@
   "settings.menu.daily_words": "📚 Word count",
   "settings.menu.notification_time": "⏰ Notification time",
   "settings.menu.notifications_toggle": "🔔 Notifications",
+  "settings.menu.review_settings": "📚 Review settings",
   "settings.menu.level": "👤 My level",
   "settings.menu.subscription": "💎 Subscription",
   "settings.menu.back": "⬅️ Back",
@@ -82,6 +83,15 @@
   "settings.notification_time_updated": "✅ Time updated: {slot} — {time}.",
   "settings.notifications_toggled_on": "🔔 Notifications turned on.",
   "settings.notifications_toggled_off": "🔕 Notifications turned off.",
+  "settings.review_settings.header": "📚 Review settings\n\nHow many words to send in a reminder, and how to review them:",
+  "settings.review_settings.count_label": "Words per reminder: {count}",
+  "settings.review_settings.mode_label": "Review mode: {mode}",
+  "settings.review_settings.mode.ask": "❓ Ask every time",
+  "settings.review_settings.count_updated": "✅ Words per reminder: {count}.",
+  "settings.review_settings.slot_toggled_on": "☑️ Turned on: {slot}.",
+  "settings.review_settings.slot_toggled_off": "☐ Turned off: {slot}.",
+  "settings.review_settings.mode_updated": "✅ Review mode updated.",
+  "revnow.button.mixed_mode": "🔀 Mixed",
   "settings.pick_timezone": "🌍 Time zone\n\nChoose your time zone:",
   "settings.timezone_updated": "✅ Time zone changed: {name}.",
   "settings.timezone_search_prompt": "Type a city, country, or region (e.g. Tel Aviv, New York, Berlin):",
@@ -286,14 +296,12 @@
 
   "learning.completion": "🎉 Great job!\n\nToday:\n📚 Reviewed: {total}\n🆕 New words: {new_words}\n✅ Correct: {correct}\n❌ Mistakes: {wrong}\n\n🔥 Streak: {streak} days",
 
-  "notification.morning.with_new": "☀️ Good morning!\n\nNew words and review are waiting for you.\n\n📚 Today: {new_count} new words\n🔄 Due for review: {due_count} words",
-  "notification.morning.reviews_only": "☀️ Good morning!\n\nNo new words left for today.\n\n🔄 Due for review: {due_count} words.",
+  "notification.morning.new_only": "☀️ Good morning!\n\nNew words are waiting for you.\n\n📚 Today: {new_count} new words",
   "notification.morning.button": "▶️ Start learning",
-  "notification.afternoon.text": "🌤 Time to review words.\n\n🔄 Currently due for review: {due_count} words.",
   "notification.afternoon.button": "▶️ Review",
-  "notification.evening.due": "🌙 A quick review before bed.\n\n🔄 Remaining: {due_count} words.",
   "notification.evening.button": "▶️ Review",
   "notification.evening.done": "✅ Today's learning is done!\n\nGreat work.",
+  "notification.review_list.header": "🔔 Quick review",
 
   "quiz.no_words": "You don't have enough words for a quiz yet. Add a few words in 📖 Dictionary first!",
   "quiz.no_mistakes": "No mistakes last time - great job!",
@@ -386,5 +394,7 @@
   "revnow.completed": "🎉 Review finished!\n\nReviewed: {count}/{total}",
   "revnow.button.again": "🔁 Review more",
   "revnow.empty": "No words to review yet.\n\nCheck 📖 Dictionary to add new words.",
-  "revnow.button.new_words": "➕ New words"
+  "revnow.button.new_words": "➕ New words",
+  "revnow.button.start_now": "▶️ Start review",
+  "revnow.button.skip": "⏭️ Skip"
 }

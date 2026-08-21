@@ -228,6 +228,13 @@ async def build_old_words_session(
 ON_DEMAND_REVIEW_OPTIONS: tuple[int, ...] = (4, 8, 12)
 DEFAULT_ON_DEMAND_REVIEW_COUNT = 4
 
+# repetition-system stage section 26: the saved review-mode preference
+# (User.review_mode) offered in ⚙️ Настройки → 📚 Настройки повторения -
+# None ("ask every time") is the model column's own default and isn't
+# part of this tuple since it has no dedicated picker button of its own,
+# only a "❓ Каждый раз спрашивать" entry that clears the column.
+REVIEW_MODE_CHOICES: tuple[str, ...] = ("flashcard", "quiz", "mixed")
+
 
 async def get_words_for_on_demand_review(
     session: AsyncSession,
