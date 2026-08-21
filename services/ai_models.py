@@ -224,3 +224,39 @@ class GrammarExplanation(BaseModel):
         if not value:
             raise ValueError("explanation must not be blank")
         return value
+
+
+class VerbConjugationResult(BaseModel):
+    """🔤 Все формы (repetition-system stage sections 22-24): `forms` maps
+    a tense/mood name - in whatever terms are natural for THIS word's own
+    language, never forced into English's four - to an ordered list of
+    conjugated forms, one per grammatical person that language
+    distinguishes. Free-form keys on purpose, same philosophy as
+    GeneratedWord.verb_forms above."""
+
+    word: str
+    language: str
+    forms: dict[str, list[str]]
+
+    @field_validator("word", "language")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("forms")
+    @classmethod
+    def _clean_forms(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        cleaned: dict[str, list[str]] = {}
+        for tense, items in value.items():
+            tense = str(tense).strip()
+            if not tense or not isinstance(items, list):
+                continue
+            forms = [str(item).strip() for item in items if isinstance(item, str) and str(item).strip()]
+            if forms:
+                cleaned[tense] = forms
+        if not cleaned:
+            raise ValueError("forms must contain at least one non-empty tense")
+        return cleaned

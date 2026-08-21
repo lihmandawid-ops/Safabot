@@ -96,6 +96,17 @@ class AIService(ABC):
         text/OCR/speech output - the seam future OCR/voice stages plug
         into without a new AIService method."""
 
+    @abstractmethod
+    async def generate_verb_conjugation(
+        self, word: str, *, language_code: str, user_id: int,
+    ) -> ai_models.VerbConjugationResult:
+        """🔤 Все формы (repetition-system stage sections 18-25): a full
+        conjugation table using whatever tense/mood structure is natural
+        for `language_code`'s own grammar - never English's four tenses
+        forced onto another language. Callers (services/verb_forms_service.py)
+        cache the result on Word.verb_conjugation so this is called at
+        most once per verb."""
+
 
 class NotConfiguredAIService(AIService):
     """Used whenever AI isn't usable: AI_ENABLED=false, or no AI_API_KEY
@@ -120,6 +131,9 @@ class NotConfiguredAIService(AIService):
         raise AIConfigurationError()
 
     async def extract_learning_words(self, text, *, language_code, user_id):
+        raise AIConfigurationError()
+
+    async def generate_verb_conjugation(self, word, *, language_code, user_id):
         raise AIConfigurationError()
 
 
@@ -229,6 +243,22 @@ _EXTRACT_WORDS_SYSTEM = (
     'Respond with ONLY a JSON object: {"words": [str, ...]}, base/dictionary form, no duplicates.'
 )
 
+_VERB_CONJUGATION_SYSTEM = (
+    "You produce a full conjugation table for a single verb, for a language-learning app. "
+    'Respond with ONLY a JSON object: {"word": str, "language": str, "forms": object}. '
+    '"forms" maps a tense/mood name to a list of conjugated forms. The tense/mood names you '
+    "choose, and how many of them you return, MUST reflect how THIS language's own grammar "
+    "actually organizes its verb system - do not force English's four tenses (present/past/"
+    "future/perfect) onto a language that categorizes verbs differently (for example, use "
+    "German's own Präsens/Präteritum/Perfekt/Futur, or Russian's aspect-based present/past/"
+    "future, or whatever a native grammar reference for that language would use). Each list "
+    "must contain one form per grammatical person that language actually distinguishes (do not "
+    "pad to exactly six English-style persons for a language that has fewer or more) - include "
+    "the subject pronoun in each form exactly the way that language normally states it (e.g. "
+    '"I am", not just "am"; omit the pronoun only if the language\'s own conjugated verb form '
+    "already fully identifies the person, e.g. many null-subject languages)."
+)
+
 
 def _strip_markdown_fence(raw: str) -> str:
     """Some models occasionally wrap JSON-mode output in a ```json ... ```
@@ -302,6 +332,14 @@ def _parse_text_analysis_response(raw: str) -> ai_models.TextAnalysisResult:
         return ai_models.TextAnalysisResult.model_validate(payload)
     except ValidationError as exc:
         raise AIInvalidResponseError("AI response did not match the expected text-analysis schema") from exc
+
+
+def _parse_verb_conjugation_response(raw: str) -> ai_models.VerbConjugationResult:
+    payload = _parse_json(raw)
+    try:
+        return ai_models.VerbConjugationResult.model_validate(payload)
+    except ValidationError as exc:
+        raise AIInvalidResponseError("AI response did not match the expected verb-conjugation schema") from exc
 
 
 class LiveAIService(AIService):
@@ -378,6 +416,12 @@ class LiveAIService(AIService):
     async def extract_learning_words(self, text, *, language_code, user_id):
         user = f"Text (language code {language_code}):\n{text}\n"
         return await self._complete("extract_learning_words", user_id, _EXTRACT_WORDS_SYSTEM, user, _parse_word_list_response)
+
+    async def generate_verb_conjugation(self, word, *, language_code, user_id):
+        user = f"Verb: {word!r}\nLanguage code (ISO 639-1): {language_code}\n"
+        return await self._complete(
+            "generate_verb_conjugation", user_id, _VERB_CONJUGATION_SYSTEM, user, _parse_verb_conjugation_response
+        )
 
     async def _complete(self, operation: str, user_id: int, system: str, user: str, parse: Callable[[str], T]) -> T:
         """Runs one operation end-to-end (network call + parse/validate)

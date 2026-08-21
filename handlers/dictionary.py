@@ -21,16 +21,23 @@ from database.repositories import users as users_repo
 from database.repositories import words as words_repo
 from keyboards.dictionary import (
     batch_resume_keyboard,
+    forms_close_keyboard,
     resume_offer_keyboard,
     search_results_keyboard,
     word_card_keyboard,
 )
-from services import dictionary_service, user_word_service, word_service
+from services import dictionary_service, user_word_service, verb_forms_service, word_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.text import split_word_batch, truncate_text
-from utils.word_display import format_pronunciation, render_forms_text, render_word_card_text, status_label
+from utils.word_display import (
+    format_pronunciation,
+    render_conjugation_messages,
+    render_forms_text,
+    render_word_card_text,
+    status_label,
+)
 
 MODE = "dictionary"
 # Bugfix stage, real-Telegram feedback: 💡 Как использовать? must stay a
@@ -257,9 +264,30 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
                 )
 
         elif data.startswith("card:forms:"):
+            # repetition-system stage sections 18-21: verb forms are shown
+            # as a real, standalone message with a ✖️ Закрыть button that
+            # deletes it - a show_alert popup is too small and must never
+            # be used here again.
             word_id = int(data.removeprefix("card:forms:"))
+            await query.answer()
+            word = await words_repo.get_by_id(session, word_id)
+            if word is None:
+                await query.message.reply_text(t("card.no_forms", get_current_language()), reply_markup=forms_close_keyboard())
+                return
+
+            conjugation = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=user.id)
+            if conjugation:
+                for chunk in render_conjugation_messages(word, conjugation):
+                    await query.message.reply_text(chunk, reply_markup=forms_close_keyboard())
+                return
+
             card = await word_service.get_word_card(session, word_id=word_id)
-            await query.answer(render_forms_text(card) if card else t("card.no_forms", get_current_language()), show_alert=True)
+            text = render_forms_text(card) if card else t("card.no_forms", get_current_language())
+            await query.message.reply_text(text, reply_markup=forms_close_keyboard())
+
+        elif data == "card:formsclose":
+            await query.answer()
+            await query.message.delete()
 
         elif data.startswith("card:pronounce:"):
             word_id = int(data.removeprefix("card:pronounce:"))

@@ -116,6 +116,48 @@ def test_card_shows_combined_pronunciation_and_ipa_when_both_set():
     assert "uh-POYNT-ment [/əˈpɔɪntmənt/]" in text
 
 
+def test_render_conjugation_messages_fits_in_one_message_when_short():
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="go")
+    conjugation = {
+        "present": ["I go", "You go", "He/She/It goes", "We go", "You go", "They go"],
+        "past": ["I went", "You went", "He/She/It went", "We went", "You went", "They went"],
+    }
+    messages = render_conjugation_messages(word, conjugation)
+    assert len(messages) == 1
+    assert "🇬🇧 go" in messages[0]
+    assert "Present:" in messages[0]
+    assert "Past:" in messages[0]
+    assert "I go" in messages[0]
+    assert "They went" in messages[0]
+
+
+def test_render_conjugation_messages_never_forces_english_tense_names():
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="de", word="gehen")
+    conjugation = {"Präsens": ["ich gehe"], "Präteritum": ["ich ging"]}
+    text = render_conjugation_messages(word, conjugation)[0]
+    assert "Präsens:" in text
+    assert "Präteritum:" in text
+
+
+def test_render_conjugation_messages_splits_long_tables_without_cutting_a_block():
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="go")
+    # Ten tenses, each padded well past the per-message safety margin -
+    # this must produce more than one message, and every tense name must
+    # appear in exactly one of them, never split mid-block.
+    conjugation = {f"tense{i}": [f"form {i} number {n}" * 20 for n in range(6)] for i in range(10)}
+    messages = render_conjugation_messages(word, conjugation)
+    assert len(messages) > 1
+    for i in range(10):
+        occurrences = sum(1 for m in messages if f"Tense{i}:" in m)
+        assert occurrences == 1
+
+
 def test_card_headers_follow_interface_language():
     from utils.i18n import set_current_language
 

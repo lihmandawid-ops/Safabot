@@ -33,6 +33,15 @@ def word_card_keyboard(word_id: int, *, back_callback: str = "dict:back") -> Inl
     )
 
 
+def forms_close_keyboard() -> InlineKeyboardMarkup:
+    """🔤 Все формы (repetition-system stage sections 18-21): the message
+    this button sits on is a real, standalone Telegram message (never a
+    show_alert popup) - tapping it deletes that message."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("card.button.forms_close", get_current_language()), callback_data="card:formsclose")]]
+    )
+
+
 def resume_offer_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

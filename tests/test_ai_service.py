@@ -209,6 +209,46 @@ async def test_extract_learning_words_returns_word_list():
     assert words == ["go", "home"]
 
 
+# --- repetition-system stage: generate_verb_conjugation ---
+
+GOOD_VERB_CONJUGATION_JSON = (
+    '{"word": "go", "language": "en", "forms": {'
+    '"present": ["I go", "You go", "He/She/It goes", "We go", "You go", "They go"], '
+    '"past": ["I went", "You went", "He/She/It went", "We went", "You went", "They went"]}}'
+)
+
+
+async def test_generate_verb_conjugation_returns_validated_result():
+    svc, provider = _service([GOOD_VERB_CONJUGATION_JSON])
+    result = await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+    assert isinstance(result, ai_models.VerbConjugationResult)
+    assert result.word == "go"
+    assert result.forms["present"][0] == "I go"
+    assert result.forms["past"][2] == "He/She/It went"
+    assert "go" in provider.last_user
+    assert "en" in provider.last_user
+
+
+async def test_generate_verb_conjugation_never_forces_english_tense_names():
+    """The AI is free to name tenses however that language's own grammar
+    does (repetition-system stage section 22) - German's Präteritum/
+    Perfekt here, not present/past/future/perfect."""
+    german_json = (
+        '{"word": "gehen", "language": "de", "forms": {'
+        '"Präsens": ["ich gehe", "du gehst", "er/sie/es geht", "wir gehen", "ihr geht", "sie gehen"], '
+        '"Präteritum": ["ich ging", "du gingst", "er/sie/es ging", "wir gingen", "ihr gingt", "sie gingen"]}}'
+    )
+    svc, _ = _service([german_json])
+    result = await svc.generate_verb_conjugation("gehen", language_code="de", user_id=1)
+    assert set(result.forms) == {"Präsens", "Präteritum"}
+
+
+async def test_generate_verb_conjugation_rejects_empty_forms():
+    svc, _ = _service(['{"word": "go", "language": "en", "forms": {}}'], max_retries=0)
+    with pytest.raises(AIInvalidResponseError):
+        await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+
+
 # --- 13. AI disabled / not configured ---
 
 async def test_not_configured_service_raises_configuration_error_for_every_method():
@@ -225,6 +265,8 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
         await svc.explain_grammar("why?", language_code="en", level="beginner", interface_language="ru", user_id=1)
     with pytest.raises(AIConfigurationError):
         await svc.extract_learning_words("hi", language_code="en", user_id=1)
+    with pytest.raises(AIConfigurationError):
+        await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
 
 
 def test_get_ai_service_factory_respects_ai_enabled_and_api_key(monkeypatch):

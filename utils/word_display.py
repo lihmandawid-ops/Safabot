@@ -113,3 +113,42 @@ def render_forms_text(card) -> str:
         info = f" ({form.grammatical_info})" if form.grammatical_info else ""
         lines.append(f"  {form.form_type}: {form.form}{info}")
     return "\n".join(lines)
+
+
+# Telegram's hard cap is 4096 characters per message; a safety margin
+# below that (repetition-system stage section 25: split into multiple
+# messages rather than truncate or fall back to a popup).
+_MAX_CONJUGATION_MESSAGE_CHARS = 3500
+
+
+def render_conjugation_messages(word, conjugation: dict[str, list[str]]) -> list[str]:
+    """🔤 Все формы (sections 19-20, 25): one vertical block per tense/mood
+    - a tense name header, then each conjugated form on its own line -
+    rather than a person x tense table, which would either force every
+    language into the same fixed set of persons or render far too wide
+    for a phone screen. Split into several messages only when the whole
+    table would exceed Telegram's length limit, always breaking between
+    whole tense blocks so one is never cut in half."""
+    lang = LANGUAGE_BY_CODE.get(word.language_code)
+    flag = lang.flag if lang else ""
+    header = f"{flag} {word.word}".strip()
+
+    blocks = []
+    for tense, forms in conjugation.items():
+        lines = [f"{tense.strip().capitalize()}:"]
+        lines.extend(forms)
+        blocks.append("\n".join(lines))
+
+    messages: list[str] = []
+    current = [header]
+    current_len = len(header)
+    for block in blocks:
+        if current_len + len(block) + 2 > _MAX_CONJUGATION_MESSAGE_CHARS and len(current) > 1:
+            messages.append("\n\n".join(current))
+            current = [block]
+            current_len = len(block)
+        else:
+            current.append(block)
+            current_len += len(block) + 2
+    messages.append("\n\n".join(current))
+    return messages

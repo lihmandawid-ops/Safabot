@@ -183,6 +183,7 @@
   "card.usage_note": "💡 {note}",
   "card.forms_header": "🔤 Word forms:",
   "card.no_forms": "Word forms haven't been added yet.",
+  "card.button.forms_close": "✖️ Close",
 
   "card.button.add": "⭐ Add to learning",
   "card.button.forms": "🔤 All forms",

@@ -183,6 +183,7 @@
   "card.usage_note": "💡 {note}",
   "card.forms_header": "🔤 Формы слова:",
   "card.no_forms": "Формы слова пока не добавлены.",
+  "card.button.forms_close": "✖️ Закрыть",
 
   "card.button.add": "⭐ Добавить в обучение",
   "card.button.forms": "🔤 Все формы",
