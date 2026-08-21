@@ -47,6 +47,9 @@ async def add_language(
     translation_language: str,
     level: str,
     daily_new_words: int,
+    learning_goal: str | None = None,
+    work_industry: str | None = None,
+    selected_topics: list[str] | None = None,
 ) -> UserLanguage:
     existing = await session.execute(
         select(UserLanguage).where(
@@ -74,6 +77,9 @@ async def add_language(
         level=level,
         daily_new_words=daily_new_words,
         is_current=is_first,
+        learning_goal=learning_goal,
+        work_industry=work_industry,
+        selected_topics=selected_topics or [],
     )
     session.add(user_language)
     await session.flush()
@@ -109,6 +115,26 @@ async def set_language_enabled(session: AsyncSession, user_language: UserLanguag
 async def set_daily_new_words(session: AsyncSession, user_language: UserLanguage, count: int) -> UserLanguage:
     """Section 8: daily new-word count is stored per learning language."""
     user_language.daily_new_words = count
+    await session.flush()
+    return user_language
+
+
+async def set_goal(
+    session: AsyncSession, user_language: UserLanguage, *, learning_goal: str | None, work_industry: str | None
+) -> UserLanguage:
+    """Settings-improvements stage section 20: work_industry is only
+    meaningful alongside learning_goal == "work" - callers are
+    responsible for clearing it when the goal changes away from "work"
+    (handlers/settings.py and handlers/start.py both do this explicitly
+    rather than this function guessing at the rule)."""
+    user_language.learning_goal = learning_goal
+    user_language.work_industry = work_industry
+    await session.flush()
+    return user_language
+
+
+async def set_topics(session: AsyncSession, user_language: UserLanguage, *, topics: list[str]) -> UserLanguage:
+    user_language.selected_topics = topics
     await session.flush()
     return user_language
 

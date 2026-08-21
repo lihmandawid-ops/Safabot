@@ -79,6 +79,7 @@ async def generate_new_words(
         language_code=user_language.language_code,
         level=user_language.level,
         limit=amount,
+        topics=user_language.selected_topics,
     )
     for word in local_candidates:
         added = await user_word_service.add_word_to_learning(
@@ -147,6 +148,24 @@ async def generate_extra_words(
     return ExtraWordsResult(words=created, limit_reached=False, remaining_today=max(0, available - len(created)))
 
 
+def _topic_hint(user_language: UserLanguage) -> str | None:
+    """🎯 Темы обучения (settings-improvements stage section 22): joined
+    into a single free-text "Category" line for the AI prompt - it
+    already accepts a phrase there, not just one of the fixed local
+    Word.category values, so a mix of preset and custom topics both work
+    unchanged."""
+    return ", ".join(user_language.selected_topics) if user_language.selected_topics else None
+
+
+def _industry_hint(user_language: UserLanguage) -> str | None:
+    """Only meaningful alongside learning_goal == "work" (section 20) -
+    an industry set under any other goal (e.g. left over from a changed
+    goal) must never leak into the prompt."""
+    if user_language.learning_goal == "work" and user_language.work_industry:
+        return user_language.work_industry
+    return None
+
+
 async def _top_up_via_ai(
     session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int, created: list[UserWord]
 ) -> str:
@@ -160,6 +179,8 @@ async def _top_up_via_ai(
     settings = get_settings()
     provider_label = settings.ai_provider
     known_words = await _recent_known_words(session, user=user, user_language=user_language)
+    category = _topic_hint(user_language)
+    industry = _industry_hint(user_language)
 
     attempts = 0
     while len(created) < amount and attempts < settings.max_generation_attempts:
@@ -170,6 +191,8 @@ async def _top_up_via_ai(
             translation_language=user_language.translation_language,
             level=user_language.level,
             amount=shortfall,
+            category=category,
+            industry=industry,
             known_words=known_words,
             user_id=user.id,
         )
@@ -238,6 +261,7 @@ async def _persist_and_add(
 
 async def _generate_via_ai(
     *, language_code: str, translation_language: str, level: str, amount: int,
+    category: str | None = None, industry: str | None = None,
     known_words: list[str], user_id: int,
 ) -> list[ai_models.GeneratedWord]:
     """Never raises: any AI failure (not configured, network error,
@@ -249,6 +273,8 @@ async def _generate_via_ai(
             translation_language=translation_language,
             level=level,
             amount=amount,
+            category=category,
+            industry=industry,
             known_words=known_words,
             user_id=user_id,
         )

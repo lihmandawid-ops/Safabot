@@ -32,11 +32,11 @@ async def _create_user(session, *, telegram_id=5000, daily_new_words=4, level="b
     return user, ul
 
 
-async def _seed_local_words(session, n, *, prefix="genword", difficulty="beginner"):
+async def _seed_local_words(session, n, *, prefix="genword", difficulty="beginner", category=None):
     words = []
     for i in range(n):
         word, _ = await word_service.get_or_create_word(
-            session, language_code="en", word=f"{prefix}{i}", difficulty=difficulty
+            session, language_code="en", word=f"{prefix}{i}", difficulty=difficulty, category=category
         )
         words.append(word)
     await session.commit()
@@ -56,8 +56,10 @@ class _FakeAIService:
         self._raises = raises
         self.calls = 0
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, known_words=None, user_id=None):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, known_words=None, user_id=None):
         self.calls += 1
+        self.last_category = category
+        self.last_industry = industry
         if self._raises is not None:
             raise self._raises
         return ai_models.GenerateWordsResult(words=self._words)
@@ -200,6 +202,64 @@ async def test_find_unknown_words_for_generation_prefers_level_match(session):
         session, user_id=user.id, language_code="en", level="advanced", limit=3
     )
     assert all(w.difficulty == "advanced" for w in candidates)
+
+
+async def test_find_unknown_words_for_generation_prefers_topic_over_level(session):
+    """settings-improvements stage section 22: a topic-matching word at
+    the "wrong" level must still outrank a level-matching word from an
+    unrelated topic - the user explicitly said they're interested in
+    this topic."""
+    user, ul = await _create_user(session, telegram_id=5009, level="advanced")
+    await _seed_local_words(session, 3, prefix="ontopic", difficulty="beginner", category="travel")
+    await _seed_local_words(session, 3, prefix="onlevel", difficulty="advanced", category="business")
+    await session.commit()
+
+    candidates = await words_repo.find_unknown_words_for_generation(
+        session, user_id=user.id, language_code="en", level="advanced", limit=3, topics=["travel"]
+    )
+    assert all(w.category == "travel" for w in candidates)
+
+
+async def test_find_unknown_words_for_generation_empty_topics_falls_back_to_level(session):
+    user, ul = await _create_user(session, telegram_id=5010, level="advanced")
+    await _seed_local_words(session, 3, prefix="beg", difficulty="beginner")
+    await _seed_local_words(session, 3, prefix="adv", difficulty="advanced")
+    await session.commit()
+
+    candidates = await words_repo.find_unknown_words_for_generation(
+        session, user_id=user.id, language_code="en", level="advanced", limit=3, topics=[]
+    )
+    assert all(w.difficulty == "advanced" for w in candidates)
+
+
+async def test_generate_new_words_passes_selected_topics_and_industry_to_ai(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5011)
+    ul.learning_goal = "work"
+    ul.work_industry = "healthcare"
+    ul.selected_topics = ["travel", "food"]
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_category == "travel, food"
+    assert fake.last_industry == "healthcare"
+
+
+async def test_generate_new_words_omits_industry_when_goal_is_not_work(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5012)
+    ul.learning_goal = "travel"
+    ul.work_industry = "healthcare"  # leftover from a previous goal - must not leak
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_industry is None
 
 
 async def test_get_new_words_for_today_auto_generates_the_shortfall(session):

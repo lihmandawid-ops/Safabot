@@ -83,17 +83,25 @@ async def get_by_language(
 
 
 async def find_unknown_words_for_generation(
-    session: AsyncSession, *, user_id: int, language_code: str, level: str, limit: int
+    session: AsyncSession, *, user_id: int, language_code: str, level: str, limit: int, topics: list[str] | None = None
 ) -> list[Word]:
     """Word rows in `language_code` the user has NO UserWord row for at
     all - regardless of status (bugfix spec: "не уже известные пользователю
     ни в каком статусе") - the local candidate pool
     services/word_generation_service.py draws from before ever calling an
     AI provider. Prefers words matching the user's level, same as
-    learning.get_new_word_candidates, without hard-excluding the rest."""
+    learning.get_new_word_candidates, without hard-excluding the rest.
+
+    `topics` (settings-improvements stage section 22's 🎯 Темы обучения)
+    additionally prefers words whose .category is one of the user's
+    selected topics - ranked ABOVE the level match, so a topic-relevant
+    word at the "wrong" difficulty still beats an on-level word from an
+    unrelated topic. Never excludes non-matching words: a sparse or
+    empty selected_topics list must still return a full candidate list."""
     if limit <= 0:
         return []
     level_match = case((Word.difficulty == level, 0), else_=1)
+    topic_match = case((Word.category.in_(topics), 0), else_=1) if topics else case((True, 1))
     known_subquery = (
         select(UserWord.id).where(UserWord.user_id == user_id, UserWord.word_id == Word.id).exists()
     )
@@ -101,7 +109,7 @@ async def find_unknown_words_for_generation(
         select(Word)
         .where(Word.language_code == language_code, ~known_subquery)
         .options(*_WITH_RELATIONS)
-        .order_by(level_match, Word.id)
+        .order_by(topic_match, level_match, Word.id)
         .limit(limit)
     )
     return list(result.scalars().unique().all())

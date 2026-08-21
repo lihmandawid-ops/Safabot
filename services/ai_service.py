@@ -59,10 +59,14 @@ class AIService(ABC):
     @abstractmethod
     async def generate_words(
         self, *, language_code: str, translation_language: str, level: str, amount: int,
-        category: str | None = None, known_words: list[str] | None = None, user_id: int,
+        category: str | None = None, industry: str | None = None,
+        known_words: list[str] | None = None, user_id: int,
     ) -> ai_models.GenerateWordsResult:
         """Up to `amount` new words the learner doesn't already know
-        (WordGenerationService's AI fallback for the shortfall)."""
+        (WordGenerationService's AI fallback for the shortfall). `category`
+        carries the user's selected topics (settings-improvements stage
+        section 22: "🎯 Темы обучения"); `industry` is only ever set when
+        the user's learning_goal is "work" (section 20)."""
 
     @abstractmethod
     async def explain_word(
@@ -103,7 +107,7 @@ class NotConfiguredAIService(AIService):
     async def lookup_word(self, word, *, language_code, translation_language, user_level=None, user_id):
         raise AIConfigurationError()
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, known_words=None, user_id):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, known_words=None, user_id):
         raise AIConfigurationError()
 
     async def explain_word(self, word, *, language_code, translation_language, level, interface_language, user_id):
@@ -324,13 +328,15 @@ class LiveAIService(AIService):
         )
         return await self._complete("lookup_word", user_id, _LOOKUP_WORD_SYSTEM, user, _parse_word_response)
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, known_words=None, user_id):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, known_words=None, user_id):
         known = ", ".join((known_words or [])[:200])
+        industry_line = f"Learner's work industry - bias vocabulary toward this field: {industry}\n" if industry else ""
         user = (
             f"Language being learned (ISO 639-1): {language_code}\n"
             f"Translate into language code: {translation_language}\n"
             f"Learner level: {level}\n"
             f"Category: {category or 'any suitable for everyday use'}\n"
+            f"{industry_line}"
             f"Exact amount of new distinct words to return: {amount}\n"
             f"Words the learner already knows - never repeat any of these: {known or 'none'}\n"
         )

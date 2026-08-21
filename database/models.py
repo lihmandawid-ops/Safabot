@@ -19,6 +19,7 @@ import enum
 from datetime import date, datetime, time
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -222,6 +223,17 @@ class UserLanguage(Base):
     daily_new_words: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Personalization (settings-improvements stage sections 17-23): why
+    # this specific language is being learned, and - only meaningful when
+    # learning_goal == "work" - which industry, so word_generation_service
+    # can bias both the local-pool query and the AI prompt toward
+    # relevant vocabulary. All three are optional and default to "not
+    # set" (None/[]) precisely so the migration adding them never forces
+    # existing users to answer anything retroactively.
+    learning_goal: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    work_industry: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    selected_topics: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
