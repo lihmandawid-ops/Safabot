@@ -107,6 +107,42 @@ async def test_interface_language_pick_answers_once_and_updates_screen(handler_d
     q.edit_message_text.assert_awaited_once()
 
 
+async def test_switching_to_ukrainian_actually_renders_ukrainian_everywhere(handler_db):
+    """Repetition-system-audit stage: real user report - picking Ukrainian
+    confirmed with the Russian text "Язык изменён" and everything after
+    stayed Russian. Root cause was locales/uk.json not existing at all
+    (utils.i18n.t() silently falls back to Russian for a language with no
+    catalog); this proves the confirmation toast, the settings screen
+    that follows, AND the resent persistent main-menu keyboard are all
+    genuinely Ukrainian now, not just "answered without erroring"."""
+    q = await _run("set:iface:pick:uk")
+    assert q.answer.call_count == 1
+
+    toast_text = q.answer.call_args[0][0]
+    assert "Мову інтерфейсу змінено" in toast_text
+    assert "Язык интерфейса изменён" not in toast_text
+
+    q.edit_message_text.assert_awaited_once()
+    screen_text = q.edit_message_text.call_args[0][0]
+    assert "Ваші налаштування" in screen_text
+    assert "Ваши настройки" not in screen_text
+
+    q.message.reply_text.assert_awaited_once()
+    menu_text, menu_kwargs = q.message.reply_text.call_args[0][0], q.message.reply_text.call_args[1]
+    assert "Головне меню оновлено" in menu_text
+    labels = [btn.text for row in menu_kwargs["reply_markup"].keyboard for btn in row]
+    assert "⚙️ Налаштування" in labels
+
+    # And it must persist across a fresh load of the same user row, not
+    # just linger in the ContextVar from this one update.
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.interface_language == "uk"
+
+
 async def test_daily_words_pick_answers_once_and_updates_screen(handler_db):
     q = await _run("set:words:pick:8")
     assert q.answer.call_count == 1

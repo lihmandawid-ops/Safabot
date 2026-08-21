@@ -198,3 +198,23 @@ async def test_opening_my_words_card_backfills_missing_pronunciation(handler_db,
     q.callback_query.answer.assert_awaited_once()
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "KWY-et" in text
+
+
+async def test_starting_a_learning_session_backfills_missing_pronunciation(handler_db, monkeypatch):
+    """Repetition-system-audit stage section 15: real bug - most seed
+    words have no pronunciation baked in, and unlike the dictionary/⭐ Мои
+    слова cards, handlers/learning.py's word-front screen never called
+    ensure_pronunciation at all, so 📚 Учить слова would show "произношение
+    пока недоступно" for a word whose card, opened moments later, would
+    successfully backfill it."""
+    from handlers import learning as learning_handler
+
+    monkeypatch.setattr("services.dictionary_service.get_ai_service", _mock_ai_service)
+
+    q = _query("learn:start")
+    await learning_handler.handle_learning_callback(q, SimpleNamespace(user_data={}))
+
+    q.callback_query.answer.assert_awaited_once()
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "KWY-et" in text
+    assert "Произношение пока недоступно" not in text

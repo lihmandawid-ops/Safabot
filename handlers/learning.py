@@ -26,6 +26,7 @@ from keyboards.learning import (
     after_session_keyboard,
     continue_keyboard,
     extra_amount_keyboard,
+    known_keyboard,
     old_words_amount_keyboard,
     rating_keyboard,
     reveal_keyboard,
@@ -95,7 +96,7 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
     )
 
 
-async def _show_current_word(edit, learning_session, translation_language: str) -> None:
+async def _show_current_word(session, edit, learning_session, translation_language: str, *, user_id: int) -> None:
     if learning_session is None:
         await edit(t("learning.session_gone", get_current_language()))
         return
@@ -103,6 +104,16 @@ async def _show_current_word(edit, learning_session, translation_language: str) 
     if item is None:
         await edit(t("learning.nothing_to_do", get_current_language()))
         return
+    # repetition-system-audit stage section 15: most seed words were
+    # inserted without a pronunciation (only AI-generated ones get it for
+    # free) - the dictionary card already backfills this on demand
+    # (word_service.ensure_pronunciation), but the learning flow never
+    # did, so a seeded word would show "pronunciation unavailable" here
+    # even though opening its dictionary card moments later would fix it.
+    # A no-op (no AI call) whenever pronunciation is already set.
+    await word_service.ensure_pronunciation(
+        session, item.user_word.word, translation_language=translation_language, user_id=user_id,
+    )
     await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id, is_new_word=item.is_new_word))
 
 
@@ -183,21 +194,21 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             learning_session = await learning_service.build_learning_session(
                 session, user=user, user_language=current, include_new_words=True
             )
-            await _show_current_word(edit, learning_session, current.translation_language)
+            await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
         elif data == "learn:reviewonly":
             await query.answer()
             learning_session = await learning_service.build_learning_session(
                 session, user=user, user_language=current, include_new_words=False
             )
-            await _show_current_word(edit, learning_session, current.translation_language)
+            await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
         elif data == "learn:continue":
             await query.answer()
             learning_session = await sessions_repo.get_active_session(
                 session, user_id=user.id, language_code=current.language_code
             )
-            await _show_current_word(edit, learning_session, current.translation_language)
+            await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
         elif data == "learn:intro":
             await query.answer()
@@ -235,7 +246,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             if learning_session is None:
                 await edit(t("learning.old_words_unavailable", get_current_language()), reply_markup=after_session_keyboard())
                 return
-            await _show_current_word(edit, learning_session, current.translation_language)
+            await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
         elif data == "learn:dictionary":
             await query.answer()
@@ -284,7 +295,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                     reply_markup=after_session_keyboard(),
                 )
             else:
-                await _show_current_word(edit, learning_session, current.translation_language)
+                await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
         elif data.startswith("learn:reveal:"):
             user_word_id = int(data.removeprefix("learn:reveal:"))
@@ -297,9 +308,16 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 await edit(t("learning.session_gone", get_current_language()))
                 return
             await query.answer()
+            # repetition-system-audit stage sections 7-11: a word never
+            # seen before shows a single acknowledgment, not the 4-button
+            # difficulty scale - "how well do you remember this" makes no
+            # sense before the first exposure. Only once it's back for a
+            # real REVIEW (is_new_word False) does the difficulty scale
+            # apply.
+            keyboard = known_keyboard(user_word_id) if item.is_new_word else rating_keyboard(user_word_id)
             await edit(
                 _render_back(item.user_word, current.translation_language),
-                reply_markup=rating_keyboard(user_word_id),
+                reply_markup=keyboard,
             )
 
         elif data.startswith("review:"):
@@ -334,7 +352,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                     reply_markup=after_session_keyboard(),
                 )
             else:
-                await _show_current_word(edit, learning_session, current.translation_language)
+                await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
 
 learning_callback_handler = CallbackQueryHandler(handle_learning_callback, pattern="^(learn|review):")

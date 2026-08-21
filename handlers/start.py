@@ -49,7 +49,7 @@ from services import subscription_service
 from utils.goals import GOAL_CODES
 from utils.i18n import get_current_language, set_current_language, t
 from utils.industries import PRESET_INDUSTRIES
-from utils.languages import LANGUAGE_BY_CODE, language_display_name
+from utils.languages import LANGUAGE_BY_CODE, is_supported, language_display_name
 from utils.levels import LEVEL_CODES
 from utils.logging import get_logger
 from utils.timezones import TIMEZONE_CHOICES
@@ -73,12 +73,29 @@ GOAL_PREFIX = "onb:goal:"
 INDUSTRY_PREFIX = "onb:industry:"
 TIMEZONE_PREFIX = "onb:tz:"
 
-# settings-improvements stage: the FIRST screen (before any language is
-# chosen at all) has no per-user language to read yet, so it stays in
-# this fallback - every screen from choose_interface_language onward uses
-# set_current_language(code) instead, so the rest of onboarding renders
-# in whichever language the user just picked.
-_LANG = "ru"
+# repetition-system-audit stage: the very FIRST screen (before any
+# language is chosen at all) has no per-user language to read from the
+# database yet, so it used to always render in this hardcoded fallback
+# regardless of who was looking at it - real bug found via audit: a
+# Telegram user with language_code="he" got a Russian welcome message.
+# _detect_interface_language() below picks a real starting point instead;
+# this constant now only matters as ITS OWN fallback when Telegram sends
+# no usable language_code at all. Every screen from
+# choose_interface_language onward uses set_current_language(code), so
+# the rest of onboarding renders in whichever language the user then
+# explicitly picks via the buttons.
+_LANG = "en"
+
+
+def _detect_interface_language(telegram_user) -> str:
+    """Telegram's `language_code` (BCP-47, e.g. "he", "en-US", "pt-BR") is
+    used ONLY to pick a sensible starting point for the very first
+    message - the user still explicitly confirms/picks their interface
+    language via interface_language_keyboard() right after, exactly like
+    before. Never touches learning_language, which stays a fully separate
+    choice a few steps later."""
+    code = (telegram_user.language_code or "").split("-")[0].lower()
+    return code if is_supported(code) else _LANG
 
 
 def _level_keyboard() -> InlineKeyboardMarkup:
@@ -142,8 +159,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     context.user_data.clear()
+    detected = _detect_interface_language(telegram_user)
+    set_current_language(detected)  # so interface_language_keyboard()'s own button labels (language names) match too
     await update.message.reply_text(
-        t("onboarding.welcome", _LANG), reply_markup=interface_language_keyboard()
+        t("onboarding.welcome", detected), reply_markup=interface_language_keyboard()
     )
     return CHOOSING_INTERFACE_LANGUAGE
 

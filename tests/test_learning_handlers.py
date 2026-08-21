@@ -252,6 +252,73 @@ async def test_dictionary_button_from_after_session_menu_switches_mode(handler_d
     q.callback_query.edit_message_text.assert_awaited_once()
 
 
+async def test_new_word_reveal_shows_single_learned_button_not_rating_scale(handler_db):
+    """Repetition-system-audit stage sections 7-11: a word never seen
+    before must offer only a single acknowledgment - the 4-button
+    difficulty scale (С трудом/Не помню/Помню/Очень легко) doesn't make
+    sense before the user has ever tried to recall it."""
+    from handlers import learning as learning_handler
+
+    learning_session = await _build_main_session()
+    item = sorted(learning_session.items, key=lambda i: i.position)[0]
+    assert item.is_new_word is True
+
+    context = SimpleNamespace(user_data={})
+    q = _query(f"learn:reveal:{item.user_word_id}")
+    await learning_handler.handle_learning_callback(q, context)
+
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    buttons = [b for row in markup.inline_keyboard for b in row]
+    assert len(buttons) == 1
+    assert buttons[0].callback_data == f"review:{item.user_word_id}:good"
+    assert "Запомнил" in buttons[0].text
+    for forbidden in ("С трудом", "Не помню", "🙂 Помню", "Очень легко"):
+        assert forbidden not in buttons[0].text
+
+
+async def test_review_word_reveal_still_shows_the_4_button_rating_scale(handler_db):
+    """A word the user has already met before (is_new_word False) keeps
+    the existing difficulty-scale behavior exactly as before."""
+    from datetime import datetime
+
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.models import WordStatus
+    from handlers import learning as learning_handler
+    from services import learning_service, word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="duewordxyz")
+        uw = await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = datetime(2020, 1, 1)
+        uw_id = uw.id
+
+    from database.repositories import user_languages as user_languages_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        learning_session = await learning_service.build_learning_session(
+            s, user=user, user_language=current, include_new_words=False
+        )
+    item = next(i for i in learning_session.items if i.user_word_id == uw_id)
+    assert item.is_new_word is False
+
+    context = SimpleNamespace(user_data={})
+    q = _query(f"learn:reveal:{uw_id}")
+    await learning_handler.handle_learning_callback(q, context)
+
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    buttons = [b for row in markup.inline_keyboard for b in row]
+    assert len(buttons) == 4
+    assert {b.callback_data for b in buttons} == {
+        f"review:{uw_id}:again", f"review:{uw_id}:hard", f"review:{uw_id}:good", f"review:{uw_id}:easy",
+    }
+
+
 async def test_completion_screen_offers_after_session_keyboard(handler_db):
     from services.repetition_service import ReviewGrade
     from handlers import learning as learning_handler

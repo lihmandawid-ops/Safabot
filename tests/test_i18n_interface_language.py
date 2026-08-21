@@ -30,12 +30,58 @@ def test_get_current_language_defaults_when_none_passed():
     assert get_current_language() == FALLBACK_LANGUAGE
 
 
-def test_available_languages_includes_ru_and_en():
+def test_available_languages_includes_all_8_supported_languages():
+    """Repetition-system-audit stage: real bug found - only ru.json and
+    en.json actually existed on disk even though SUPPORTED_LANGUAGES (and
+    every onboarding/settings picker) offered all 8 languages. Picking
+    e.g. Ukrainian silently fell back to Russian for every single string
+    (utils.i18n.t()'s own fallback-to-FALLBACK_LANGUAGE behavior), which
+    is exactly the "language doesn't propagate" symptom that was
+    reported. available_languages() (used by
+    keyboards.main_menu.resolve_menu_action) is the simplest signal that
+    a language is actually usable, so this guards against the bug class
+    recurring for any of the 8, not just Ukrainian."""
     from utils.i18n import available_languages
+    from utils.languages import SUPPORTED_LANGUAGES
 
     langs = available_languages()
-    assert "ru" in langs
-    assert "en" in langs
+    for lang in SUPPORTED_LANGUAGES:
+        assert lang.code in langs, f"locales/{lang.code}.json is missing"
+
+
+def test_every_locale_file_has_the_same_keys_and_placeholders_as_russian():
+    """A locale file that exists but is missing keys, or has a
+    placeholder typo (e.g. {name} vs {nam}), fails silently at runtime -
+    t() just falls back to Russian for that one key. Catch that at test
+    time instead of in production for a language nobody on the team
+    reads fluently."""
+    import json
+    import re
+
+    from utils.i18n import LOCALES_DIR
+    from utils.languages import SUPPORTED_LANGUAGES
+
+    ru = json.loads((LOCALES_DIR / "ru.json").read_text(encoding="utf-8"))
+    placeholder = re.compile(r"\{(\w+)\}")
+
+    for lang in SUPPORTED_LANGUAGES:
+        path = LOCALES_DIR / f"{lang.code}.json"
+        assert path.exists(), f"{path} does not exist"
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+        assert set(catalog) == set(ru), f"{lang.code}.json key set differs from ru.json"
+        for key, ru_value in ru.items():
+            assert set(placeholder.findall(ru_value)) == set(placeholder.findall(catalog[key])), (
+                f"{lang.code}.json[{key!r}] placeholders don't match ru.json"
+            )
+
+
+def test_ukrainian_actually_translates_not_just_falls_back_to_russian():
+    from utils.i18n import t
+
+    ru_text = t("menu.button.settings", "ru")
+    uk_text = t("menu.button.settings", "uk")
+    assert uk_text != ru_text
+    assert uk_text == "⚙️ Налаштування"
 
 
 def test_t_uses_real_english_translation_not_just_fallback():

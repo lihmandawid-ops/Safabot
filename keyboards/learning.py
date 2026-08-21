@@ -80,6 +80,20 @@ def extra_amount_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def known_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
+    """First exposure to a brand-new word (repetition-system-audit stage
+    sections 7-11): the 4-button difficulty scale doesn't make sense
+    before the user has ever tried to recall it - a single acknowledgment
+    reuses the SAME GOOD grade and review: callback the 4-button
+    keyboard's own "🙂 Помню" button uses, so the word enters the exact
+    same repetition system as every other answer (no second scoring
+    path), just without asking for a difficulty judgment on something
+    never seen before."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("learning.button.learned", get_current_language()), callback_data=f"review:{user_word_id}:{ReviewGrade.GOOD.value}")]]
+    )
+
+
 def rating_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
