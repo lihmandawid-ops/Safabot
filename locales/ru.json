@@ -46,6 +46,8 @@
   "settings.menu.subscription": "💎 Подписка",
   "settings.menu.back": "⬅️ Назад",
   "settings.menu.add_language": "➕ Добавить язык",
+  "settings.menu.timezone": "🌍 Часовой пояс",
+  "settings.menu.timezone_search": "🔎 Другой часовой пояс",
 
   "settings.pick_current_language": "Выберите язык, который хотите сделать активным:",
   "settings.current_language_updated": "✅ Активный язык изменён на {flag} {name}.",
@@ -65,6 +67,11 @@
   "settings.notification_time_updated": "✅ Время обновлено: {slot} — {time}.",
   "settings.notifications_toggled_on": "🔔 Уведомления включены.",
   "settings.notifications_toggled_off": "🔕 Уведомления выключены.",
+  "settings.pick_timezone": "🌍 Часовой пояс\n\nВыбери свой часовой пояс:",
+  "settings.timezone_updated": "✅ Часовой пояс изменён: {name}.",
+  "settings.timezone_search_prompt": "Напиши город, страну или регион (например: Tel Aviv, New York, Berlin):",
+  "settings.timezone_search_empty": "Ничего не найдено. Попробуй другое название (по-английски, например: Tel Aviv, Warsaw, Tokyo).",
+  "settings.timezone_search_results": "Вот что нашлось — выбери подходящий часовой пояс:",
 
   "subscription.status.trial": "Пробный период",
   "subscription.status.free": "Бесплатный",

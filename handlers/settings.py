@@ -38,15 +38,19 @@ from keyboards.settings import (
     notification_slot_keyboard,
     notification_time_keyboard,
     settings_home_keyboard,
+    timezone_pick_keyboard,
+    timezone_search_results_keyboard,
 )
 from services import subscription_service
 from utils.i18n import t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.logging import get_logger
+from utils.timezones import TIMEZONE_BY_NAME, is_valid_timezone, search_timezones
 
 logger = get_logger(__name__)
 
 _LANG = "ru"
+MODE = "settings_timezone_search"
 
 
 async def _build_summary(session, user) -> str:
@@ -110,6 +114,20 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         summary = await _build_summary(session, user)
 
     await update.message.reply_text(summary, reply_markup=settings_home_keyboard())
+
+
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    """🔎 Другой часовой пояс (bugfix stage): the only free-text step in
+    Settings today, routed here via context.user_data["mode"] == MODE the
+    same way handlers/dictionary.py etc. handle their own free-text modes
+    (see handlers/menu.py's router)."""
+    matches = search_timezones(text)
+    if not matches:
+        await update.message.reply_text(t("settings.timezone_search_empty", _LANG))
+        return
+    await update.message.reply_text(
+        t("settings.timezone_search_results", _LANG), reply_markup=timezone_search_results_keyboard(matches)
+    )
 
 
 async def _get_user_or_warn(session, query) -> object | None:
@@ -309,6 +327,27 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             level = data.removeprefix("set:level:pick:")
             await users_repo.update_user(session, user, level=level)
             await query.answer(t("settings.level_updated", _LANG, level=t(f"level.{level}", _LANG)))
+            await _render_home(query, session, user)
+
+        elif data == "set:tz:list":
+            await query.answer()
+            context.user_data.pop("mode", None)
+            await query.edit_message_text(t("settings.pick_timezone", _LANG), reply_markup=timezone_pick_keyboard())
+
+        elif data == "set:tz:search":
+            await query.answer()
+            context.user_data["mode"] = MODE
+            await query.edit_message_text(t("settings.timezone_search_prompt", _LANG))
+
+        elif data.startswith("set:tz:pick:"):
+            iana_name = data.removeprefix("set:tz:pick:")
+            if not is_valid_timezone(iana_name):
+                await query.answer(t("settings.timezone_search_empty", _LANG), show_alert=True)
+                return
+            context.user_data.pop("mode", None)
+            await users_repo.update_user(session, user, timezone=iana_name)
+            label = TIMEZONE_BY_NAME[iana_name].label if iana_name in TIMEZONE_BY_NAME else iana_name
+            await query.answer(t("settings.timezone_updated", _LANG, name=label))
             await _render_home(query, session, user)
 
         elif data == "set:sub":

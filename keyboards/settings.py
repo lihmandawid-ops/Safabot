@@ -13,6 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from utils.i18n import t
 from utils.languages import SUPPORTED_LANGUAGES
 from utils.levels import LEVEL_CODES
+from utils.timezones import TIMEZONE_CHOICES
 
 _LANG = "ru"
 
@@ -32,6 +33,7 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.notification_time", _LANG), callback_data="set:notif:slots")],
             [InlineKeyboardButton(t("settings.menu.notifications_toggle", _LANG), callback_data="set:notif:toggle")],
             [InlineKeyboardButton(t("settings.menu.level", _LANG), callback_data="set:level:list")],
+            [InlineKeyboardButton(t("settings.menu.timezone", _LANG), callback_data="set:tz:list")],
             [InlineKeyboardButton(t("settings.menu.subscription", _LANG), callback_data="set:sub")],
         ]
     )
@@ -139,4 +141,17 @@ def level_pick_keyboard() -> InlineKeyboardMarkup:
         for code in LEVEL_CODES
     ]
     rows.append([InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def timezone_pick_keyboard() -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(tz.label, callback_data=f"set:tz:pick:{tz.iana_name}")] for tz in TIMEZONE_CHOICES]
+    rows.append([InlineKeyboardButton(t("settings.menu.timezone_search", _LANG), callback_data="set:tz:search")])
+    rows.append([InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def timezone_search_results_keyboard(iana_names: list[str]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(name, callback_data=f"set:tz:pick:{name}")] for name in iana_names]
+    rows.append([InlineKeyboardButton(t("settings.menu.back", _LANG), callback_data="set:tz:list")])
     return InlineKeyboardMarkup(rows)

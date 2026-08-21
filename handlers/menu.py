@@ -100,6 +100,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if mode == grammar_handler.MODE:
         await grammar_handler.handle_text_input(update, context, text)
         return
+    if mode == settings_handler.MODE:
+        await settings_handler.handle_text_input(update, context, text)
+        return
 
     await update.message.reply_text(t("menu.unknown_command", _LANG))
 
