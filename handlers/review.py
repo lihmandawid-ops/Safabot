@@ -1,21 +1,19 @@
-"""🔄 Повторить (learning-core stage, section 8's priority order: due
-reviews only, never new words).
-
-Thin wrapper: the whole word -> reveal -> rate -> next word loop, the
-callback handler, and the resume logic are shared with 📚 Учить слова -
-see handlers/learning.py, which build_learning_session's
-include_new_words flag already distinguishes. Routed from
-handlers/menu.py.
+"""🔄 Повторить (repetition-system stage sections 1-2): ON-DEMAND REVIEW -
+triggers immediately regardless of next_review_at, unlike the old
+due-gated flow this used to call (handlers.learning.show_review_intro,
+kept as-is for internal callers that still want the strict due-only
+behavior). See handlers/review_now.py for the actual count-picker /
+mode-picker / flashcard / quiz flow. Routed from handlers/menu.py.
 """
 from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from handlers.learning import show_review_intro
+from handlers.review_now import show_review_now_menu
 
 MODE = "learning"
 
 
 async def show_review_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await show_review_intro(update, context)
+    await show_review_now_menu(update, context)

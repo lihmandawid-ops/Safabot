@@ -158,6 +158,22 @@ class User(Base):
     afternoon_time: Mapped[time] = mapped_column(Time, nullable=False)
     evening_time: Mapped[time] = mapped_column(Time, nullable=False)
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Per-slot toggles (repetition-system stage section 13): the single
+    # notifications_enabled switch above stays the master on/off, these
+    # three let a user keep e.g. only the morning reminder without
+    # touching the other two times.
+    morning_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    afternoon_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    evening_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # 📚 Настройки повторения (repetition-system stage sections 9, 26):
+    # how many words go in one automatic reminder message (4/6/8), and
+    # which mode manual review defaults to. review_mode=None means
+    # "always ask" - the on-demand 🔁 Повторить flow's mode picker is
+    # shown every time; once set to "flashcard"/"quiz"/"mixed" that
+    # picker is skipped and the saved mode is used directly.
+    notification_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    review_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     trial_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     trial_end: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -271,6 +287,12 @@ class Word(Base):
     difficulty: Mapped[str | None] = mapped_column(String(32), nullable=True)
     category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_verb: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Full, language-appropriate conjugation table (repetition-system
+    # stage sections 18-25): {tense_name: ["I am", "You are", ...], ...}
+    # - tense names are whatever's natural for this word's own language,
+    # never forced into English's four. Cached here so 🔤 Все формы only
+    # ever calls DeepSeek once per verb, not on every tap.
+    verb_conjugation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -501,6 +523,12 @@ class NotificationLog(Base):
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # UserWord ids actually shown in this notification (repetition-system
+    # stage section 15) - lets the next notification for this user avoid
+    # repeating the exact same set three times running. Null for
+    # notifications that predate this field or never listed real words
+    # (e.g. the evening "done for today" message).
+    word_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (

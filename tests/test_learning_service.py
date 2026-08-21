@@ -391,6 +391,113 @@ async def test_old_words_session_returns_none_when_nothing_to_review(session):
     assert result is None
 
 
+async def test_on_demand_review_is_never_gated_by_next_review_at(session):
+    """repetition-system stage section 1: ON-DEMAND REVIEW must not wait
+    for next_review_at - words scheduled far in the future must still be
+    returned when the user explicitly asks to review right now."""
+    user, ul = await _create_user(session, telegram_id=2500)
+    words = await _make_words(session, 3, prefix="future_")
+    for w in words:
+        uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = NOW + timedelta(days=30)
+    await session.commit()
+
+    result = await learning_service.get_words_for_on_demand_review(session, user=user, user_language=ul, limit=3, now=NOW)
+    assert len(result) == 3
+
+
+async def test_on_demand_review_falls_back_to_new_words_when_short(session):
+    """repetition-system stage section 2, tier 3: "остальные активные
+    слова" includes never-studied (NEW) words when due+upcoming aren't
+    enough - this is the one behavior that differs from 🔁 Повторить
+    старые слова, which never touches NEW words."""
+    user, ul = await _create_user(session, telegram_id=2501)
+    due_words = await _make_words(session, 1, prefix="due_")
+    new_words = await _make_words(session, 4, prefix="unstarted_")
+    for w in due_words:
+        uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = NOW - timedelta(hours=1)
+    for w in new_words:
+        await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")  # stays NEW
+    await session.commit()
+
+    result = await learning_service.get_words_for_on_demand_review(session, user=user, user_language=ul, limit=4, now=NOW)
+    assert len(result) == 4
+    statuses = {uw.status for uw in result}
+    assert WordStatus.NEW in statuses
+
+
+async def test_on_demand_review_excludes_paused_and_mastered_by_default(session):
+    user, ul = await _create_user(session, telegram_id=2502)
+    active = await _make_words(session, 1, prefix="active_")
+    paused = await _make_words(session, 1, prefix="paused_")
+    mastered = await _make_words(session, 1, prefix="mastered_")
+
+    active_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=active[0].id, language_code="en")
+    active_uw.status = WordStatus.REVIEW
+    active_uw.next_review_at = NOW - timedelta(hours=1)
+    paused_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=paused[0].id, language_code="en")
+    paused_uw.status = WordStatus.PAUSED
+    paused_uw.next_review_at = NOW - timedelta(hours=1)
+    mastered_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=mastered[0].id, language_code="en")
+    mastered_uw.status = WordStatus.MASTERED
+    await session.commit()
+
+    result = await learning_service.get_words_for_on_demand_review(session, user=user, user_language=ul, limit=10, now=NOW)
+    words_shown = {uw.word.word for uw in result}
+    assert words_shown == {"active_0"}
+
+
+async def test_on_demand_review_includes_mastered_when_explicitly_requested(session):
+    user, ul = await _create_user(session, telegram_id=2503)
+    mastered = await _make_words(session, 1, prefix="mastered_")
+    mastered_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=mastered[0].id, language_code="en")
+    mastered_uw.status = WordStatus.MASTERED
+    await session.commit()
+
+    without = await learning_service.get_words_for_on_demand_review(session, user=user, user_language=ul, limit=10, now=NOW)
+    assert without == []
+
+    with_mastered = await learning_service.get_words_for_on_demand_review(
+        session, user=user, user_language=ul, limit=10, include_mastered=True, now=NOW
+    )
+    assert len(with_mastered) == 1
+
+
+async def test_record_on_demand_answer_correct_uses_good_grade(session):
+    user, ul = await _create_user(session, telegram_id=2504)
+    word = (await _make_words(session, 1, prefix="know_"))[0]
+    uw = await user_words_repo.add_word(session, user_id=user.id, word_id=word.id, language_code="en")
+    uw.status = WordStatus.REVIEW
+    uw.repetition_stage = 2
+    await session.commit()
+
+    await learning_service.record_on_demand_answer(session, uw, correct=True, now=NOW)
+    await session.commit()
+
+    assert uw.repetition_stage == 3  # GOOD advances one stage
+    assert uw.correct_answers == 1
+    assert uw.wrong_answers == 0
+
+
+async def test_record_on_demand_answer_wrong_uses_again_grade(session):
+    user, ul = await _create_user(session, telegram_id=2505)
+    word = (await _make_words(session, 1, prefix="dontknow_"))[0]
+    uw = await user_words_repo.add_word(session, user_id=user.id, word_id=word.id, language_code="en")
+    uw.status = WordStatus.REVIEW
+    uw.repetition_stage = 2
+    await session.commit()
+
+    await learning_service.record_on_demand_answer(session, uw, correct=False, now=NOW)
+    await session.commit()
+
+    assert uw.repetition_stage == 1  # AGAIN steps back one stage
+    assert uw.wrong_answers == 1
+    assert uw.next_review_at is not None  # schedule advances, word isn't just dropped
+
+
 async def test_streak_does_not_double_count_same_local_day(session):
     user, ul = await _create_user(session, telegram_id=3100, daily_new_words=4, timezone="UTC")
 

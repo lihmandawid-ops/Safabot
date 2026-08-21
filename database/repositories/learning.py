@@ -18,7 +18,15 @@ from database.models import UserWord, Word, WordStatus
 from services.repetition_service import RepetitionResult, clamp_difficulty
 from utils.time import utc_now
 
-_WITH_WORD = (selectinload(UserWord.word).selectinload(Word.translations),)
+_WORD = selectinload(UserWord.word)
+# Two separate loader options sharing the same prefix - chaining a single
+# .selectinload() call only follows one path, so translations/examples
+# (siblings on Word) each need their own branch (same pattern as
+# database/repositories/user_words.py's _WITH_WORD).
+_WITH_WORD = (
+    _WORD.selectinload(Word.translations),
+    _WORD.selectinload(Word.examples),
+)
 
 
 async def get_due_for_review(
@@ -56,18 +64,26 @@ async def get_words_for_old_review(
     language_code: str,
     limit: int,
     include_mastered: bool = False,
+    include_new_fallback: bool = False,
     now: datetime | None = None,
 ) -> list[UserWord]:
-    """🔁 Повторить старые слова (settings-improvements stage section 4):
-    the user explicitly asked for `limit` old words, so unlike
-    get_due_for_review this backfills with the soonest-NOT-YET-due words
-    when fewer than `limit` are actually overdue, instead of just handing
-    back a short list. Still the same due/next_review_at priority and the
-    same PAUSED/DELETED exclusion as the normal review queue - no second
-    scheduling algorithm, only a different "how many, and what if not
-    enough are due yet" policy on top of it. MASTERED is excluded unless
-    `include_mastered` is explicitly requested (spec: "MASTERED only if
-    explicitly requested")."""
+    """🔁 Повторить старые слова / 🔁 Повторить (on-demand review,
+    settings-improvements stage section 4 and repetition-system stage
+    sections 1-2): the user explicitly asked for `limit` words right now,
+    so unlike get_due_for_review this backfills with the soonest-NOT-YET-
+    due words when fewer than `limit` are actually overdue, instead of
+    just handing back a short list. Still the same due/next_review_at
+    priority and the same PAUSED/DELETED exclusion as the normal review
+    queue - no second scheduling algorithm, only a different "how many,
+    and what if not enough are due yet" policy on top of it. MASTERED is
+    excluded unless `include_mastered` is explicitly requested.
+
+    `include_new_fallback` adds a third tier - NEW-status (never-studied)
+    words - used only by the on-demand 🔁 Повторить entry point, which
+    the spec explicitly wants to fall back to "остальные активные слова"
+    rather than come up short; 🔁 Повторить старые слова (the post-
+    session menu button) never sets this, since by then 📚 Учить слова
+    has already handled the day's new words on purpose."""
     now = now if now is not None else utc_now()
     statuses = [WordStatus.LEARNING, WordStatus.REVIEW]
     if include_mastered:
@@ -91,7 +107,25 @@ async def get_words_for_old_review(
         .limit(limit - len(due))
     )
     upcoming = list(result.scalars().unique().all())
-    return due + upcoming
+    combined = due + upcoming
+    if not include_new_fallback or len(combined) >= limit:
+        return combined
+
+    exclude_ids = exclude_ids | {uw.id for uw in upcoming}
+    result = await session.execute(
+        select(UserWord)
+        .where(
+            UserWord.user_id == user_id,
+            UserWord.language_code == language_code,
+            UserWord.status == WordStatus.NEW,
+            UserWord.id.notin_(exclude_ids) if exclude_ids else True,
+        )
+        .options(*_WITH_WORD)
+        .order_by(UserWord.added_at.asc())
+        .limit(limit - len(combined))
+    )
+    filler = list(result.scalars().unique().all())
+    return combined + filler
 
 
 async def get_new_word_candidates(

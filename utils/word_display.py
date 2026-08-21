@@ -12,6 +12,18 @@ def status_label(status: str) -> str:
     return t(f"card.status.{status}", get_current_language())
 
 
+def translation_for(user_word, translation_language: str) -> str | None:
+    """The one translation to show for `user_word` in a single-line
+    context (a numbered list row, a quiz question, a review card) - the
+    user's current translation_language if the word has one in it,
+    otherwise whichever translation happens to be first. None only when
+    the word has no translations at all."""
+    matches = [tr.translation for tr in user_word.word.translations if tr.language_code == translation_language]
+    if matches:
+        return matches[0]
+    return user_word.word.translations[0].translation if user_word.word.translations else None
+
+
 def format_pronunciation(word) -> str | None:
     """Combines Word.pronunciation (a readable, non-IPA transliteration -
     e.g. "goh") with Word.phonetic (IPA - e.g. "/ɡoʊ/") when both exist,

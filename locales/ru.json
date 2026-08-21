@@ -372,5 +372,19 @@
   "settings.current_goal_none": "🎯 Цель: не указана",
   "settings.current_industry": "💼 Сфера: {industry}",
   "settings.current_topics": "📌 Темы: {topics}",
-  "settings.current_topics_none": "📌 Темы: не выбраны"
+  "settings.current_topics_none": "📌 Темы: не выбраны",
+
+  "revnow.count_prompt": "Сколько слов повторить?",
+  "revnow.count_prompt_mastered": "🏆 Повторить выученные\n\nСколько слов повторить?",
+  "revnow.button.mastered": "🏆 Повторить выученные",
+  "revnow.mode_prompt": "Как повторять?",
+  "revnow.button.flashcard_mode": "🔤 Обычное повторение",
+  "revnow.button.quiz_mode": "🏆 Викторина",
+  "revnow.progress": "🔁 Повторение {current}/{total}",
+  "revnow.button.know": "✅ Знаю",
+  "revnow.button.dontknow": "❌ Не знаю",
+  "revnow.completed": "🎉 Повторение завершено!\n\nПовторено: {count}/{total}",
+  "revnow.button.again": "🔁 Повторить ещё",
+  "revnow.empty": "Пока нет слов для повторения.\n\nЗагляни в 📖 Словарь, чтобы добавить новые слова.",
+  "revnow.button.new_words": "➕ Новые слова"
 }

@@ -225,6 +225,52 @@ async def build_old_words_session(
     return await sessions_repo.get_session_by_id(session, learning_session.id)
 
 
+ON_DEMAND_REVIEW_OPTIONS: tuple[int, ...] = (4, 8, 12)
+DEFAULT_ON_DEMAND_REVIEW_COUNT = 4
+
+
+async def get_words_for_on_demand_review(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    limit: int,
+    include_mastered: bool = False,
+    now: datetime | None = None,
+) -> list[UserWord]:
+    """🔁 Повторить (repetition-system stage sections 1-2): ON-DEMAND
+    REVIEW - never gated on next_review_at, always returns up to `limit`
+    words right now. Reuses get_words_for_old_review's due-then-upcoming
+    priority with its extra NEW-status fallback tier
+    (include_new_fallback=True) so "not enough due/upcoming words" still
+    hands back a full set when the user has that many words at all.
+    Does NOT build a LearningSession - this flow's state lives in
+    context.user_data (handlers/review_now.py), the same lightweight
+    pattern 🏆 Викторина already uses, since its compact ✅/❌ card format
+    is a different interaction from the full flashcard session."""
+    return await learning_repo.get_words_for_old_review(
+        session, user_id=user.id, language_code=user_language.language_code,
+        limit=limit, include_mastered=include_mastered, include_new_fallback=True, now=now,
+    )
+
+
+async def record_on_demand_answer(
+    session: AsyncSession, user_word: UserWord, *, correct: bool, now: datetime | None = None
+) -> None:
+    """✅ Знаю / ❌ Не знаю (repetition-system stage section 16): reuses
+    the exact same repetition_service.calculate_next_review +
+    learning_repo.apply_review_result path record_review_answer uses for
+    the normal session-based flow - never a second interval system.
+    Reviewing a word early (before its next_review_at) is fine: the
+    algorithm just computes the next interval from `now`, same as
+    answering it right on schedule would (section 17 - manual review
+    must not "break" the schedule, only advance it normally)."""
+    now = now if now is not None else utc_now()
+    grade = ReviewGrade.GOOD if correct else ReviewGrade.AGAIN
+    result = calculate_next_review(user_word.repetition_stage, user_word.interval_days, grade, now=now)
+    await learning_repo.apply_review_result(session, user_word, result, now=now)
+
+
 async def mark_word_as_seen(
     session: AsyncSession, learning_session: LearningSession, user_word_id: int, *, grade: ReviewGrade, now: datetime | None = None
 ) -> LearningSessionItem | None:
