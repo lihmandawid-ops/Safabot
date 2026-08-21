@@ -50,6 +50,17 @@ _SLOT_ENABLED_FIELD = {
     SLOT_EVENING: "evening_enabled",
 }
 
+# Notification-scheduler-fix stage section 9: a user's exact scheduled
+# minute is easy to miss entirely if the bot happens to be mid-restart
+# right then (real incident: a startup crash-loop silently ate that day's
+# sends for anyone whose slot fell inside the outage). A short grace
+# window means the very next poll tick after a restart still catches a
+# recently-missed slot, while NotificationLog's once-a-day dedup (checked
+# separately, in send_for_slot) guarantees only one message ever goes out
+# for it - and once the window fully passes with the bot down, that day's
+# send for this slot is skipped for good rather than firing hours later.
+NOTIFICATION_GRACE_MINUTES = 10
+
 
 @dataclass(frozen=True)
 class NotificationContent:
@@ -67,7 +78,9 @@ def _is_due_now(user, slot: str, now: datetime) -> bool:
         return False
     slot_time = _slot_time(user, slot)
     hour, minute = local_hour_minute(now, user.timezone)
-    return (hour, minute) == (slot_time.hour, slot_time.minute)
+    now_minutes = hour * 60 + minute
+    slot_minutes = slot_time.hour * 60 + slot_time.minute
+    return slot_minutes <= now_minutes < slot_minutes + NOTIFICATION_GRACE_MINUTES
 
 
 async def _select_review_words(session, user, slot: str, current, now: datetime) -> list[UserWord]:
@@ -128,6 +141,7 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
         return None
 
     due = await _select_review_words(session, user, slot, current, now)
+    logger.debug("SELECTED_WORDS_COUNT=%d telegram_id=%s slot=%s", len(due), user.telegram_id, slot)
 
     # Repetition-system stage sections 10-11: whenever there is anything
     # due, always use the compact per-word reminder - never the old
@@ -141,16 +155,19 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
     if slot == SLOT_MORNING:
         new_words = (await learning_service.get_new_words_for_today(session, user=user, user_language=current, now=now)).words
         if not new_words:
+            logger.info("REVIEW_NOTIFICATION_SKIPPED telegram_id=%s slot=%s REASON=NO_ACTIVE_WORDS", user.telegram_id, slot)
             return None
         text = t("notification.morning.new_only", language, new_count=len(new_words))
         return NotificationContent(text, start_keyboard())
 
     if slot == SLOT_AFTERNOON:
+        logger.info("REVIEW_NOTIFICATION_SKIPPED telegram_id=%s slot=%s REASON=NO_ACTIVE_WORDS", user.telegram_id, slot)
         return None
 
     if slot == SLOT_EVENING:
         if user.last_learning_date == local_today(now, user.timezone):
             return NotificationContent(t("notification.evening.done", language))
+        logger.info("REVIEW_NOTIFICATION_SKIPPED telegram_id=%s slot=%s REASON=NO_ACTIVE_WORDS", user.telegram_id, slot)
         return None
 
     raise ValueError(f"Unknown notification slot: {slot!r}")  # pragma: no cover - exhaustive guard
@@ -172,6 +189,7 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
 
     for user in users:
         try:
+            hour, minute = local_hour_minute(now, user.timezone)
             due_now = _is_due_now(user, slot, now)
         except Exception:
             # A single user with an unrecognized/corrupted timezone value
@@ -186,6 +204,10 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
                 slot, user.telegram_id, user.timezone,
             )
             continue
+        logger.debug(
+            "CHECKING_REVIEWS telegram_id=%s slot=%s USER_TIMEZONE=%s CURRENT_LOCAL_TIME=%02d:%02d %s_NOTIFICATION_DUE=%s",
+            user.telegram_id, slot, user.timezone, hour, minute, slot.upper(), due_now,
+        )
         if not due_now:
             continue
 
@@ -202,9 +224,14 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
         if content is None:
             continue
 
+        logger.info("SENDING_REVIEW_NOTIFICATION telegram_id=%s slot=%s", user.telegram_id, slot)
         try:
             await bot.send_message(chat_id=user.telegram_id, text=content.text, reply_markup=content.reply_markup)
         except Exception:
+            # Covers a blocked/deleted Telegram account (Forbidden, "bot
+            # was blocked", "chat not found") the exact same way as any
+            # other send failure - one user's account state must never
+            # stop the loop for anyone else (sections 18-19).
             logger.exception("Failed to send %s notification to telegram_id=%s", slot, user.telegram_id)
             continue
 
@@ -212,6 +239,7 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
             await notifications_repo.log_sent(
                 session, user_id=user.id, notification_type=slot, scheduled_date=scheduled_date, word_ids=content.word_ids,
             )
+        logger.info("REVIEW_NOTIFICATION_SENT telegram_id=%s slot=%s", user.telegram_id, slot)
         sent_count += 1
 
     return sent_count
@@ -221,7 +249,35 @@ async def send_due_notifications(bot, *, now: datetime | None = None) -> int:
     """Checks all three slots in one pass - what scheduler/notifications.py's
     poller calls on each tick."""
     now = now if now is not None else utc_now()
+    logger.debug("NOTIFICATION_CHECK_STARTED")
     total = 0
     for slot in SLOTS:
         total += await send_for_slot(bot, slot, now=now)
+    logger.debug("NOTIFICATION_CHECK_FINISHED sent=%d", total)
     return total
+
+
+async def send_review_notification_now(bot, *, telegram_id: int, slot: str = SLOT_MORNING) -> bool:
+    """Manual test trigger (notification-scheduler-fix stage section 25):
+    builds and sends `slot`'s compact review reminder for `telegram_id`
+    right now, using the exact same word-selection/content logic a real
+    scheduled send uses - but bypasses morning_time/afternoon_time/
+    evening_time, the per-slot enabled toggles, AND the NotificationLog
+    once-a-day dedup entirely (it neither checks nor writes it), so
+    calling this can never change whether the REAL scheduled send for
+    `slot` still fires later the same day, and can be re-run freely while
+    testing. Returns True only if a message was actually sent."""
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, telegram_id)
+        if user is None:
+            logger.warning("send_review_notification_now: no user with telegram_id=%s", telegram_id)
+            return False
+        content = await _build_content(session, user, slot, utc_now())
+
+    if content is None:
+        logger.info("send_review_notification_now: nothing to send telegram_id=%s slot=%s", telegram_id, slot)
+        return False
+
+    await bot.send_message(chat_id=telegram_id, text=content.text, reply_markup=content.reply_markup)
+    logger.info("send_review_notification_now: sent telegram_id=%s slot=%s", telegram_id, slot)
+    return True

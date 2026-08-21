@@ -140,7 +140,7 @@ async def test_disabled_notifications_are_never_sent(notif_db):
     bot.send_message.assert_not_awaited()
 
 
-async def test_notification_not_sent_outside_its_scheduled_minute(notif_db):
+async def test_notification_not_sent_far_outside_its_scheduled_minute(notif_db):
     from database.database import session_scope
     from services import notification_service
 
@@ -149,10 +149,30 @@ async def test_notification_not_sent_outside_its_scheduled_minute(notif_db):
         await _add_due_word(s, user.id)
 
     bot = AsyncMock()
-    off_time = datetime(2026, 6, 15, 9, 5, 0)  # 5 minutes late
+    off_time = datetime(2026, 6, 15, 9, 30, 0)  # well past the grace window
     sent = await notification_service.send_for_slot(bot, "morning", now=off_time)
 
     assert sent == 0
+
+
+async def test_notification_still_sent_within_grace_period_after_a_missed_exact_minute(notif_db):
+    """Notification-scheduler-fix stage section 9: a short restart or a
+    delayed poll tick around the scheduled minute must not silently skip
+    the whole day - real incident: a startup crash-loop ate several
+    users' scheduled sends because the old exact-minute match had zero
+    tolerance."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s, morning=time(9, 0))
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    off_time = datetime(2026, 6, 15, 9, 5, 0)  # 5 minutes late, inside NOTIFICATION_GRACE_MINUTES
+    sent = await notification_service.send_for_slot(bot, "morning", now=off_time)
+
+    assert sent == 1
 
 
 async def test_repeated_poll_does_not_send_twice(notif_db):
@@ -214,6 +234,33 @@ async def test_timezone_is_respected_not_server_time(notif_db):
     nine_am_utc = datetime(2026, 6, 16, 9, 0, 0)
     sent_at_9am_utc = await notification_service.send_for_slot(bot2, "morning", now=nine_am_utc)
     assert sent_at_9am_utc == 0  # that's 18:00 in Tokyo, not their morning slot
+
+
+async def test_timezone_respected_across_several_real_zones(notif_db):
+    """Notification-scheduler-fix stage section 26: local 09:00 must mean
+    09:00 in the user's OWN zone for a representative spread of real IANA
+    names (not a fixed UTC offset, which would be wrong for at least one
+    of these on the test date since they don't all share the same DST
+    rules) - computed via zoneinfo itself rather than hardcoded offsets,
+    so this doesn't silently rot if a rule changes."""
+    from datetime import date, time as dtime
+    from zoneinfo import ZoneInfo
+
+    from database.database import session_scope
+    from services import notification_service
+
+    for i, tz_name in enumerate(("Asia/Jerusalem", "Europe/Moscow", "Europe/Berlin", "America/New_York")):
+        telegram_id = 5300 + i
+        async with session_scope() as s:
+            user, _ = await _create_user(s, telegram_id=telegram_id, timezone=tz_name, morning=time(9, 0))
+            await _add_due_word(s, user.id, word=f"tzword{i}")
+
+        local_nine_am = datetime.combine(date(2026, 6, 15), dtime(9, 0), tzinfo=ZoneInfo(tz_name))
+        now_utc = local_nine_am.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        bot = AsyncMock()
+        sent = await notification_service.send_for_slot(bot, "morning", now=now_utc)
+        assert sent == 1, f"expected a send for {tz_name} at its local 09:00"
 
 
 async def test_afternoon_notification_reviews_wording(notif_db):
@@ -444,3 +491,75 @@ async def test_one_users_corrupted_timezone_does_not_block_other_users(notif_db)
     assert sent == 1
     bot.send_message.assert_awaited_once()
     assert bot.send_message.await_args.kwargs["chat_id"] == good_user.telegram_id
+
+
+async def test_send_review_notification_now_sends_regardless_of_scheduled_time(notif_db):
+    """Notification-scheduler-fix stage section 25: the manual test
+    trigger must work at any moment, not just the user's actual
+    morning_time/afternoon_time/evening_time - that's the whole point of
+    a way to test without waiting for real time."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s, morning=time(23, 59))  # nowhere near "now"
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    sent = await notification_service.send_review_notification_now(bot, telegram_id=user.telegram_id, slot="morning")
+
+    assert sent is True
+    bot.send_message.assert_awaited_once()
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "Быстрое повторение" in text
+
+
+async def test_send_review_notification_now_does_not_touch_notification_log(notif_db):
+    """Must never affect whether the REAL scheduled send for that slot
+    still fires later the same day - so it must not write (or even
+    check) NotificationLog."""
+    from database.database import session_scope
+    from database.repositories import notifications as notifications_repo
+    from services import notification_service
+    from utils.time import local_today, utc_now
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s, morning=time(9, 0))
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_review_notification_now(bot, telegram_id=user.telegram_id, slot="morning")
+
+    async with session_scope() as s:
+        was_sent = await notifications_repo.was_sent(
+            s, user_id=user.id, notification_type="morning", scheduled_date=local_today(utc_now(), user.timezone),
+        )
+    assert was_sent is False
+
+    # The real scheduled send for today must still go through afterward.
+    bot2 = AsyncMock()
+    sent = await notification_service.send_for_slot(bot2, "morning", now=MORNING_UTC)
+    assert sent == 1
+
+
+async def test_send_review_notification_now_returns_false_for_unknown_user(notif_db):
+    from services import notification_service
+
+    bot = AsyncMock()
+    sent = await notification_service.send_review_notification_now(bot, telegram_id=999999, slot="morning")
+    assert sent is False
+    bot.send_message.assert_not_awaited()
+
+
+async def test_send_review_notification_now_returns_false_when_nothing_to_send(notif_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from services import notification_service
+
+    async with session_scope() as s:
+        await _create_user(s, telegram_id=5400)
+
+    bot = AsyncMock()
+    sent = await notification_service.send_review_notification_now(bot, telegram_id=5400, slot="afternoon")
+    assert sent is False
+    bot.send_message.assert_not_awaited()

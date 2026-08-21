@@ -28,6 +28,7 @@ POLL_INTERVAL_SECONDS = 60
 
 
 async def _poll_and_send(context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.debug("SCHEDULER_TICK")
     try:
         sent = await notification_service.send_due_notifications(context.bot)
         if sent:
@@ -45,3 +46,4 @@ def register_notification_jobs(application: Application) -> None:
             "JobQueue is not available - install python-telegram-bot[job-queue] (see requirements.txt)"
         )
     application.job_queue.run_repeating(_poll_and_send, interval=POLL_INTERVAL_SECONDS, first=10)
+    logger.info("SCHEDULER_STARTED interval=%ds", POLL_INTERVAL_SECONDS)
