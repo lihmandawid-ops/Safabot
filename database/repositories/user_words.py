@@ -67,8 +67,16 @@ async def pause_word(session: AsyncSession, user_word: UserWord) -> UserWord:
 
 
 async def resume_word(session: AsyncSession, user_word: UserWord, *, status: str) -> UserWord:
+    """Bringing a word back into REVIEW must make it actually due again -
+    a naturally-MASTERED word has next_review_at=None (repetition_service
+    never schedules a further review for it), and a long-PAUSED word may
+    carry a next_review_at from months ago. Leaving either alone would
+    silently exclude the word from get_due_for_review forever (None fails
+    its IS NOT NULL check) or until its stale date arrives, even though
+    the user just explicitly asked to review it again."""
     user_word.status = status
     user_word.is_paused = False
+    user_word.next_review_at = utc_now()
     await session.flush()
     return user_word
 

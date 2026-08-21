@@ -73,3 +73,28 @@ def test_word_card_keyboard_has_no_separate_pronounce_button():
     assert "card:add:42" in all_callbacks
     assert "card:usage:42" in all_callbacks
     assert "card:forms:42" in all_callbacks
+
+
+def test_status_label_follows_interface_language_not_always_russian():
+    """settings-improvements stage: utils/word_display.py used to hardcode
+    _LANG = "ru" for every label (status, part of speech, section
+    headers) regardless of who was looking at the card - the same class
+    of bug fixed everywhere else in this stage."""
+    from utils.i18n import set_current_language
+    from utils.word_display import status_label
+
+    set_current_language("ru")
+    assert status_label("mastered") == "✅ Выучено"
+    set_current_language("en")
+    assert status_label("mastered") == "✅ Mastered"
+    set_current_language("ru")
+
+
+def test_card_headers_follow_interface_language():
+    from utils.i18n import set_current_language
+
+    set_current_language("en")
+    text = render_word_card_text(_card(pronunciation="/əˈpɔɪntmənt/"))
+    assert "🔊 Pronunciation:" in text
+    assert "/əˈpɔɪntmənt/" in text
+    set_current_language("ru")

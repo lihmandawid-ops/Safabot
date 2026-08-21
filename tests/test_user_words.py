@@ -9,6 +9,7 @@ from datetime import time
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from database.repositories import learning as learning_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
 from database.models import WordStatus
@@ -119,6 +120,54 @@ async def test_resume_word_with_progress_goes_to_review(session):
     await user_word_service.resume_word(session, added.user_word)
 
     assert added.user_word.status == WordStatus.REVIEW
+
+
+async def test_resume_word_naturally_mastered_becomes_due_immediately(session):
+    """settings-improvements stage: a naturally-mastered word (reached via
+    the real repetition algorithm) has next_review_at=None, since
+    repetition_service never schedules a further review for MASTERED.
+    Manually returning it to review from ⭐ Мои слова must make it
+    actually reappear in the due queue right away, not silently stay
+    excluded forever because next_review_at is still None."""
+    user = await _create_user(session, telegram_id=920)
+    word = await _create_word(session)
+    added = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=word.id, language_code="en")
+    added.user_word.repetition_stage = 7  # MASTERED_STAGE
+    added.user_word.status = WordStatus.MASTERED
+    added.user_word.next_review_at = None
+    await session.commit()
+
+    await user_word_service.resume_word(session, added.user_word)
+    await session.commit()
+
+    assert added.user_word.status == WordStatus.REVIEW
+    assert added.user_word.next_review_at is not None
+
+    due = await learning_repo.get_due_for_review(session, user_id=user.id, language_code="en", limit=10)
+    assert added.user_word.id in {uw.id for uw in due}
+
+
+async def test_resume_word_with_stale_schedule_becomes_due_immediately(session):
+    """A word paused while its next_review_at was still far in the future
+    must become due right away once explicitly un-paused, not wait out
+    its old schedule from before the pause."""
+    from datetime import timedelta
+
+    from utils.time import utc_now
+
+    user = await _create_user(session, telegram_id=921)
+    word = await _create_word(session)
+    added = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=word.id, language_code="en")
+    added.user_word.repetition_stage = 2
+    added.user_word.status = WordStatus.PAUSED
+    added.user_word.next_review_at = utc_now() + timedelta(days=30)
+    await session.commit()
+
+    await user_word_service.resume_word(session, added.user_word)
+    await session.commit()
+
+    due = await learning_repo.get_due_for_review(session, user_id=user.id, language_code="en", limit=10)
+    assert added.user_word.id in {uw.id for uw in due}
 
 
 async def test_delete_word_is_soft_delete_and_excluded_from_lists(session):

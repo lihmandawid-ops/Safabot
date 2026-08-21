@@ -76,9 +76,9 @@ def _format_next_review(when: datetime | None) -> str:
     when_date = when.date() if isinstance(when, datetime) else when
     today = date.today()
     if when_date == today:
-        label = "сегодня"
+        label = t("words.today", get_current_language())
     elif when_date == today + timedelta(days=1):
-        label = "завтра"
+        label = t("words.tomorrow", get_current_language())
     else:
         label = when_date.strftime("%d.%m.%Y")
     return t("words.manage_next_review", get_current_language(), when=label)
@@ -182,7 +182,7 @@ async def _render_manage_screen(
         t("words.manage_status", get_current_language(), status=status_label(user_word.status)),
         _format_next_review(user_word.next_review_at),
     ]
-    await send("\n".join(lines), reply_markup=single_word_keyboard(user_word.id))
+    await send("\n".join(lines), reply_markup=single_word_keyboard(user_word.id, user_word.status))
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:

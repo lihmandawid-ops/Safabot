@@ -93,6 +93,41 @@ def test_resolve_menu_action_returns_none_for_free_text():
     assert resolve_menu_action("apple") is None
 
 
+def test_single_word_keyboard_hides_review_button_for_active_word():
+    """settings-improvements stage section 3: the action row must reflect
+    the word's actual status - an actively-learning word has no use for a
+    redundant "add to review" button."""
+    from database.models import WordStatus
+    from keyboards.words import single_word_keyboard
+
+    markup = single_word_keyboard(1, WordStatus.REVIEW)
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "uw:review:1" not in callbacks
+    assert "uw:pause:1" in callbacks
+
+
+def test_single_word_keyboard_hides_pause_button_for_paused_word():
+    from database.models import WordStatus
+    from keyboards.words import single_word_keyboard
+
+    markup = single_word_keyboard(1, WordStatus.PAUSED)
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "uw:review:1" in callbacks
+    assert "uw:pause:1" not in callbacks
+
+
+def test_single_word_keyboard_offers_review_button_for_mastered_word():
+    """Spec: MASTERED must be manually returnable to review from the same
+    per-word action screen, not through a second, separate mechanism."""
+    from database.models import WordStatus
+    from keyboards.words import single_word_keyboard
+
+    markup = single_word_keyboard(1, WordStatus.MASTERED)
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "uw:review:1" in callbacks
+    assert "uw:pause:1" not in callbacks
+
+
 @pytest_asyncio.fixture
 async def handler_db(monkeypatch):
     fd, path = tempfile.mkstemp(suffix=".db")

@@ -219,6 +219,8 @@
   "words.manage_status": "Статус: {status}",
   "words.manage_next_review": "Следующее повторение: {when}",
   "words.manage_next_review_none": "Следующее повторение: не запланировано",
+  "words.today": "сегодня",
+  "words.tomorrow": "завтра",
 
   "words.bulk_header": "Выбраны:",
   "words.bulk_invalid": "Не понимаю выбор. Укажите номера через запятую или пробел, например: 2,5,7",

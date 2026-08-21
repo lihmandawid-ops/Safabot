@@ -4,14 +4,12 @@ the two handlers never format a word card differently.
 """
 from __future__ import annotations
 
-from utils.i18n import t
+from utils.i18n import get_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
-
-_LANG = "ru"
 
 
 def status_label(status: str) -> str:
-    return t(f"card.status.{status}", _LANG)
+    return t(f"card.status.{status}", get_current_language())
 
 
 _POS_WITH_LABEL = {
@@ -26,7 +24,7 @@ def part_of_speech_label(part_of_speech: str | None) -> str | None:
     (bugfix spec: word cards were missing part of speech entirely)."""
     if part_of_speech not in _POS_WITH_LABEL:
         return None
-    return t(f"card.pos.{part_of_speech}", _LANG)
+    return t(f"card.pos.{part_of_speech}", get_current_language())
 
 
 def render_word_card_text(card, *, status: str | None = None) -> str:
@@ -52,39 +50,39 @@ def render_word_card_text(card, *, status: str | None = None) -> str:
     pos_label = part_of_speech_label(card.word.part_of_speech)
     if pos_label is not None:
         lines.append("")
-        lines.append(t("card.pos_header", _LANG))
+        lines.append(t("card.pos_header", get_current_language()))
         lines.append(pos_label)
 
     lines.append("")
-    lines.append(t("card.pronunciation_header", _LANG))
-    lines.append(card.word.pronunciation if card.word.pronunciation else t("card.no_pronunciation", _LANG))
+    lines.append(t("card.pronunciation_header", get_current_language()))
+    lines.append(card.word.pronunciation if card.word.pronunciation else t("card.no_pronunciation", get_current_language()))
 
     lines.append("")
-    lines.append(t("card.definition_header", _LANG))
-    lines.append(card.word.definition if card.word.definition else t("card.no_definition", _LANG))
+    lines.append(t("card.definition_header", get_current_language()))
+    lines.append(card.word.definition if card.word.definition else t("card.no_definition", get_current_language()))
 
     lines.append("")
-    lines.append(t("card.example_label", _LANG))
+    lines.append(t("card.example_label", get_current_language()))
     if card.examples:
         example = card.examples[0]
         lines.append(example.example_text)
         if example.translation:
             lines.append(example.translation)
     else:
-        lines.append(t("card.no_examples", _LANG))
+        lines.append(t("card.no_examples", get_current_language()))
 
     usage_notes = [tr.usage_note for tr in card.translations if tr.usage_note]
     if usage_notes:
         lines.append("")
-        lines.append(t("card.usage_note", _LANG, note=usage_notes[0]))
+        lines.append(t("card.usage_note", get_current_language(), note=usage_notes[0]))
 
     return "\n".join(lines)
 
 
 def render_forms_text(card) -> str:
     if not card.forms:
-        return t("card.no_forms", _LANG)
-    lines = [t("card.forms_header", _LANG)]
+        return t("card.no_forms", get_current_language())
+    lines = [t("card.forms_header", get_current_language())]
     for form in card.forms:
         info = f" ({form.grammatical_info})" if form.grammatical_info else ""
         lines.append(f"  {form.form_type}: {form.form}{info}")

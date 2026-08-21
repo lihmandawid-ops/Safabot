@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from database.models import WordStatus
 from utils.i18n import get_current_language, t
 from utils.pagination import NEXT_LABEL, PREVIOUS_LABEL
 
@@ -35,16 +36,27 @@ def list_keyboard(*, has_previous: bool, has_next: bool) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(rows)
 
 
-def single_word_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t("words.button.review", get_current_language()), callback_data=f"uw:review:{user_word_id}")],
-            [InlineKeyboardButton(t("words.button.pause", get_current_language()), callback_data=f"uw:pause:{user_word_id}")],
-            [InlineKeyboardButton(t("words.button.delete", get_current_language()), callback_data=f"uw:delete:{user_word_id}")],
-            [InlineKeyboardButton(t("words.button.open_card", get_current_language()), callback_data=f"uw:card:{user_word_id}")],
-            [InlineKeyboardButton(t("words.button.back", get_current_language()), callback_data="uw:list_back")],
-        ]
-    )
+def single_word_keyboard(user_word_id: int, status: str | None = None) -> InlineKeyboardMarkup:
+    """Manual repetition control (settings-improvements stage section 3):
+    the action row reflects the word's ACTUAL current status instead of
+    always offering both "add to review" and "pause" - a word that's
+    already actively being reviewed has no use for a redundant "add to
+    review" tap, and a PAUSED or MASTERED word has no use for "pause".
+    `status` is optional only so old code paths that don't have it yet
+    keep working; omitting it falls back to the previous always-show-both
+    behaviour."""
+    rows = []
+    if status == WordStatus.PAUSED or status == WordStatus.MASTERED:
+        rows.append([InlineKeyboardButton(t("words.button.review", get_current_language()), callback_data=f"uw:review:{user_word_id}")])
+    elif status is None:
+        rows.append([InlineKeyboardButton(t("words.button.review", get_current_language()), callback_data=f"uw:review:{user_word_id}")])
+        rows.append([InlineKeyboardButton(t("words.button.pause", get_current_language()), callback_data=f"uw:pause:{user_word_id}")])
+    else:
+        rows.append([InlineKeyboardButton(t("words.button.pause", get_current_language()), callback_data=f"uw:pause:{user_word_id}")])
+    rows.append([InlineKeyboardButton(t("words.button.delete", get_current_language()), callback_data=f"uw:delete:{user_word_id}")])
+    rows.append([InlineKeyboardButton(t("words.button.open_card", get_current_language()), callback_data=f"uw:card:{user_word_id}")])
+    rows.append([InlineKeyboardButton(t("words.button.back", get_current_language()), callback_data="uw:list_back")])
+    return InlineKeyboardMarkup(rows)
 
 
 def delete_confirm_keyboard(user_word_id: int) -> InlineKeyboardMarkup:

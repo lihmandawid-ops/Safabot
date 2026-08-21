@@ -219,6 +219,8 @@
   "words.manage_status": "Status: {status}",
   "words.manage_next_review": "Next review: {when}",
   "words.manage_next_review_none": "Next review: not scheduled",
+  "words.today": "today",
+  "words.tomorrow": "tomorrow",
 
   "words.bulk_header": "Selected:",
   "words.bulk_invalid": "I don't understand the selection. Give numbers separated by commas or spaces, e.g. 2,5,7",
