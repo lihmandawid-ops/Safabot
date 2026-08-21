@@ -48,19 +48,38 @@ async def _current_language(session, telegram_id: int):
     return user, current
 
 
-def _render_results(text: str, translation: str, key_words: list[tuple[str, str]], phrases: list[str]) -> str:
+def _render_results(
+    text: str,
+    translation: str,
+    text_pronunciation: str | None,
+    key_words: list[tuple[str, str, str | None]],
+    phrases: list[tuple[str, str | None]],
+) -> str:
+    """Global pronunciation rule sections 43-45: the whole analyzed text,
+    every key word, and every useful phrase each get their own
+    pronunciation shown inline when the AI provided one - key words and
+    phrases keep pronunciation in parentheses right on their existing
+    numbered/bulleted line rather than a second line each, so the list
+    stays as compact as it already was."""
     lines = [t("text_analysis.title", get_current_language()), "", text, translation]
+    if text_pronunciation:
+        lines.append("")
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=text_pronunciation))
     if key_words:
         lines.append("")
         lines.append(t("text_analysis.key_words_header", get_current_language()))
-        lines.extend(f"{i}. {word} — {translation}" for i, (word, translation) in enumerate(key_words, start=1))
+        for i, (word, word_translation, pronunciation) in enumerate(key_words, start=1):
+            word_part = f"{word} ({pronunciation})" if pronunciation else word
+            lines.append(f"{i}. {word_part} — {word_translation}")
     else:
         lines.append("")
         lines.append(t("text_analysis.no_key_words", get_current_language()))
     if phrases:
         lines.append("")
         lines.append(t("text_analysis.phrases_header", get_current_language()))
-        lines.extend(f"- {phrase}" for phrase in phrases)
+        for phrase, pronunciation in phrases:
+            phrase_part = f"{phrase} ({pronunciation})" if pronunciation else phrase
+            lines.append(f"- {phrase_part}")
     lines.append("")
     lines.append(t("text_analysis.select_hint", get_current_language()))
     return "\n".join(lines)
@@ -108,10 +127,11 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await update.message.reply_text(t("ai.generic_error", get_current_language()))
             return
 
-        key_words = [(kw.word, kw.translation) for kw in result.key_words]
+        key_words = [(kw.word, kw.translation, kw.pronunciation) for kw in result.key_words]
+        phrases = [(ph.phrase, ph.pronunciation) for ph in result.useful_phrases]
         context.user_data["text_analysis"] = {"words": [kw.word for kw in result.key_words]}
         await update.message.reply_text(
-            _render_results(result.original_text, result.translation, key_words, result.useful_phrases),
+            _render_results(result.original_text, result.translation, result.pronunciation, key_words, phrases),
             reply_markup=results_keyboard() if key_words else None,
         )
 

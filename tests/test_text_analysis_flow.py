@@ -29,11 +29,12 @@ class _MockProvider(AIProvider):
 TEXT_ANALYSIS_JSON = (
     '{"original_text": "I need to schedule an appointment with my doctor tomorrow.", '
     '"translation": "Мне нужно записаться на приём к врачу завтра.", '
+    '"pronunciation": "ay need too SKED-yool an uh-POYNT-ment", '
     '"key_words": ['
-    '{"word": "schedule", "translation": "планировать", "part_of_speech": "verb"}, '
-    '{"word": "appointment", "translation": "встреча", "part_of_speech": "noun"}, '
+    '{"word": "schedule", "translation": "планировать", "part_of_speech": "verb", "pronunciation": "SKED-yool"}, '
+    '{"word": "appointment", "translation": "встреча", "part_of_speech": "noun", "pronunciation": "uh-POYNT-ment"}, '
     '{"word": "doctor", "translation": "врач", "part_of_speech": "noun"}'
-    '], "useful_phrases": ["schedule an appointment"]}'
+    '], "useful_phrases": [{"phrase": "schedule an appointment", "pronunciation": "SKED-yool an uh-POYNT-ment"}]}'
 )
 
 
@@ -119,10 +120,11 @@ async def test_analyze_text_shows_results_with_numbered_key_words(handler_db, mo
 
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.call_args[0][0]
-    assert "1. schedule — планировать" in text
-    assert "2. appointment — встреча" in text
-    assert "3. doctor — врач" in text
-    assert "schedule an appointment" in text
+    assert "🔊 ay need too SKED-yool an uh-POYNT-ment" in text
+    assert "1. schedule (SKED-yool) — планировать" in text
+    assert "2. appointment (uh-POYNT-ment) — встреча" in text
+    assert "3. doctor — врач" in text  # no pronunciation from AI -> no parens, never crashes
+    assert "schedule an appointment (SKED-yool an uh-POYNT-ment)" in text
     assert context.user_data["text_analysis"]["words"] == ["schedule", "appointment", "doctor"]
 
 

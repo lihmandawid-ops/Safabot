@@ -161,6 +161,7 @@ class AnalyzedWord(BaseModel):
     word: str
     translation: str
     part_of_speech: str | None = None
+    pronunciation: str | None = None
 
     @field_validator("word", "translation")
     @classmethod
@@ -183,13 +184,57 @@ class AnalyzedWord(BaseModel):
         value = value.lower()
         return value if value in _VALID_PARTS_OF_SPEECH else None
 
+    @field_validator("pronunciation", mode="before")
+    @classmethod
+    def _clean_pronunciation(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
+
+
+class AnalyzedPhrase(BaseModel):
+    """💬 Полезные фразы (global pronunciation rule, section 44): a phrase
+    with its own whole-phrase pronunciation, kept alongside key_words
+    rather than replacing it - key_words already covers per-word
+    pronunciation for the significant vocabulary shown from the text."""
+
+    phrase: str
+    pronunciation: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_plain_string(cls, value: object) -> object:
+        # Tolerates an older/pre-pronunciation AI response shape (a plain
+        # list[str]) so a model that ignores the updated prompt still
+        # degrades gracefully instead of failing the whole analysis.
+        if isinstance(value, str):
+            return {"phrase": value, "pronunciation": None}
+        return value
+
+    @field_validator("phrase")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("pronunciation", mode="before")
+    @classmethod
+    def _clean_pronunciation(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
+
 
 class TextAnalysisResult(BaseModel):
     original_text: str
     translation: str
+    pronunciation: str | None = None
     key_words: list[AnalyzedWord] = Field(default_factory=list)
     difficulty: str | None = None
-    useful_phrases: list[str] = Field(default_factory=list)
+    useful_phrases: list[AnalyzedPhrase] = Field(default_factory=list)
+
+    @field_validator("pronunciation", mode="before")
+    @classmethod
+    def _clean_pronunciation(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
 
     @field_validator("difficulty", mode="before")
     @classmethod

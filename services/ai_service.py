@@ -232,10 +232,17 @@ _EXPLAIN_SYSTEM = (
 
 _ANALYZE_TEXT_SYSTEM = (
     "You analyze a short text for a language-learning app. Respond with ONLY a JSON object: "
-    '{"original_text": str, "translation": str, '
-    '"key_words": [{"word": str, "translation": str, "part_of_speech": str|null}], '
-    '"difficulty": str|null, "useful_phrases": [str]}. '
-    "key_words should list the words most worth learning from the text, in the order they appear."
+    '{"original_text": str, "translation": str, "pronunciation": str|null, '
+    '"key_words": [{"word": str, "translation": str, "part_of_speech": str|null, "pronunciation": str|null}], '
+    '"difficulty": str|null, "useful_phrases": [{"phrase": str, "pronunciation": str|null}]}. '
+    "key_words should list the words most worth learning from the text, in the order they appear. "
+    'The top-level "pronunciation" is a phonetic transcription of the WHOLE original_text, and each '
+    'key word\'s and each useful_phrase\'s own "pronunciation" is a transcription of just that word or '
+    "phrase - all using the translation language's own spelling conventions (not IPA, not a "
+    "transcription system for a third language) so a reader of the translation language can sound "
+    "it out using that language's own spelling. Always attempt a pronunciation for the whole text, "
+    "for every key word, and for every useful phrase, rather than leaving it null, unless the "
+    "script makes this genuinely impossible - these fields are shown to the learner directly."
 )
 
 _EXTRACT_WORDS_SYSTEM = (

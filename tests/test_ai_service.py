@@ -53,9 +53,9 @@ GOOD_GENERATE_JSON = (
 )
 GOOD_EXPLANATION_JSON = '{"explanation": "means to move", "examples": ["I go home."]}'
 GOOD_TEXT_ANALYSIS_JSON = (
-    '{"original_text": "I go home.", "translation": "Я иду домой.", '
-    '"key_words": [{"word": "go", "translation": "идти", "part_of_speech": "verb"}], '
-    '"useful_phrases": ["go home"]}'
+    '{"original_text": "I go home.", "translation": "Я иду домой.", "pronunciation": "ay goh hohm", '
+    '"key_words": [{"word": "go", "translation": "идти", "part_of_speech": "verb", "pronunciation": "goh"}], '
+    '"useful_phrases": [{"phrase": "go home", "pronunciation": "goh hohm"}]}'
 )
 
 
@@ -191,8 +191,11 @@ async def test_analyze_text_returns_validated_result():
         "I go home.", language_code="en", translation_language="ru", interface_language="ru", user_id=1,
     )
     assert result.translation == "Я иду домой."
+    assert result.pronunciation == "ay goh hohm"
     assert result.key_words[0].word == "go"
-    assert result.useful_phrases == ["go home"]
+    assert result.key_words[0].pronunciation == "goh"
+    assert result.useful_phrases[0].phrase == "go home"
+    assert result.useful_phrases[0].pronunciation == "goh hohm"
 
 
 async def test_explain_grammar_returns_formatted_string():
