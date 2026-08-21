@@ -5,6 +5,14 @@ back to whatever flat WordForm rows already exist (populated at word-
 generation time, spec section 20's "verb_forms" AI field) for a word that
 isn't a verb, or when the AI call itself fails - the card always shows
 SOMETHING reasonable rather than an error.
+
+A freshly generated table caches each form as {"form": str, "pronunciation":
+str|null} (global pronunciation rule section 49 - one pronunciation per
+individual conjugated form, not one shared pronunciation for the whole
+verb). Word.verb_conjugation is a schema-less JSON column, so older rows
+cached before this change keep their original flat list[str] shape
+forever - utils.word_display.render_conjugation_messages reads both
+shapes directly rather than this module reshaping old cache entries.
 """
 from __future__ import annotations
 
@@ -21,7 +29,7 @@ logger = get_logger(__name__)
 
 async def get_or_generate_conjugation(
     session: AsyncSession, word: Word, *, user_id: int
-) -> dict[str, list[str]] | None:
+) -> dict[str, list] | None:
     """None means no AI-generated conjugation table is available - the
     caller falls back to word.forms (the older flat WordForm list) or a
     "not available" message. Never raises: an AI failure here must not
@@ -40,5 +48,9 @@ async def get_or_generate_conjugation(
         logger.warning("Verb conjugation generation failed for word_id=%s", word.id)
         return None
 
-    await words_repo.set_verb_conjugation(session, word, result.forms)
-    return result.forms
+    forms = {
+        tense: [{"form": item.form, "pronunciation": item.pronunciation} for item in items]
+        for tense, items in result.forms.items()
+    }
+    await words_repo.set_verb_conjugation(session, word, forms)
+    return forms

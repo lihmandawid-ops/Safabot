@@ -253,17 +253,23 @@ _EXTRACT_WORDS_SYSTEM = (
 _VERB_CONJUGATION_SYSTEM = (
     "You produce a full conjugation table for a single verb, for a language-learning app. "
     'Respond with ONLY a JSON object: {"word": str, "language": str, "forms": object}. '
-    '"forms" maps a tense/mood name to a list of conjugated forms. The tense/mood names you '
-    "choose, and how many of them you return, MUST reflect how THIS language's own grammar "
-    "actually organizes its verb system - do not force English's four tenses (present/past/"
-    "future/perfect) onto a language that categorizes verbs differently (for example, use "
+    '"forms" maps a tense/mood name to a list of {"form": str, "pronunciation": str|null} '
+    "objects - one per grammatical person that language actually distinguishes. The tense/mood "
+    "names you choose, and how many of them you return, MUST reflect how THIS language's own "
+    "grammar actually organizes its verb system - do not force English's four tenses (present/"
+    "past/future/perfect) onto a language that categorizes verbs differently (for example, use "
     "German's own Präsens/Präteritum/Perfekt/Futur, or Russian's aspect-based present/past/"
     "future, or whatever a native grammar reference for that language would use). Each list "
     "must contain one form per grammatical person that language actually distinguishes (do not "
     "pad to exactly six English-style persons for a language that has fewer or more) - include "
     "the subject pronoun in each form exactly the way that language normally states it (e.g. "
     '"I am", not just "am"; omit the pronoun only if the language\'s own conjugated verb form '
-    "already fully identifies the person, e.g. many null-subject languages)."
+    "already fully identifies the person, e.g. many null-subject languages). Each form's own "
+    '"pronunciation" is a readable phonetic transcription (not IPA) of just THAT conjugated '
+    "form specifically - not the infinitive's pronunciation reused for every row, since "
+    "conjugated forms often sound different from each other - written so a learner can sound "
+    "it out directly. Always attempt one per form, leave it null only when the script makes "
+    "this genuinely impossible."
 )
 
 

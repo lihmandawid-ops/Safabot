@@ -20,8 +20,11 @@ class _FakeConjugationService:
     """Stands in for AIService, counting calls so tests can assert the
     cache actually prevents a second DeepSeek request (section 24)."""
 
-    def __init__(self, forms: dict[str, list[str]] | None = None, *, raises: Exception | None = None) -> None:
-        self.forms = forms or {"present": ["I go", "You go"], "past": ["I went", "You went"]}
+    def __init__(self, forms: dict[str, list] | None = None, *, raises: Exception | None = None) -> None:
+        self.forms = forms or {
+            "present": [{"form": "I go", "pronunciation": "gohh"}, {"form": "You go", "pronunciation": "gohh"}],
+            "past": [{"form": "I went", "pronunciation": "wehnt"}, {"form": "You went", "pronunciation": "wehnt"}],
+        }
         self.raises = raises
         self.calls = 0
 
@@ -70,6 +73,23 @@ async def test_get_or_generate_calls_ai_and_caches_for_a_verb(session, monkeypat
     result2 = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
     assert result2 == fake.forms
     assert fake.calls == 1
+
+
+async def test_get_or_generate_caches_per_form_pronunciation(session, monkeypatch):
+    """Global pronunciation rule section 49: each cached form keeps its
+    OWN pronunciation, not one shared pronunciation for the whole verb."""
+    from services import verb_forms_service
+
+    word, _ = await word_service.get_or_create_word(session, language_code="en", word="go", is_verb=True, part_of_speech="verb")
+    await session.commit()
+
+    fake = _FakeConjugationService()
+    monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
+
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
+    assert result["present"][0] == {"form": "I go", "pronunciation": "gohh"}
+    assert result["past"][0] == {"form": "I went", "pronunciation": "wehnt"}
+    assert word.verb_conjugation["present"][0]["pronunciation"] == "gohh"
 
 
 async def test_get_or_generate_returns_none_for_a_non_verb_without_calling_ai(session, monkeypatch):
@@ -166,6 +186,19 @@ async def test_forms_button_never_shows_a_popup_and_sends_a_real_message(handler
     args, kwargs = q.callback_query.message.reply_text.call_args_list[0]
     assert kwargs["reply_markup"] is not None
     assert "I go" in args[0]
+
+
+async def test_forms_message_shows_per_form_pronunciation(handler_db, monkeypatch):
+    from handlers import dictionary as dictionary_handler
+
+    fake = _FakeConjugationService()
+    monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
+
+    q = _query(f"card:forms:{handler_db.verb_id}")
+    await dictionary_handler.handle_dictionary_callback(q, SimpleNamespace(user_data={}))
+
+    text = q.callback_query.message.reply_text.call_args_list[0][0][0]
+    assert "I go (gohh)" in text
 
 
 async def test_forms_second_tap_uses_cache_not_a_new_ai_call(handler_db, monkeypatch):

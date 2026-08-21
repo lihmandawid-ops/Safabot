@@ -136,7 +136,7 @@ async def set_pronunciation(
     return word
 
 
-async def set_verb_conjugation(session: AsyncSession, word: Word, conjugation: dict[str, list[str]]) -> Word:
+async def set_verb_conjugation(session: AsyncSession, word: Word, conjugation: dict[str, list]) -> Word:
     """Caches an AI-generated conjugation table (repetition-system stage
     section 24: 🔤 Все формы must never re-call DeepSeek on a repeat tap)."""
     word.verb_conjugation = conjugation

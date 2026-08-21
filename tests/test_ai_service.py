@@ -216,8 +216,12 @@ async def test_extract_learning_words_returns_word_list():
 
 GOOD_VERB_CONJUGATION_JSON = (
     '{"word": "go", "language": "en", "forms": {'
-    '"present": ["I go", "You go", "He/She/It goes", "We go", "You go", "They go"], '
-    '"past": ["I went", "You went", "He/She/It went", "We went", "You went", "They went"]}}'
+    '"present": [{"form": "I go", "pronunciation": "ay goh"}, {"form": "You go", "pronunciation": "yoo goh"}, '
+    '{"form": "He/She/It goes", "pronunciation": "hee gohz"}, {"form": "We go", "pronunciation": "wee goh"}, '
+    '{"form": "You go", "pronunciation": "yoo goh"}, {"form": "They go", "pronunciation": "thay goh"}], '
+    '"past": [{"form": "I went", "pronunciation": null}, {"form": "You went", "pronunciation": null}, '
+    '{"form": "He/She/It went", "pronunciation": null}, {"form": "We went", "pronunciation": null}, '
+    '{"form": "You went", "pronunciation": null}, {"form": "They went", "pronunciation": null}]}}'
 )
 
 
@@ -226,10 +230,25 @@ async def test_generate_verb_conjugation_returns_validated_result():
     result = await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
     assert isinstance(result, ai_models.VerbConjugationResult)
     assert result.word == "go"
-    assert result.forms["present"][0] == "I go"
-    assert result.forms["past"][2] == "He/She/It went"
+    assert result.forms["present"][0].form == "I go"
+    assert result.forms["present"][0].pronunciation == "ay goh"
+    assert result.forms["past"][2].form == "He/She/It went"
+    assert result.forms["past"][2].pronunciation is None
     assert "go" in provider.last_user
     assert "en" in provider.last_user
+
+
+async def test_generate_verb_conjugation_tolerates_a_plain_string_forms_shape():
+    """The forms validator also accepts a bare list[str] per tense (an
+    older/pre-pronunciation AI response shape) - each string becomes a
+    form with pronunciation=None rather than failing validation."""
+    raw = (
+        '{"word": "go", "language": "en", "forms": {"present": ["I go", "You go"]}}'
+    )
+    svc, _ = _service([raw])
+    result = await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+    assert result.forms["present"][0].form == "I go"
+    assert result.forms["present"][0].pronunciation is None
 
 
 async def test_generate_verb_conjugation_never_forces_english_tense_names():

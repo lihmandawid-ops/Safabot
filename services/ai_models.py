@@ -271,6 +271,29 @@ class GrammarExplanation(BaseModel):
         return value
 
 
+class ConjugatedForm(BaseModel):
+    """One conjugated form plus its own pronunciation (global pronunciation
+    rule, section 49: "ideally per individual conjugated form" - each verb
+    form is its own distinct pronunciation, not a single pronunciation for
+    the infinitive reused across the whole table)."""
+
+    form: str
+    pronunciation: str | None = None
+
+    @field_validator("form")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("pronunciation", mode="before")
+    @classmethod
+    def _clean_pronunciation(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
+
+
 class VerbConjugationResult(BaseModel):
     """🔤 Все формы (repetition-system stage sections 22-24): `forms` maps
     a tense/mood name - in whatever terms are natural for THIS word's own
@@ -281,7 +304,7 @@ class VerbConjugationResult(BaseModel):
 
     word: str
     language: str
-    forms: dict[str, list[str]]
+    forms: dict[str, list[ConjugatedForm]]
 
     @field_validator("word", "language")
     @classmethod
@@ -291,15 +314,28 @@ class VerbConjugationResult(BaseModel):
             raise ValueError("must not be blank")
         return value
 
-    @field_validator("forms")
+    @field_validator("forms", mode="before")
     @classmethod
-    def _clean_forms(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
-        cleaned: dict[str, list[str]] = {}
-        for tense, items in value.items():
+    def _clean_forms(cls, value: dict) -> dict:
+        # Tolerates a plain list[str] per tense too (an older/pre-
+        # pronunciation AI response shape, or a caller that hasn't been
+        # updated) - each bare string becomes a form with no pronunciation
+        # rather than failing the whole conjugation table.
+        cleaned: dict[str, list[dict]] = {}
+        for tense, items in (value or {}).items():
             tense = str(tense).strip()
             if not tense or not isinstance(items, list):
                 continue
-            forms = [str(item).strip() for item in items if isinstance(item, str) and str(item).strip()]
+            forms: list[dict] = []
+            for item in items:
+                if isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        forms.append({"form": text, "pronunciation": None})
+                elif isinstance(item, dict):
+                    text = str(item.get("form", "")).strip()
+                    if text:
+                        forms.append({"form": text, "pronunciation": item.get("pronunciation")})
             if forms:
                 cleaned[tense] = forms
         if not cleaned:

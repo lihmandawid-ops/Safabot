@@ -119,7 +119,21 @@ def render_forms_text(card) -> str:
 _MAX_CONJUGATION_MESSAGE_CHARS = 3500
 
 
-def render_conjugation_messages(word, conjugation: dict[str, list[str]]) -> list[str]:
+def _render_conjugated_form(item) -> str:
+    """Word.verb_conjugation is a schema-less JSON column, so an entry
+    cached before the global pronunciation rule (section 49) is still a
+    plain form string, while a freshly generated one is a {"form":
+    "pronunciation"} dict - handled per-item (not by branching on the
+    whole table's shape) so even a table with a mix of old and new
+    entries renders correctly."""
+    if isinstance(item, dict):
+        form = item.get("form", "")
+        pronunciation = item.get("pronunciation")
+        return f"{form} ({pronunciation})" if pronunciation else form
+    return item
+
+
+def render_conjugation_messages(word, conjugation: dict[str, list]) -> list[str]:
     """🔤 Все формы (sections 19-20, 25): one vertical block per tense/mood
     - a tense name header, then each conjugated form on its own line -
     rather than a person x tense table, which would either force every
@@ -134,7 +148,7 @@ def render_conjugation_messages(word, conjugation: dict[str, list[str]]) -> list
     blocks = []
     for tense, forms in conjugation.items():
         lines = [f"{tense.strip().capitalize()}:"]
-        lines.extend(forms)
+        lines.extend(_render_conjugated_form(item) for item in forms)
         blocks.append("\n".join(lines))
 
     messages: list[str] = []

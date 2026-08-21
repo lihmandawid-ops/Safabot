@@ -136,6 +136,39 @@ def test_render_conjugation_messages_fits_in_one_message_when_short():
     assert "They went" in messages[0]
 
 
+def test_render_conjugation_messages_shows_per_form_pronunciation():
+    """Global pronunciation rule section 49: a freshly generated
+    conjugation table caches each form as {"form": ..., "pronunciation":
+    ...} - each form's own pronunciation must render next to it, and a
+    form with no pronunciation must still render plainly (never crash)."""
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="go")
+    conjugation = {
+        "present": [
+            {"form": "I go", "pronunciation": "ay goh"},
+            {"form": "You go", "pronunciation": None},
+        ],
+    }
+    messages = render_conjugation_messages(word, conjugation)
+    assert "I go (ay goh)" in messages[0]
+    assert "You go" in messages[0]
+    assert "You go (" not in messages[0]
+
+
+def test_render_conjugation_messages_handles_old_cached_flat_string_shape():
+    """Word.verb_conjugation is schema-less JSON - an entry cached before
+    section 49 shipped is still a plain list[str] per tense and must keep
+    rendering exactly as before, forever (no DB backfill/migration)."""
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="go")
+    conjugation = {"present": ["I go", "You go"]}
+    messages = render_conjugation_messages(word, conjugation)
+    assert "I go" in messages[0]
+    assert "You go" in messages[0]
+
+
 def test_render_conjugation_messages_never_forces_english_tense_names():
     from utils.word_display import render_conjugation_messages
 
