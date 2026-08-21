@@ -59,14 +59,14 @@ MORNING_UTC = datetime(2026, 6, 15, 9, 0, 0)
 
 async def _create_user(
     db_session, *, telegram_id=5000, timezone="UTC", notifications_enabled=True,
-    morning=time(9, 0), afternoon=time(14, 0), evening=time(20, 0),
+    morning=time(9, 0), afternoon=time(14, 0), evening=time(20, 0), interface_language="ru",
 ):
     from database.repositories import user_languages as user_languages_repo
     from database.repositories import users as users_repo
 
     user = await users_repo.create_user(
         db_session, telegram_id=telegram_id, username=None, first_name="T",
-        interface_language="ru", timezone=timezone, level="beginner", daily_new_words=4,
+        interface_language=interface_language, timezone=timezone, level="beginner", daily_new_words=4,
         morning_time=morning, afternoon_time=afternoon, evening_time=evening,
     )
     if not notifications_enabled:
@@ -291,3 +291,49 @@ async def test_send_due_notifications_checks_all_three_slots(notif_db):
     # checked independently rather than firing all three at once.
     sent = await notification_service.send_due_notifications(bot, now=MORNING_UTC)
     assert sent == 1
+
+
+async def test_notification_follows_users_interface_language(notif_db):
+    """settings-improvements stage section 26: a notification's text AND
+    its inline keyboard button must follow the recipient's own
+    interface_language, not always render in Russian - the same class
+    of bug fixed everywhere else in this stage (utils/word_display.py,
+    keyboards/main_menu.py, ...) had also been missed here."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s, interface_language="en")
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    kwargs = bot.send_message.await_args.kwargs
+    assert "Due for review" in kwargs["text"]
+    assert "К повторению" not in kwargs["text"]
+    button_text = kwargs["reply_markup"].inline_keyboard[0][0].text
+    assert button_text == "▶️ Start"
+
+
+async def test_one_users_corrupted_timezone_does_not_block_other_users(notif_db):
+    """A stale/invalid timezone string on one user's row (e.g. leftover
+    from before real IANA validation existed) must never take the whole
+    poll tick down for everyone else - ZoneInfo() raises for an unknown
+    name, and this loop has no other guard between it and
+    scheduler/notifications.py's broad except."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        broken_user, _ = await _create_user(s, telegram_id=5100, timezone="Not/A_Real_Zone")
+        await _add_due_word(s, broken_user.id, word="broken")
+        good_user, _ = await _create_user(s, telegram_id=5101, timezone="UTC")
+        await _add_due_word(s, good_user.id, word="good")
+
+    bot = AsyncMock()
+    sent = await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    assert sent == 1
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.await_args.kwargs["chat_id"] == good_user.telegram_id

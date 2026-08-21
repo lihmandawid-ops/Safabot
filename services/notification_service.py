@@ -20,12 +20,11 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from keyboards.learning import start_keyboard, start_review_keyboard
 from services import learning_service
-from utils.i18n import t
+from utils.i18n import set_current_language, t
 from utils.logging import get_logger
 from utils.time import local_hour_minute, local_today, utc_now
 
 logger = get_logger(__name__)
-_LANG = "ru"
 
 SLOT_MORNING = "morning"
 SLOT_AFTERNOON = "afternoon"
@@ -51,7 +50,22 @@ def _is_due_now(user, slot: str, now: datetime) -> bool:
 
 async def _build_content(session, user, slot: str, now: datetime) -> NotificationContent | None:
     """None means there is nothing worth sending (spec sections 14-16,
-    32: never send a meaningless notification)."""
+    32: never send a meaningless notification).
+
+    set_current_language(user.interface_language) here, not just passing
+    it to t() explicitly, because start_keyboard()/start_review_keyboard()
+    (keyboards/learning.py) read the language back out of the same
+    ContextVar every other screen in the bot uses - settings-improvements
+    stage section 2's "every part of the UI must follow interface_language"
+    applies to a notification's buttons exactly as much as its text.
+    Safe to call per-iteration here even though this is a batch loop over
+    many users: each poll tick runs in its own asyncio task, so nothing
+    from a concurrent request-handling task can leak in, and the next
+    user in this same loop simply overwrites it again before their own
+    text/keyboard is built."""
+    set_current_language(user.interface_language)
+    language = user.interface_language
+
     current = await user_languages_repo.get_current_language(session, user.id)
     if current is None:
         return None
@@ -65,21 +79,21 @@ async def _build_content(session, user, slot: str, now: datetime) -> Notificatio
         if not due and not new_words:
             return None
         if new_words:
-            text = t("notification.morning.with_new", _LANG, new_count=len(new_words), due_count=len(due))
+            text = t("notification.morning.with_new", language, new_count=len(new_words), due_count=len(due))
         else:
-            text = t("notification.morning.reviews_only", _LANG, due_count=len(due))
+            text = t("notification.morning.reviews_only", language, due_count=len(due))
         return NotificationContent(text, start_keyboard())
 
     if slot == SLOT_AFTERNOON:
         if not due:
             return None
-        return NotificationContent(t("notification.afternoon.text", _LANG, due_count=len(due)), start_review_keyboard())
+        return NotificationContent(t("notification.afternoon.text", language, due_count=len(due)), start_review_keyboard())
 
     if slot == SLOT_EVENING:
         if due:
-            return NotificationContent(t("notification.evening.due", _LANG, due_count=len(due)), start_review_keyboard())
+            return NotificationContent(t("notification.evening.due", language, due_count=len(due)), start_review_keyboard())
         if user.last_learning_date == local_today(now, user.timezone):
-            return NotificationContent(t("notification.evening.done", _LANG))
+            return NotificationContent(t("notification.evening.done", language))
         return None
 
     raise ValueError(f"Unknown notification slot: {slot!r}")  # pragma: no cover - exhaustive guard
@@ -100,7 +114,22 @@ async def send_for_slot(bot, slot: str, *, now: datetime | None = None) -> int:
         users = await users_repo.get_notifiable_users(session)
 
     for user in users:
-        if not _is_due_now(user, slot, now):
+        try:
+            due_now = _is_due_now(user, slot, now)
+        except Exception:
+            # A single user with an unrecognized/corrupted timezone value
+            # (stale data from before real IANA validation existed, or a
+            # bad manual edit) must never take the whole poll tick down -
+            # ZoneInfo() raises for an unknown name, and this loop has no
+            # other guard between here and scheduler/notifications.py's
+            # broad except, which would otherwise skip sending to EVERY
+            # user for the rest of this tick, not just this one.
+            logger.exception(
+                "Could not evaluate %s notification due-check for telegram_id=%s (timezone=%r) - skipping this user",
+                slot, user.telegram_id, user.timezone,
+            )
+            continue
+        if not due_now:
             continue
 
         scheduled_date = local_today(now, user.timezone)
