@@ -21,16 +21,23 @@ class TimezoneChoice:
     label: str
 
 
+# City/timezone labels are deliberately plain English regardless of
+# interface_language (repetition-system-audit stage: real request - a
+# city name like "Jerusalem" or "Kyiv" isn't really "in Russian" or "in
+# Ukrainian", and translating it only adds a second, inconsistent name
+# for the same IANA zone). Only the surrounding prompt text
+# ("settings.pick_timezone" etc., via t()) still follows interface_language -
+# these labels are the one place in the picker that never does.
 TIMEZONE_CHOICES: tuple[TimezoneChoice, ...] = (
-    TimezoneChoice("Asia/Jerusalem", "🇮🇱 Израиль (Иерусалим)"),
-    TimezoneChoice("Europe/Moscow", "🇷🇺 Москва"),
-    TimezoneChoice("Europe/Kyiv", "🇺🇦 Киев"),
-    TimezoneChoice("Europe/Berlin", "🇩🇪 Берлин"),
-    TimezoneChoice("Europe/London", "🇬🇧 Лондон"),
-    TimezoneChoice("America/New_York", "🇺🇸 Нью-Йорк"),
-    TimezoneChoice("Europe/Madrid", "🇪🇸 Мадрид"),
-    TimezoneChoice("Europe/Paris", "🇫🇷 Париж"),
-    TimezoneChoice("Europe/Rome", "🇮🇹 Рим"),
+    TimezoneChoice("Asia/Jerusalem", "🇮🇱 Jerusalem"),
+    TimezoneChoice("Europe/Moscow", "🇷🇺 Moscow"),
+    TimezoneChoice("Europe/Kyiv", "🇺🇦 Kyiv"),
+    TimezoneChoice("Europe/Berlin", "🇩🇪 Berlin"),
+    TimezoneChoice("Europe/London", "🇬🇧 London"),
+    TimezoneChoice("America/New_York", "🇺🇸 New York"),
+    TimezoneChoice("Europe/Madrid", "🇪🇸 Madrid"),
+    TimezoneChoice("Europe/Paris", "🇫🇷 Paris"),
+    TimezoneChoice("Europe/Rome", "🇮🇹 Rome"),
     TimezoneChoice("UTC", "🌍 UTC"),
 )
 

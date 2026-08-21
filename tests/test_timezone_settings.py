@@ -149,3 +149,60 @@ async def test_timezone_change_does_not_affect_interface_language(handler_db):
     user = await _get_user()
     assert user.timezone == "Europe/Berlin"
     assert user.interface_language == "en"  # untouched
+
+
+def test_timezone_choice_labels_are_english_city_names_never_translated():
+    """Repetition-system-audit stage: real request - city/timezone names
+    in the picker must always read in English (e.g. "Jerusalem", not
+    "Иерусалим"), independent of interface_language. The curated list is
+    a single hardcoded module-level constant (no per-language variant),
+    so this only has to check it once."""
+    from utils.timezones import TIMEZONE_CHOICES
+
+    cyrillic = set("абвгдежзийклмнопрстуфхцчшщъыьэюяіїєґ")
+    for choice in TIMEZONE_CHOICES:
+        assert not (cyrillic & set(choice.label.lower())), f"{choice.label!r} contains Cyrillic"
+
+
+def test_timezone_choice_iana_names_are_never_translated():
+    from utils.timezones import TIMEZONE_CHOICES
+
+    expected = {
+        "Asia/Jerusalem": "🇮🇱 Jerusalem",
+        "Europe/Moscow": "🇷🇺 Moscow",
+        "Europe/Kyiv": "🇺🇦 Kyiv",
+        "Europe/Berlin": "🇩🇪 Berlin",
+        "Europe/London": "🇬🇧 London",
+        "America/New_York": "🇺🇸 New York",
+        "Europe/Madrid": "🇪🇸 Madrid",
+        "Europe/Paris": "🇫🇷 Paris",
+        "Europe/Rome": "🇮🇹 Rome",
+        "UTC": "🌍 UTC",
+    }
+    actual = {tz.iana_name: tz.label for tz in TIMEZONE_CHOICES}
+    assert actual == expected
+
+
+async def test_timezone_picker_shows_english_city_names_across_interface_languages(handler_db):
+    """The prompt header still follows interface_language (untouched) -
+    only the city names on the buttons themselves stay English in every
+    case, per the four languages explicitly called out in the request."""
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from handlers import settings as settings_handler
+
+    for language in ("ru", "uk", "he", "en"):
+        async with session_scope() as s:
+            user = await users_repo.get_by_telegram_id(s, 42)
+            await users_repo.update_user(s, user, interface_language=language)
+
+        q = await _run("set:tz:list")
+        assert q.answer.call_count == 1
+
+        markup = q.edit_message_text.call_args[1]["reply_markup"]
+        labels = [btn.text for row in markup.inline_keyboard for btn in row]
+        assert "🇮🇱 Jerusalem" in labels
+        assert "🇺🇦 Kyiv" in labels
+        assert "🇩🇪 Berlin" in labels
+        assert "🇬🇧 London" in labels
+        assert "🇺🇸 New York" in labels
