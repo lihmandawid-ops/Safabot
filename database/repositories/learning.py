@@ -49,6 +49,51 @@ async def get_due_for_review(
     return list(result.scalars().unique().all())
 
 
+async def get_words_for_old_review(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    language_code: str,
+    limit: int,
+    include_mastered: bool = False,
+    now: datetime | None = None,
+) -> list[UserWord]:
+    """🔁 Повторить старые слова (settings-improvements stage section 4):
+    the user explicitly asked for `limit` old words, so unlike
+    get_due_for_review this backfills with the soonest-NOT-YET-due words
+    when fewer than `limit` are actually overdue, instead of just handing
+    back a short list. Still the same due/next_review_at priority and the
+    same PAUSED/DELETED exclusion as the normal review queue - no second
+    scheduling algorithm, only a different "how many, and what if not
+    enough are due yet" policy on top of it. MASTERED is excluded unless
+    `include_mastered` is explicitly requested (spec: "MASTERED only if
+    explicitly requested")."""
+    now = now if now is not None else utc_now()
+    statuses = [WordStatus.LEARNING, WordStatus.REVIEW]
+    if include_mastered:
+        statuses.append(WordStatus.MASTERED)
+
+    due = await get_due_for_review(session, user_id=user_id, language_code=language_code, limit=limit, now=now)
+    if len(due) >= limit:
+        return due
+
+    exclude_ids = {uw.id for uw in due}
+    result = await session.execute(
+        select(UserWord)
+        .where(
+            UserWord.user_id == user_id,
+            UserWord.language_code == language_code,
+            UserWord.status.in_(statuses),
+            UserWord.id.notin_(exclude_ids) if exclude_ids else True,
+        )
+        .options(*_WITH_WORD)
+        .order_by(UserWord.next_review_at.asc().nulls_last(), UserWord.wrong_answers.desc())
+        .limit(limit - len(due))
+    )
+    upcoming = list(result.scalars().unique().all())
+    return due + upcoming
+
+
 async def get_new_word_candidates(
     session: AsyncSession, *, user_id: int, language_code: str, level: str, limit: int
 ) -> list[UserWord]:

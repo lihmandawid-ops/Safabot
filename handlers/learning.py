@@ -26,11 +26,13 @@ from keyboards.learning import (
     after_session_keyboard,
     continue_keyboard,
     extra_amount_keyboard,
+    old_words_amount_keyboard,
     rating_keyboard,
     reveal_keyboard,
     start_keyboard,
     start_review_keyboard,
 )
+from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
 from keyboards.words import filter_keyboard
 from services import learning_service, word_generation_service, word_service
@@ -216,6 +218,27 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             else:
                 text = t("learning.extra_added", get_current_language(), count=len(result.words))
             await edit(text, reply_markup=after_session_keyboard())
+
+        elif data == "learn:oldwords":
+            await query.answer()
+            await edit(t("learning.old_words_prompt", get_current_language()), reply_markup=old_words_amount_keyboard())
+
+        elif data.startswith("learn:oldwords:"):
+            amount = int(data.removeprefix("learn:oldwords:"))
+            await query.answer()
+            learning_session = await learning_service.build_old_words_session(
+                session, user=user, user_language=current, limit=amount
+            )
+            if learning_session is None:
+                await edit(t("learning.old_words_unavailable", get_current_language()), reply_markup=after_session_keyboard())
+                return
+            await _show_current_word(edit, learning_session, current.translation_language)
+
+        elif data == "learn:dictionary":
+            await query.answer()
+            context.user_data["mode"] = dictionary_handler.MODE
+            context.user_data["dictionary_entry_source"] = "search"
+            await edit(t("dictionary.prompt", get_current_language()))
 
         elif data == "learn:mywords":
             await query.answer()

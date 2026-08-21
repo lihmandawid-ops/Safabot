@@ -335,6 +335,62 @@ async def test_mark_known_and_replace_handles_no_replacement_available(session):
     assert sessions_repo.next_incomplete_item(learning_session) is None
 
 
+async def test_old_words_session_backfills_with_upcoming_when_not_enough_due(session):
+    """🔁 Повторить старые слова (settings-improvements stage section 4):
+    the user explicitly asked for N words, so a shortfall of actually-due
+    words must be backfilled with the soonest-upcoming ones instead of
+    just handing back fewer than N."""
+    user, ul = await _create_user(session, telegram_id=2400)
+    due_words = await _make_words(session, 2, prefix="due_")
+    upcoming_words = await _make_words(session, 5, prefix="upcoming_")
+
+    for w in due_words:
+        uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = NOW - timedelta(hours=1)
+    for i, w in enumerate(upcoming_words):
+        uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = NOW + timedelta(days=i + 1)
+    await session.commit()
+
+    learning_session = await learning_service.build_old_words_session(session, user=user, user_language=ul, limit=5, now=NOW)
+    assert learning_session.total_words == 5
+    words_shown = {item.user_word.word.word for item in learning_session.items}
+    assert {"due_0", "due_1"} <= words_shown
+    # the 3 soonest-upcoming, not a random 3 out of the 5
+    assert words_shown == {"due_0", "due_1", "upcoming_0", "upcoming_1", "upcoming_2"}
+
+
+async def test_old_words_session_excludes_paused_and_mastered_by_default(session):
+    user, ul = await _create_user(session, telegram_id=2401)
+    active_words = await _make_words(session, 2, prefix="active_")
+    paused_word = (await _make_words(session, 1, prefix="paused_"))[0]
+    mastered_word = (await _make_words(session, 1, prefix="mastered_"))[0]
+
+    for w in active_words:
+        uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw.next_review_at = NOW - timedelta(hours=1)
+    paused_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=paused_word.id, language_code="en")
+    paused_uw.status = WordStatus.PAUSED
+    paused_uw.next_review_at = NOW - timedelta(hours=1)
+    mastered_uw = await user_words_repo.add_word(session, user_id=user.id, word_id=mastered_word.id, language_code="en")
+    mastered_uw.status = WordStatus.MASTERED
+    mastered_uw.next_review_at = None
+    await session.commit()
+
+    learning_session = await learning_service.build_old_words_session(session, user=user, user_language=ul, limit=10, now=NOW)
+    words_shown = {item.user_word.word.word for item in learning_session.items}
+    assert words_shown == {"active_0", "active_1"}
+
+
+async def test_old_words_session_returns_none_when_nothing_to_review(session):
+    user, ul = await _create_user(session, telegram_id=2402)
+    result = await learning_service.build_old_words_session(session, user=user, user_language=ul, limit=5, now=NOW)
+    assert result is None
+
+
 async def test_streak_does_not_double_count_same_local_day(session):
     user, ul = await _create_user(session, telegram_id=3100, daily_new_words=4, timezone="UTC")
 

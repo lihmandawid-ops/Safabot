@@ -36,14 +36,32 @@ def reveal_keyboard(user_word_id: int, *, is_new_word: bool = False) -> InlineKe
 
 
 def after_session_keyboard() -> InlineKeyboardMarkup:
-    """Shown once nothing more is due today (bugfix stage section 8/9):
-    lets the user immediately ask for more new words or jump to ⭐ Мои
-    слова, instead of having to go back to the plain-text main menu."""
+    """Shown once nothing more is due today (bugfix stage section 8/9,
+    extended in the settings-improvements stage section 4): lets the user
+    immediately ask for more new words, review old ones again, jump to
+    ⭐ Мои слова or 📖 Словарь, instead of having to go back to the
+    plain-text main menu."""
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton(t("learning.button.old_words", get_current_language()), callback_data="learn:oldwords")],
             [InlineKeyboardButton(t("learning.button.learn_more", get_current_language()), callback_data="learn:intro")],
             [InlineKeyboardButton(t("learning.button.extra", get_current_language()), callback_data="learn:extra")],
             [InlineKeyboardButton(t("learning.button.mywords", get_current_language()), callback_data="learn:mywords")],
+            [InlineKeyboardButton(t("learning.button.dictionary", get_current_language()), callback_data="learn:dictionary")],
+        ]
+    )
+
+
+def old_words_amount_keyboard() -> InlineKeyboardMarkup:
+    from services.learning_service import OLD_WORDS_REVIEW_OPTIONS
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(str(n), callback_data=f"learn:oldwords:{n}")
+                for n in OLD_WORDS_REVIEW_OPTIONS
+            ],
+            [InlineKeyboardButton(t("card.button.back", get_current_language()), callback_data="learn:intro")],
         ]
     )
 

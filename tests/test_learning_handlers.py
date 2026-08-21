@@ -176,6 +176,82 @@ async def test_mywords_button_switches_mode_and_shows_filters(handler_db):
     assert kwargs["reply_markup"] is not None
 
 
+async def test_oldwords_button_shows_amount_picker(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:oldwords")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.edit_message_text.assert_awaited_once()
+    args, kwargs = q.callback_query.edit_message_text.call_args
+    assert kwargs["reply_markup"] is not None
+
+
+async def test_oldwords_amount_builds_session_from_due_words(handler_db):
+    """settings-improvements stage section 4: 🔁 Повторить старые слова
+    must use the existing due/next_review_at priority - never a second
+    scheduling system - and hand back exactly the count the user asked
+    for when enough old words exist."""
+    from datetime import timedelta
+
+    from database.database import session_scope
+    from database.models import WordStatus
+    from database.repositories import sessions as sessions_repo
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import word_service
+    from utils.time import utc_now
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        for i in range(6):
+            word, _ = await word_service.get_or_create_word(s, language_code="en", word=f"oldw{i}")
+            uw = await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+            uw.status = WordStatus.REVIEW
+            uw.next_review_at = utc_now() - timedelta(hours=1)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:oldwords:5")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.edit_message_text.assert_awaited_once()
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        active = await sessions_repo.get_active_session(s, user_id=user.id, language_code=current.language_code)
+    assert active is not None
+    assert active.total_words == 5
+    assert all(not item.is_new_word for item in active.items)
+
+
+async def test_oldwords_amount_with_nothing_to_review_shows_friendly_message(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:oldwords:5")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.edit_message_text.assert_awaited_once()
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "старых слов" in text.lower()
+
+
+async def test_dictionary_button_from_after_session_menu_switches_mode(handler_db):
+    from handlers import dictionary as dictionary_handler
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:dictionary")
+    await learning_handler.handle_learning_callback(q, context)
+
+    assert context.user_data["mode"] == dictionary_handler.MODE
+    q.callback_query.edit_message_text.assert_awaited_once()
+
+
 async def test_completion_screen_offers_after_session_keyboard(handler_db):
     from services.repetition_service import ReviewGrade
     from handlers import learning as learning_handler

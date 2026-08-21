@@ -184,6 +184,47 @@ async def build_learning_session(
     return await sessions_repo.get_session_by_id(session, learning_session.id)
 
 
+OLD_WORDS_REVIEW_OPTIONS: tuple[int, ...] = (5, 10, 20)
+
+
+async def build_old_words_session(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    limit: int,
+    now: datetime | None = None,
+) -> LearningSession | None:
+    """🔁 Повторить старые слова (settings-improvements stage section 4):
+    same resume-if-in-progress behaviour as build_learning_session, but
+    sources its words from get_words_for_old_review instead of
+    get_due_reviews - the user picked an explicit count (5/10/20), so a
+    shortfall of actually-due words is backfilled with the soonest-
+    upcoming ones rather than just handing back fewer than asked for.
+    Never includes new words (this is a review-only mode by definition)."""
+    now = now if now is not None else utc_now()
+
+    existing = await sessions_repo.get_active_session(session, user_id=user.id, language_code=user_language.language_code)
+    if existing is not None:
+        if sessions_repo.next_incomplete_item(existing) is not None:
+            return existing
+        await sessions_repo.complete_session(session, existing, now=now)
+
+    words = await learning_repo.get_words_for_old_review(
+        session, user_id=user.id, language_code=user_language.language_code, limit=limit, now=now
+    )
+    if not words:
+        return None
+
+    learning_session = await sessions_repo.create_session(session, user_id=user.id, language_code=user_language.language_code)
+    for position, user_word in enumerate(words, start=1):
+        await sessions_repo.add_session_item(
+            session, learning_session=learning_session, user_word_id=user_word.id, position=position, is_new_word=False
+        )
+
+    return await sessions_repo.get_session_by_id(session, learning_session.id)
+
+
 async def mark_word_as_seen(
     session: AsyncSession, learning_session: LearningSession, user_word_id: int, *, grade: ReviewGrade, now: datetime | None = None
 ) -> LearningSessionItem | None:
