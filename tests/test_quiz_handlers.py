@@ -114,6 +114,34 @@ async def test_quiz_start_builds_flashcard_question_for_single_word(handler_db):
     q.callback_query.edit_message_text.assert_awaited_once()
 
 
+async def test_flashcard_hides_pronunciation_before_reveal_shows_it_after(handler_db):
+    """Global pronunciation rule section 46: the quiz must never show a
+    word's pronunciation on its initial prompt (it could give away the
+    answer for the translation_to_word type, where the word itself IS the
+    correct answer) - only once "Ответ:" has already been revealed."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import quiz as quiz_handler
+    from services import word_service
+
+    async with session_scope() as s:
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="cat")
+        await words_repo.set_pronunciation(s, word, pronunciation="kat", phonetic=None)
+
+    context = SimpleNamespace(user_data={})
+    q1 = _query("quiz:start")
+    await quiz_handler.handle_quiz_callback(q1, context)
+    prompt_text = q1.callback_query.edit_message_text.call_args[0][0]
+    assert "kat" not in prompt_text
+    assert context.user_data["quiz"]["questions"][0]["pronunciation"] == "kat"
+
+    q2 = _query("quiz:reveal")
+    await quiz_handler.handle_quiz_callback(q2, context)
+    revealed_text = q2.callback_query.edit_message_text.call_args[0][0]
+    assert "Ответ:" in revealed_text
+    assert "🔊 kat" in revealed_text
+
+
 async def test_flashcard_reveal_then_correct_selfgrade_shows_results(handler_db):
     from handlers import quiz as quiz_handler
 
@@ -200,6 +228,56 @@ async def test_multiple_choice_flow_picks_correct_and_shows_feedback(handler_db)
     state_after = context.user_data["quiz"]
     assert state_after["correct"] == 1
     assert state_after["position"] == 1
+
+
+async def test_multiple_choice_hides_pronunciation_before_answer_shows_it_after(handler_db):
+    """Section 46 for the multiple-choice/fill-blank types too: options
+    already show the target word as one of the choices (mc_word/fill_in_
+    blank), so its pronunciation must not be attached to the prompt -
+    only shown in the feedback once the pick has been graded."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.repositories import words as words_repo
+    from services import word_service
+    from handlers import quiz as quiz_handler
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        for i in range(5):
+            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"pword{i}", pronunciation=f"puh-{i}")
+            await words_repo.add_translation(s, word_id=w.id, language_code="ru", translation=f"пслово{i}")
+            await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
+
+    context = SimpleNamespace(user_data={})
+    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+
+    # Isolate this test to one of THIS test's own pronunciation-bearing
+    # words (the fixture's own "cat" word may also be in the pool, with
+    # no pronunciation set here) and re-render it fresh at position 0, so
+    # the captured prompt text unambiguously belongs to this question.
+    q0 = next(q for q in state["questions"] if q["word"].startswith("pword"))
+    if q0["type"] not in ("mc_translation", "mc_word"):
+        q0["type"] = "mc_translation"
+        q0["options"] = [q0["correct_answer"], "x", "y", "z"]
+    state["questions"] = [q0]
+    state["position"] = 0
+
+    rendered = AsyncMock()
+
+    async def edit(text, reply_markup=None):
+        await rendered(text, reply_markup=reply_markup)
+
+    await quiz_handler._render_question(edit, state)
+    prompt_text = rendered.call_args[0][0]
+    assert q0["pronunciation"] not in prompt_text
+
+    correct_index = q0["options"].index(q0["correct_answer"])
+    q = _query(f"quiz:answer:{correct_index}")
+    await quiz_handler.handle_quiz_callback(q, context)
+    feedback_text = q.callback_query.edit_message_text.call_args[0][0]
+    assert f"🔊 {q0['pronunciation']}" in feedback_text
 
 
 async def test_retry_wrong_with_no_prior_mistakes_shows_message(handler_db):

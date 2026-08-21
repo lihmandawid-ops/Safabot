@@ -149,8 +149,14 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             prompt = t(f"quiz.prompt.{q['type']}", get_current_language(), value=q["prompt"])
             answer = t("quiz.reveal_answer", get_current_language(), answer=q["correct_answer"])
             selfgrade_prompt = t("quiz.selfgrade_prompt", get_current_language())
-            text = f"{progress}\n\n{prompt}\n\n{answer}\n\n{selfgrade_prompt}"
-            await edit(text, reply_markup=quiz_selfgrade_keyboard())
+            parts = [progress, prompt, answer]
+            if q.get("pronunciation"):
+                # Global pronunciation rule section 46: only shown now that
+                # the answer itself has already been revealed above - never
+                # attached to the prompt, where it would give the answer away.
+                parts.append(t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"]))
+            parts.append(selfgrade_prompt)
+            await edit("\n\n".join(parts), reply_markup=quiz_selfgrade_keyboard())
 
         elif data.startswith("quiz:selfgrade:"):
             await query.answer()
@@ -175,6 +181,10 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await _grade_current(session, state, correct=is_correct)
             key = "quiz.feedback.correct" if is_correct else "quiz.feedback.wrong"
             feedback = t(key, get_current_language(), answer=q["correct_answer"])
+            if q.get("pronunciation"):
+                # Section 46: only added now that the answer has been
+                # graded/shown, same rule as the flashcard reveal above.
+                feedback += "\n\n" + t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"])
             is_last = state["position"] + 1 >= len(state["questions"])
             await edit(feedback, reply_markup=quiz_continue_keyboard(is_last_question=is_last))
 

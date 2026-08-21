@@ -51,6 +51,31 @@ async def test_build_quiz_flashcard_only_with_a_single_word(session):
     assert questions[0]["options"] == []
 
 
+async def test_build_quiz_questions_carry_cached_pronunciation(session):
+    """Global pronunciation rule section 46: quiz questions carry the
+    tested word's cached pronunciation for handlers/quiz.py to show only
+    after the answer is revealed/graded - never generated live here."""
+    user = await _create_user(session)
+    word, _ = await word_service.get_or_create_word(session, language_code="en", word="cat", pronunciation="kat")
+    await words_repo.add_translation(session, word_id=word.id, language_code="ru", translation="кошка")
+    await user_words_repo.add_word(session, user_id=user.id, word_id=word.id, language_code="en")
+    await session.commit()
+
+    questions = await quiz_service.build_quiz(session, user_id=user.id, language_code="en", translation_language="ru")
+    assert questions[0]["word"] == "cat"
+    assert questions[0]["pronunciation"] == "kat"
+
+
+async def test_build_quiz_questions_have_no_pronunciation_when_not_cached(session):
+    user = await _create_user(session)
+    word = await _make_word(session, "dog", "собака")
+    await user_words_repo.add_word(session, user_id=user.id, word_id=word.id, language_code="en")
+    await session.commit()
+
+    questions = await quiz_service.build_quiz(session, user_id=user.id, language_code="en", translation_language="ru")
+    assert questions[0]["pronunciation"] is None
+
+
 async def test_build_quiz_offers_multiple_choice_with_enough_words(session):
     user = await _create_user(session)
     words = []

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import UserWord, WordStatus
 from database.repositories import learning as learning_repo
 from database.repositories import user_words as user_words_repo
+from services import pronunciation_service
 from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import utc_now
 
@@ -46,6 +47,15 @@ class QuizQuestion:
     prompt: str
     correct_answer: str
     options: list[str] = field(default_factory=list)
+    # The target-language word being tested, and its pronunciation - cache
+    # -only (global pronunciation rule section 46): quiz questions are
+    # built in a batch, and a live AI backfill call per question here
+    # would both slow quiz start down and risk showing the answer away
+    # (below) before it's earned. Never shown until after the answer is
+    # graded/revealed, since `word` IS the correct answer for the
+    # translation_to_word/mc_word/fill_in_blank question types.
+    word: str = ""
+    pronunciation: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +64,8 @@ class QuizQuestion:
             "prompt": self.prompt,
             "correct_answer": self.correct_answer,
             "options": self.options,
+            "word": self.word,
+            "pronunciation": self.pronunciation,
         }
 
 
@@ -120,30 +132,44 @@ def _build_question(
     user_word: UserWord, translation: str, qtype: str, pool: list[UserWord], translation_language: str
 ) -> QuizQuestion:
     word_text = user_word.word.word
+    pronunciation = pronunciation_service.format_pronunciation(user_word.word)
 
     if qtype == "word_to_translation":
-        return QuizQuestion(user_word.id, qtype, prompt=word_text, correct_answer=translation)
+        return QuizQuestion(
+            user_word.id, qtype, prompt=word_text, correct_answer=translation, word=word_text, pronunciation=pronunciation
+        )
     if qtype == "translation_to_word":
-        return QuizQuestion(user_word.id, qtype, prompt=translation, correct_answer=word_text)
+        return QuizQuestion(
+            user_word.id, qtype, prompt=translation, correct_answer=word_text, word=word_text, pronunciation=pronunciation
+        )
 
     if qtype == "mc_translation":
         distractors = _distractor_translations(user_word, pool, translation_language, _OPTION_COUNT - 1)
         options = distractors + [translation]
         random.shuffle(options)
-        return QuizQuestion(user_word.id, qtype, prompt=word_text, correct_answer=translation, options=options)
+        return QuizQuestion(
+            user_word.id, qtype, prompt=word_text, correct_answer=translation, options=options,
+            word=word_text, pronunciation=pronunciation,
+        )
 
     if qtype == "mc_word":
         distractors = _distractor_words(user_word, pool, _OPTION_COUNT - 1)
         options = distractors + [word_text]
         random.shuffle(options)
-        return QuizQuestion(user_word.id, qtype, prompt=translation, correct_answer=word_text, options=options)
+        return QuizQuestion(
+            user_word.id, qtype, prompt=translation, correct_answer=word_text, options=options,
+            word=word_text, pronunciation=pronunciation,
+        )
 
     # fill_in_blank
     blanked = _blank_out(user_word.word.examples[0].example_text, word_text)
     distractors = _distractor_words(user_word, pool, _OPTION_COUNT - 1)
     options = distractors + [word_text]
     random.shuffle(options)
-    return QuizQuestion(user_word.id, qtype, prompt=blanked, correct_answer=word_text, options=options)
+    return QuizQuestion(
+        user_word.id, qtype, prompt=blanked, correct_answer=word_text, options=options,
+        word=word_text, pronunciation=pronunciation,
+    )
 
 
 async def build_quiz(
