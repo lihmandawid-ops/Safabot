@@ -25,15 +25,13 @@ def translation_for(user_word, translation_language: str) -> str | None:
 
 
 def format_pronunciation(word) -> str | None:
-    """Combines Word.pronunciation (a readable, non-IPA transliteration -
-    e.g. "goh") with Word.phonetic (IPA - e.g. "/ɡoʊ/") when both exist,
-    so the IPA transcription the spec asks to keep alongside the
-    readable one (settings-improvements stage section 13) is actually
-    shown somewhere instead of being written to the database and never
-    read back. Returns None only when neither is set, so callers can
-    show their own "not available yet" placeholder."""
-    if word.pronunciation and word.phonetic:
-        return f"{word.pronunciation} [{word.phonetic}]"
+    """Latin-only transcription (global pronunciation rule, sections 35-36):
+    Word.pronunciation is the readable Latin transliteration (e.g. "goh")
+    and is always preferred/shown alone when present. Word.phonetic (IPA -
+    e.g. "/ɡoʊ/") is shown only as a last-resort fallback when no readable
+    pronunciation exists at all - IPA must never be the primary/default
+    display. Returns None only when neither is set, so callers can show
+    their own "not available yet" placeholder."""
     return word.pronunciation or word.phonetic
 
 

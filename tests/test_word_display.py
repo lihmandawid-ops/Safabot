@@ -90,16 +90,18 @@ def test_status_label_follows_interface_language_not_always_russian():
     set_current_language("ru")
 
 
-def test_format_pronunciation_combines_readable_and_ipa():
-    """settings-improvements stage section 13: Word.phonetic (IPA) was
-    being written by AI generation but never shown anywhere - it must
-    appear alongside the readable Word.pronunciation, not replace it."""
+def test_format_pronunciation_prefers_latin_readable_over_ipa():
+    """Global pronunciation rule (sections 35-36): the readable Latin
+    transliteration is always shown alone when present - IPA is never
+    appended alongside it, since IPA must never be the primary/default
+    display. IPA is used only as a last-resort fallback when no readable
+    pronunciation exists at all."""
     from types import SimpleNamespace
 
     from utils.word_display import format_pronunciation
 
     both = SimpleNamespace(pronunciation="goh", phonetic="/ɡoʊ/")
-    assert format_pronunciation(both) == "goh [/ɡoʊ/]"
+    assert format_pronunciation(both) == "goh"
 
     readable_only = SimpleNamespace(pronunciation="goh", phonetic=None)
     assert format_pronunciation(readable_only) == "goh"
@@ -111,9 +113,10 @@ def test_format_pronunciation_combines_readable_and_ipa():
     assert format_pronunciation(neither) is None
 
 
-def test_card_shows_combined_pronunciation_and_ipa_when_both_set():
+def test_card_shows_only_the_readable_latin_pronunciation_when_both_set():
     text = render_word_card_text(_card(pronunciation="uh-POYNT-ment", phonetic="/əˈpɔɪntmənt/"))
-    assert "uh-POYNT-ment [/əˈpɔɪntmənt/]" in text
+    assert "uh-POYNT-ment" in text
+    assert "/əˈpɔɪntmənt/" not in text
 
 
 def test_render_conjugation_messages_fits_in_one_message_when_short():

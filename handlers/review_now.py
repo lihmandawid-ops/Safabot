@@ -91,7 +91,7 @@ def _flashcard_text(item: dict, position: int, total: int) -> str:
     lines.append(item["translation"])
     if item["pronunciation"]:
         lines.append("")
-        lines.append(f"🔊 {item['pronunciation']}")
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=item["pronunciation"]))
     if item["example"]:
         lines.append("")
         lines.append(f"💬 {item['example']}")
@@ -109,8 +109,10 @@ async def _finish_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, state: di
     await edit(t("revnow.completed", get_current_language(), count=total, total=total), reply_markup=completion_keyboard())
 
 
-async def _launch_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, words, translation_language: str) -> None:
-    items = review_now_service.build_flashcard_items(words, translation_language)
+async def _launch_flashcards(
+    session, edit, context: ContextTypes.DEFAULT_TYPE, words, translation_language: str, *, user_id: int
+) -> None:
+    items = await review_now_service.build_flashcard_items(session, words, translation_language, user_id=user_id)
     if not items:
         await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
         return
@@ -140,7 +142,7 @@ async def _launch(session, edit, context: ContextTypes.DEFAULT_TYPE, user, curre
     if resolved == "quiz":
         await _launch_quiz(session, edit, context, user, current, words)
     else:
-        await _launch_flashcards(edit, context, words, current.translation_language)
+        await _launch_flashcards(session, edit, context, words, current.translation_language, user_id=user.id)
 
 
 def _parse_count_flag(text: str) -> tuple[int, bool]:

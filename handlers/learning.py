@@ -36,11 +36,10 @@ from keyboards.learning import (
 from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
 from keyboards.words import filter_keyboard
-from services import learning_service, word_generation_service, word_service
+from services import learning_service, pronunciation_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
-from utils.word_display import format_pronunciation
 
 MODE = "learning"
 
@@ -56,12 +55,7 @@ async def _current_user_and_language(session, telegram_id: int):
 
 def _render_front(user_word: UserWord) -> str:
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
-    pronunciation_text = format_pronunciation(user_word.word)
-    pronunciation = (
-        t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation_text)
-        if pronunciation_text
-        else t("card.pronunciation_placeholder", get_current_language())
-    )
+    pronunciation = pronunciation_service.display_line(user_word.word)
     return t(
         "learning.card_front", get_current_language(),
         flag=lang.flag if lang else "", word=user_word.word.word, pronunciation=pronunciation,
@@ -72,12 +66,7 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
     card = word_service.build_word_card(user_word.word, translation_language=translation_language)
     lang = LANGUAGE_BY_CODE.get(user_word.word.language_code)
     translation_lang = LANGUAGE_BY_CODE.get(translation_language)
-    pronunciation_text = format_pronunciation(user_word.word)
-    pronunciation = (
-        t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation_text)
-        if pronunciation_text
-        else t("card.pronunciation_placeholder", get_current_language())
-    )
+    pronunciation = pronunciation_service.display_line(user_word.word)
     translation_text = ", ".join(tr.translation for tr in card.translations)
 
     if card.examples:
@@ -107,11 +96,11 @@ async def _show_current_word(session, edit, learning_session, translation_langua
     # repetition-system-audit stage section 15: most seed words were
     # inserted without a pronunciation (only AI-generated ones get it for
     # free) - the dictionary card already backfills this on demand
-    # (word_service.ensure_pronunciation), but the learning flow never
-    # did, so a seeded word would show "pronunciation unavailable" here
-    # even though opening its dictionary card moments later would fix it.
-    # A no-op (no AI call) whenever pronunciation is already set.
-    await word_service.ensure_pronunciation(
+    # (pronunciation_service.ensure), but the learning flow never did, so
+    # a seeded word would show "pronunciation unavailable" here even
+    # though opening its dictionary card moments later would fix it. A
+    # no-op (no AI call) whenever pronunciation is already set.
+    await pronunciation_service.ensure(
         session, item.user_word.word, translation_language=translation_language, user_id=user_id,
     )
     await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id, is_new_word=item.is_new_word))

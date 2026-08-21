@@ -12,16 +12,23 @@ LearningSession/LearningSessionItem rows for something this transient).
 """
 from __future__ import annotations
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.models import UserWord
+from services import pronunciation_service
 from utils.languages import LANGUAGE_BY_CODE
-from utils.word_display import format_pronunciation, translation_for
+from utils.word_display import translation_for
 
 
-def build_flashcard_items(user_words: list[UserWord], translation_language: str) -> list[dict]:
+async def build_flashcard_items(
+    session: AsyncSession, user_words: list[UserWord], translation_language: str, *, user_id: int
+) -> list[dict]:
     """🔤 Обычное повторение (section 5): unlike the quiz's flashcard-
     style questions, the translation is shown immediately - no separate
-    reveal step - so everything needed to render the card is captured
-    here up front."""
+    reveal step - so pronunciation is safe to backfill and show up front
+    too (global pronunciation rule section 47: the hide-until-reveal rule
+    only applies to quiz/knowledge-check screens, and this flow has no
+    reveal step to begin with)."""
     items = []
     for uw in user_words:
         translation = translation_for(uw, translation_language)
@@ -29,13 +36,16 @@ def build_flashcard_items(user_words: list[UserWord], translation_language: str)
             continue
         lang = LANGUAGE_BY_CODE.get(uw.word.language_code)
         example = uw.word.examples[0].example_text if uw.word.examples else None
+        pronunciation = await pronunciation_service.ensure_and_format(
+            session, uw.word, translation_language=translation_language, user_id=user_id
+        )
         items.append(
             {
                 "user_word_id": uw.id,
                 "flag": lang.flag if lang else "",
                 "word": uw.word.word,
                 "translation": translation,
-                "pronunciation": format_pronunciation(uw.word),
+                "pronunciation": pronunciation,
                 "example": example,
             }
         )

@@ -26,13 +26,12 @@ from keyboards.dictionary import (
     search_results_keyboard,
     word_card_keyboard,
 )
-from services import dictionary_service, user_word_service, verb_forms_service, word_service
+from services import dictionary_service, pronunciation_service, user_word_service, verb_forms_service, word_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.text import split_word_batch, truncate_text
 from utils.word_display import (
-    format_pronunciation,
     render_conjugation_messages,
     render_forms_text,
     render_word_card_text,
@@ -208,7 +207,7 @@ async def _send_card(send, session, word_id: int, translation_language: str, *, 
     # on-demand pronunciation backfill), and a too-late answer() would be
     # rejected by Telegram the same way any other slow AI-backed action
     # in the bot would be.
-    await word_service.ensure_pronunciation(session, word, translation_language=translation_language, user_id=user_id)
+    await pronunciation_service.ensure(session, word, translation_language=translation_language, user_id=user_id)
     card = word_service.build_word_card(word, translation_language=translation_language)
     await send(render_word_card_text(card), reply_markup=word_card_keyboard(word_id))
 
@@ -292,10 +291,9 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
         elif data.startswith("card:pronounce:"):
             word_id = int(data.removeprefix("card:pronounce:"))
             card = await word_service.get_word_card(session, word_id=word_id)
-            pronunciation = format_pronunciation(card.word) if card else None
             text = (
-                t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation)
-                if pronunciation
+                pronunciation_service.display_line(card.word)
+                if card
                 else t("card.pronunciation_placeholder", get_current_language())
             )
             await query.answer(text, show_alert=True)

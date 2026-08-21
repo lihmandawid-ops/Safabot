@@ -36,7 +36,7 @@ from keyboards.words import (
     list_keyboard,
     single_word_keyboard,
 )
-from services import user_word_service, word_service
+from services import pronunciation_service, user_word_service, word_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.pagination import paginate
 from utils.text import parse_number_list
@@ -353,7 +353,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 # section 13's on-demand backfill), and Telegram rejects a
                 # too-late answer the same way a slow AI-backed action
                 # anywhere else in the bot would.
-                await word_service.ensure_pronunciation(
+                await pronunciation_service.ensure(
                     session, user_word.word, translation_language=current.translation_language, user_id=user.id
                 )
                 card = await word_service.get_word_card(
