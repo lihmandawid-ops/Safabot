@@ -537,6 +537,48 @@ class NotificationLog(Base):
         )
 
 
+class UserPhrase(Base):
+    """One phrase a user saved from 💬 Полезные фразы (native-speaker
+    phrasebook stage). `phrase`/`translation`/`pronunciation` follow the
+    same Latin-only-pronunciation, learning_language-vs-interface_language
+    separation as everywhere else in Safabot - `language_code` is the
+    LEARNING language the phrase is written in, never the interface
+    language. `normalized_phrase` reuses utils.text.normalize_word's
+    lowercase+whitespace-collapse rule (works for a short phrase just as
+    well as a single word) so a case-only variant of an already-saved
+    phrase is recognized as a duplicate instead of creating a second row.
+    """
+
+    __tablename__ = "user_phrases"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "language_code", "normalized_phrase", name="uq_user_phrase"
+        ),
+        Index("ix_user_phrases_user_language", "user_id", "language_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+
+    phrase: Mapped[str] = mapped_column(String(500), nullable=False)
+    normalized_phrase: Mapped[str] = mapped_column(String(500), nullable=False)
+    translation: Mapped[str] = mapped_column(String(500), nullable=False)
+    pronunciation: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    register: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    situation: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"UserPhrase(id={self.id}, user_id={self.user_id}, phrase={self.phrase!r})"
+
+
 class WordGenerationLog(Base):
     """One call to word_generation_service.generate_new_words (bugfix spec:
     "для контроля использования AI и затрат") - logged even when the local

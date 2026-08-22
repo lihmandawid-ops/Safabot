@@ -16,12 +16,10 @@
   "onboarding.registration_complete": "🎉 Регистрация завершена!\n\nВы изучаете: {flag} {name}\nНовых слов в день: {daily_words}\n\nВам открыт бесплатный PRO-доступ на {trial_days} дней. Хорошего обучения!",
   "onboarding.main_menu_ready": "Главное меню:",
   "onboarding.cancelled": "Регистрация отменена. Отправьте /start, чтобы начать заново.",
-
   "menu.coming_soon": "🚧 Раздел «{feature}» пока в разработке. Загляните позже!",
   "menu.unknown_command": "Не понимаю эту команду. Используйте меню ниже.",
   "menu.feature.progress": "Мой прогресс",
   "menu.feature.pro": "PRO-подписка",
-
   "menu.button.learn_words": "📚 Учить слова",
   "menu.button.review": "🔄 Повторить",
   "menu.button.dictionary": "📖 Словарь",
@@ -33,7 +31,6 @@
   "menu.button.progress": "📊 Мой прогресс",
   "menu.button.settings": "⚙️ Настройки",
   "menu.button.pro": "💎 PRO",
-
   "settings.title": "⚙️ Ваши настройки",
   "settings.profile_not_found": "Профиль не найден. Отправьте /start, чтобы зарегистрироваться.",
   "settings.interface_language": "🗣 Язык интерфейса: {flag} {name}",
@@ -50,7 +47,6 @@
   "settings.your_languages": "🌍 Изучаемые языки:",
   "settings.language_row": "  {flag} {name} — {level}{current_marker}",
   "settings.current_marker": " — ACTIVE",
-
   "settings.menu.language": "🌍 Мой язык",
   "settings.menu.interface_language": "🗣 Язык интерфейса",
   "settings.menu.daily_words": "📚 Количество слов",
@@ -63,7 +59,6 @@
   "settings.menu.add_language": "➕ Добавить язык",
   "settings.menu.timezone": "🌍 Часовой пояс",
   "settings.menu.timezone_search": "🔎 Другой часовой пояс",
-
   "settings.pick_current_language": "Выберите язык, который хотите сделать активным:",
   "settings.current_language_updated": "✅ Активный язык изменён на {flag} {name}.",
   "settings.add_language_limit_reached": "На вашем тарифе доступно не больше {max} языков одновременно. Оформите PRO, чтобы изучать больше языков.",
@@ -97,7 +92,6 @@
   "settings.timezone_search_prompt": "Напиши город, страну или регион (например: Tel Aviv, New York, Berlin):",
   "settings.timezone_search_empty": "Ничего не найдено. Попробуй другое название (по-английски, например: Tel Aviv, Warsaw, Tokyo).",
   "settings.timezone_search_results": "Вот что нашлось — выбери подходящий часовой пояс:",
-
   "language.name.en": "Английский",
   "language.name.ru": "Русский",
   "language.name.de": "Немецкий",
@@ -106,34 +100,27 @@
   "language.name.fr": "Французский",
   "language.name.it": "Итальянский",
   "language.name.uk": "Украинский",
-
   "subscription.status.trial": "Пробный период",
   "subscription.status.free": "Бесплатный",
   "subscription.status.pro": "PRO",
   "subscription.status.expired": "Истёк",
-
   "level.beginner": "🟢 Начальный",
   "level.elementary": "🟡 Элементарный",
   "level.intermediate": "🟠 Средний",
   "level.upper_intermediate": "🔵 Выше среднего",
   "level.advanced": "🔴 Продвинутый",
-
   "notification_slot.morning": "Утро",
   "notification_slot.afternoon": "День",
   "notification_slot.evening": "Вечер",
-
   "card.status.new": "🆕 Новое",
   "card.status.learning": "📖 Изучается",
   "card.status.review": "🔄 На повторении",
   "card.status.paused": "⏸ Отложено",
   "card.status.mastered": "✅ Выучено",
-
   "card.no_language": "Сначала выберите изучаемый язык в ⚙️ Настройках.",
   "ai.not_configured": "AI-функции пока не настроены.",
   "ai.generic_error": "Не удалось получить информацию. Попробуй ещё раз.",
-
   "grammar.prompt": "✏️ Задай вопрос о грамматике, например: «Почему в английском 'went', а не 'goed'?»",
-
   "text_analysis.prompt": "📝 Отправь текст для разбора:",
   "text_analysis.too_long": "Текст слишком длинный (максимум {max_length} символов). Сократи его и отправь снова.",
   "text_analysis.title": "📝 Разбор текста",
@@ -184,13 +171,11 @@
   "card.forms_header": "🔤 Формы слова:",
   "card.no_forms": "Формы слова пока не добавлены.",
   "card.button.forms_close": "✖️ Закрыть",
-
   "card.button.add": "⭐ Добавить в обучение",
   "card.button.forms": "🔤 Все формы",
   "card.button.usage": "💡 Как использовать?",
   "card.button.pronounce": "🔊 Произношение",
   "card.button.back": "⬅️ Назад",
-
   "dictionary.prompt": "🔎 Введите слово для поиска:",
   "dictionary.not_found": "😕 Ничего не найдено. Попробуйте другое слово.",
   "dictionary.results_header": "Результаты поиска:",
@@ -201,7 +186,6 @@
   "dictionary.resume_yes": "🔄 Вернуть в повторение",
   "dictionary.resume_no": "⬅️ Назад",
   "dictionary.already_active_status": "Это слово уже в твоём словаре.\nСтатус: {status}",
-
   "words.add_button": "➕ Добавить слово",
   "words.add_prompt": "✏️ Введите слово, которое хочешь добавить в обучение.\n\nМожно сразу несколько слов через запятую или с новой строки.",
   "words.batch_header": "Результат добавления слов:",
@@ -209,7 +193,6 @@
   "words.batch_already_header": "⚠️ Уже было ({count}):",
   "words.batch_failed_header": "❌ Не удалось определить ({count}):",
   "words.batch_resume_button": "🔄 Вернуть «{word}»",
-
   "words.title": "⭐ Мои слова",
   "words.choose_filter": "Выберите список:",
   "words.filter.all": "📚 Все",
@@ -224,7 +207,6 @@
   "words.invalid_number": "Не понимаю. Отправьте номер слова из списка выше.",
   "words.number_out_of_range": "Номера {numbers} нет на текущей странице.",
   "words.list_expired": "Список устарел. Откройте «⭐ Мои слова» заново.",
-
   "words.manage_header": "№{number} — {word}",
   "words.manage_translation": "Перевод: {translation}",
   "words.manage_status": "Статус: {status}",
@@ -232,7 +214,6 @@
   "words.manage_next_review_none": "Следующее повторение: не запланировано",
   "words.today": "сегодня",
   "words.tomorrow": "завтра",
-
   "words.bulk_header": "Выбраны:",
   "words.bulk_invalid": "Не понимаю выбор. Укажите номера через запятую или пробел, например: 2,5,7",
   "words.bulk_out_of_range": "Номера {numbers} нет на текущей странице.",
@@ -240,17 +221,14 @@
   "words.bulk_paused": "⏸ Слов убрано из повторения: {count}.",
   "words.bulk_resumed": "🔄 Слов возвращено в повторение: {count}.",
   "words.bulk_deleted": "🗑 Слов удалено: {count}.",
-
   "words.delete_confirm": "Удалить слово «{word}» из твоего словаря?",
   "words.delete_confirm_bulk": "Удалить выбранные слова ({count}) из твоего словаря?",
   "words.deleted": "🗑 Слово удалено из твоего словаря.",
   "words.paused_single": "⏸ Слово убрано из повторения.",
   "words.resumed_single": "🔄 Слово возвращено в повторение.",
-
   "words.search_prompt": "🔎 Введите слово для поиска в вашем словаре:",
   "words.search_not_found": "Ничего не найдено в вашем словаре.",
   "words.search_results_header": "Найдено в вашем словаре:",
-
   "words.button.review": "🔄 Добавить в повторение",
   "words.button.pause": "⏸ Убрать из повторения",
   "words.button.delete": "🗑 Удалить",
@@ -258,7 +236,6 @@
   "words.button.back": "⬅️ Назад",
   "words.button.cancel": "❌ Отмена",
   "words.button.confirm_delete": "✅ Да, удалить",
-
   "learning.nothing_to_do": "🎉 Пока нечего повторять — все слова выучены или ещё не пора.\n\nЗагляни в 📖 Словарь, чтобы добавить новые слова.",
   "learning.nothing_due": "🎉 Сейчас нет слов, которым пора повторяться.",
   "learning.ready": "📚 Время заниматься!\n\nСегодня тебе нужно повторить {count} слов.\n\nНачнём?",
@@ -285,26 +262,20 @@
   "learning.extra_limit_reached": "На сегодня достигнут лимит дополнительных слов. Завтра можно будет добавить ещё.",
   "learning.extra_unavailable": "Сейчас не удалось добавить новые слова. Попробуй немного позже.",
   "learning.known_no_replacement": "Хорошо, это слово отмечено как выученное. Свободных новых слов сейчас нет.",
-
   "learning.card_front": "{flag} {word}\n\n{pronunciation}",
   "learning.card_back": "{flag} {word}\n\n{pronunciation}\n\n{translation_flag} {translation}\n\n{example}",
-
   "learning.rating.again": "😣 Не помню",
   "learning.rating.hard": "😐 С трудом",
   "learning.rating.good": "🙂 Помню",
   "learning.rating.easy": "😎 Очень легко",
-
   "learning.session_gone": "Эта учебная сессия больше не активна. Загляни в 📚 Учить слова, чтобы начать заново.",
-
   "learning.completion": "🎉 Отлично!\n\nСегодня:\n📚 Повторено: {total}\n🆕 Новых слов: {new_words}\n✅ Правильных: {correct}\n❌ Ошибок: {wrong}\n\n🔥 Серия: {streak} дней",
-
   "notification.morning.new_only": "☀️ Доброе утро!\n\nТебя ждут новые слова.\n\n📚 Сегодня: {new_count} новых слов",
   "notification.morning.button": "▶️ Начать обучение",
   "notification.afternoon.button": "▶️ Повторить",
   "notification.evening.button": "▶️ Повторить",
   "notification.evening.done": "✅ Сегодняшнее обучение выполнено!\n\nОтличная работа.",
   "notification.review_list.header": "🔔 Быстрое повторение",
-
   "quiz.no_words": "У тебя пока недостаточно слов для викторины. Сначала добавь несколько слов в 📖 Словарь!",
   "quiz.no_mistakes": "В прошлый раз не было ошибок — отличная работа!",
   "quiz.progress": "Вопрос {current} из {total}",
@@ -318,7 +289,6 @@
   "quiz.feedback.correct": "✅ Верно!",
   "quiz.feedback.wrong": "❌ Неверно. Правильный ответ: {answer}",
   "quiz.results": "🏆 Викторина завершена!\n\n✅ Правильно: {correct}\n❌ Ошибок: {wrong}\n🎯 Точность: {accuracy}%",
-
   "quiz.button.start": "🏆 Викторина",
   "quiz.button.reveal": "👁 Показать ответ",
   "quiz.button.correct": "✅ Да",
@@ -328,13 +298,11 @@
   "quiz.button.retry_wrong": "🔁 Повторить ошибки",
   "quiz.button.new_quiz": "🏆 Новая викторина",
   "quiz.button.main_menu": "⬅️ Главное меню",
-
   "goal.general": "🌍 Для общего развития",
   "goal.work": "💼 Для работы",
   "goal.travel": "✈️ Для путешествий",
   "goal.study": "🎓 Для учёбы",
   "goal.family": "👨‍👩‍👧 Для общения с семьёй",
-
   "industry.it": "💻 IT",
   "industry.healthcare": "🏥 Медицина",
   "industry.education": "🎓 Образование",
@@ -345,7 +313,6 @@
   "industry.legal": "⚖️ Юриспруденция",
   "industry.marketing": "📈 Маркетинг",
   "industry.manufacturing": "🏭 Производство",
-
   "topic.daily_life": "🏠 Повседневная жизнь",
   "topic.business": "💼 Бизнес",
   "topic.work": "🏢 Работа",
@@ -356,7 +323,6 @@
   "topic.education": "🎓 Образование",
   "topic.technology": "💻 Технологии",
   "topic.transport": "🚗 Транспорт",
-
   "onboarding.choose_goal": "Для чего вы изучаете этот язык?",
   "onboarding.goal_selected": "Отлично!\n\nВ каком часовом поясе вы находитесь?",
   "onboarding.choose_industry": "В какой сфере вы работаете?",
@@ -364,7 +330,6 @@
   "onboarding.industry_selected": "Отлично!\n\nВ каком часовом поясе вы находитесь?",
   "onboarding.button.skip": "⏭ Пропустить",
   "onboarding.button.other": "✏️ Другое",
-
   "settings.menu.topics": "🎯 Темы обучения",
   "settings.menu.goal": "🎯 Цель изучения",
   "settings.topics_title": "🎯 Темы обучения\n\nВыбранные темы помогают AI подбирать более релевантные слова.",
@@ -383,7 +348,6 @@
   "settings.current_industry": "💼 Сфера: {industry}",
   "settings.current_topics": "📌 Темы: {topics}",
   "settings.current_topics_none": "📌 Темы: не выбраны",
-
   "revnow.count_prompt": "Сколько слов повторить?",
   "revnow.count_prompt_mastered": "🏆 Повторить выученные\n\nСколько слов повторить?",
   "revnow.button.mastered": "🏆 Повторить выученные",
@@ -398,5 +362,46 @@
   "revnow.empty": "Пока нет слов для повторения.\n\nЗагляни в 📖 Словарь, чтобы добавить новые слова.",
   "revnow.button.new_words": "➕ Новые слова",
   "revnow.button.start_now": "▶️ Начать повторение",
-  "revnow.button.skip": "⏭️ Пропустить"
+  "revnow.button.skip": "⏭️ Пропустить",
+  "menu.button.phrases": "💬 Полезные фразы",
+  "phrases.menu.title": "💬 Полезные фразы\n\nВыбери, что хочешь сделать:",
+  "phrases.menu.saved": "📚 Сохранённые фразы",
+  "phrases.menu.new": "✨ Новая фраза",
+  "phrases.menu.popular": "🔥 Популярные фразы",
+  "phrases.menu.back": "⬅️ Назад",
+  "phrases.saved.empty": "У тебя пока нет сохранённых фраз.\n\nНажми «✨ Новая фраза», чтобы создать первую.",
+  "phrases.saved.header": "📚 Мои полезные фразы",
+  "phrases.popular.empty": "Для этого языка пока нет популярных фраз.",
+  "phrases.popular.header": "🔥 Популярные фразы",
+  "phrases.popular.translation_unavailable": "Перевод временно недоступен",
+  "phrases.situation.prompt": "🎯 Выбери ситуацию, для которой нужна фраза:",
+  "phrases.situation.custom": "🎯 Своя ситуация",
+  "phrases.situation.custom_prompt": "Опиши ситуацию своими словами - и я подберу подходящую фразу.",
+  "phrases.situation.custom_empty": "Опиши ситуацию текстом - не получилось прочитать пустое сообщение.",
+  "phrases.button.back": "⬅️ Назад",
+  "phrases.button.analyze": "📖 Разобрать / ➕ Добавить слова",
+  "phrases.button.delete": "🗑️ Удалить",
+  "phrases.button.delete_confirm": "🗑️ Да, удалить",
+  "phrases.button.save": "💾 Сохранить",
+  "phrases.button.another": "🔄 Другая фраза",
+  "phrases.not_found": "Эта фраза не найдена - возможно, она уже удалена.",
+  "phrases.delete_confirm_prompt": "Точно удалить эту фразу?",
+  "phrases.deleted": "Фраза удалена",
+  "phrases.expired": "Эта фраза больше не активна. Попробуй ещё раз.",
+  "phrases.saved_ok": "💾 Сохранено",
+  "phrases.already_saved": "Эта фраза уже сохранена",
+  "phrase_situation.work": "💼 Работа",
+  "phrase_situation.shopping": "🛒 Магазин",
+  "phrase_situation.restaurant": "🍽️ Ресторан",
+  "phrase_situation.travel": "✈️ Путешествие",
+  "phrase_situation.hotel": "🏨 Отель",
+  "phrase_situation.transport": "🚕 Транспорт",
+  "phrase_situation.meeting": "👋 Знакомство",
+  "phrase_situation.daily_life": "🏠 Повседневная жизнь",
+  "phrase_situation.socializing": "❤️ Общение",
+  "phrase_situation.phone": "📞 Телефон",
+  "phrase_situation.doctor": "🏥 Врач",
+  "phrase_situation.bank": "🏦 Банк",
+  "phrase_situation.study": "🎓 Учёба",
+  "phrase_situation.customer_service": "🔧 Работа с клиентами"
 }

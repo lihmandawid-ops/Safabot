@@ -23,6 +23,7 @@ LEARN_WORDS = "menu.button.learn_words"
 REVIEW = "menu.button.review"
 DICTIONARY = "menu.button.dictionary"
 MY_WORDS = "menu.button.my_words"
+PHRASES = "menu.button.phrases"
 GRAMMAR = "menu.button.grammar"
 PARSE_PHOTO = "menu.button.parse_photo"
 PARSE_TEXT = "menu.button.parse_text"
@@ -34,7 +35,7 @@ PRO = "menu.button.pro"
 MAIN_MENU_LAYOUT: tuple[tuple[str, ...], ...] = (
     (LEARN_WORDS, REVIEW),
     (DICTIONARY, MY_WORDS),
-    (GRAMMAR,),
+    (PHRASES, GRAMMAR),
     (PARSE_PHOTO, PARSE_TEXT),
     (PARSE_VOICE, PROGRESS),
     (SETTINGS, PRO),

@@ -16,12 +16,10 @@
   "onboarding.registration_complete": "🎉 ההרשמה הושלמה!\n\nאתה לומד: {flag} {name}\nמילים חדשות ביום: {daily_words}\n\nקיבלת גישת PRO חינם ל-{trial_days} ימים. לימוד מהנה!",
   "onboarding.main_menu_ready": "תפריט ראשי:",
   "onboarding.cancelled": "ההרשמה בוטלה. שלח /start כדי להתחיל מחדש.",
-
   "menu.coming_soon": "🚧 האזור «{feature}» עדיין בפיתוח. חזור מאוחר יותר!",
   "menu.unknown_command": "לא הבנתי את הפקודה הזו. השתמש בתפריט שלמטה.",
   "menu.feature.progress": "ההתקדמות שלי",
   "menu.feature.pro": "מנוי PRO",
-
   "menu.button.learn_words": "📚 ללמוד מילים",
   "menu.button.review": "🔄 לחזור",
   "menu.button.dictionary": "📖 מילון",
@@ -33,7 +31,6 @@
   "menu.button.progress": "📊 ההתקדמות שלי",
   "menu.button.settings": "⚙️ הגדרות",
   "menu.button.pro": "💎 PRO",
-
   "settings.title": "⚙️ ההגדרות שלך",
   "settings.profile_not_found": "הפרופיל לא נמצא. שלח /start כדי להירשם.",
   "settings.interface_language": "🗣 שפת הממשק: {flag} {name}",
@@ -50,7 +47,6 @@
   "settings.your_languages": "🌍 השפות שלך:",
   "settings.language_row": "  {flag} {name} — {level}{current_marker}",
   "settings.current_marker": " — פעילה",
-
   "settings.menu.language": "🌍 השפה שלי",
   "settings.menu.interface_language": "🗣 שפת הממשק",
   "settings.menu.daily_words": "📚 כמות מילים",
@@ -63,7 +59,6 @@
   "settings.menu.add_language": "➕ הוסף שפה",
   "settings.menu.timezone": "🌍 אזור זמן",
   "settings.menu.timezone_search": "🔎 אזור זמן אחר",
-
   "settings.pick_current_language": "בחר את השפה שברצונך להפוך לפעילה:",
   "settings.current_language_updated": "✅ השפה הפעילה שונתה ל-{flag} {name}.",
   "settings.add_language_limit_reached": "בתוכנית שלך ניתן ללמוד עד {max} שפות בו-זמנית. שדרג ל-PRO כדי ללמוד שפות נוספות.",
@@ -97,7 +92,6 @@
   "settings.timezone_search_prompt": "כתוב עיר, מדינה או אזור (לדוגמה: Tel Aviv, New York, Berlin):",
   "settings.timezone_search_empty": "לא נמצא דבר. נסה שם אחר (באנגלית, לדוגמה: Tel Aviv, Warsaw, Tokyo).",
   "settings.timezone_search_results": "הנה מה שנמצא — בחר את אזור הזמן המתאים:",
-
   "language.name.en": "אנגלית",
   "language.name.ru": "רוסית",
   "language.name.de": "גרמנית",
@@ -106,34 +100,27 @@
   "language.name.fr": "צרפתית",
   "language.name.it": "איטלקית",
   "language.name.uk": "אוקראינית",
-
   "subscription.status.trial": "תקופת ניסיון",
   "subscription.status.free": "חינמי",
   "subscription.status.pro": "PRO",
   "subscription.status.expired": "פג תוקף",
-
   "level.beginner": "🟢 מתחיל",
   "level.elementary": "🟡 בסיסי",
   "level.intermediate": "🟠 בינוני",
   "level.upper_intermediate": "🔵 בינוני-מתקדם",
   "level.advanced": "🔴 מתקדם",
-
   "notification_slot.morning": "בוקר",
   "notification_slot.afternoon": "צהריים",
   "notification_slot.evening": "ערב",
-
   "card.status.new": "🆕 חדשה",
   "card.status.learning": "📖 בלימוד",
   "card.status.review": "🔄 בחזרה",
   "card.status.paused": "⏸ מושהית",
   "card.status.mastered": "✅ נלמדה",
-
   "card.no_language": "בחר תחילה שפת לימוד ב-⚙️ הגדרות.",
   "ai.not_configured": "פונקציות ה-AI עדיין לא הוגדרו.",
   "ai.generic_error": "לא ניתן היה לקבל את המידע. נסה שוב.",
-
   "grammar.prompt": "✏️ שאל שאלת דקדוק, לדוגמה: «למה באנגלית אומרים 'went' ולא 'goed'?»",
-
   "text_analysis.prompt": "📝 שלח טקסט לניתוח:",
   "text_analysis.too_long": "הטקסט ארוך מדי (מקסימום {max_length} תווים). קצר אותו ושלח שוב.",
   "text_analysis.title": "📝 ניתוח טקסט",
@@ -184,13 +171,11 @@
   "card.forms_header": "🔤 צורות המילה:",
   "card.no_forms": "עדיין לא נוספו צורות למילה.",
   "card.button.forms_close": "✖️ סגור",
-
   "card.button.add": "⭐ הוסף ללימוד",
   "card.button.forms": "🔤 כל הצורות",
   "card.button.usage": "💡 איך משתמשים בזה?",
   "card.button.pronounce": "🔊 הגייה",
   "card.button.back": "⬅️ חזרה",
-
   "dictionary.prompt": "🔎 הזן את המילה שברצונך לחפש:",
   "dictionary.not_found": "😕 לא נמצא דבר. נסה מילה אחרת.",
   "dictionary.results_header": "תוצאות חיפוש:",
@@ -201,7 +186,6 @@
   "dictionary.resume_yes": "🔄 החזר לחזרה",
   "dictionary.resume_no": "⬅️ חזרה",
   "dictionary.already_active_status": "המילה הזו כבר נמצאת במילון שלך.\nסטטוס: {status}",
-
   "words.add_button": "➕ הוסף מילה",
   "words.add_prompt": "✏️ הזן את המילה שברצונך להוסיף ללימוד.\n\nניתן להוסיף כמה מילים בבת אחת, מופרדות בפסיקים או בשורות נפרדות.",
   "words.batch_header": "תוצאת הוספת המילים:",
@@ -209,7 +193,6 @@
   "words.batch_already_header": "⚠️ כבר היו קיימות ({count}):",
   "words.batch_failed_header": "❌ לא ניתן היה לזהות ({count}):",
   "words.batch_resume_button": "🔄 החזר את «{word}»",
-
   "words.title": "⭐ המילים שלי",
   "words.choose_filter": "בחר רשימה:",
   "words.filter.all": "📚 הכול",
@@ -224,7 +207,6 @@
   "words.invalid_number": "לא הבנתי. שלח את מספר המילה מהרשימה שלמעלה.",
   "words.number_out_of_range": "המספר {numbers} לא נמצא בעמוד הנוכחי.",
   "words.list_expired": "הרשימה פגה. פתח שוב את «⭐ המילים שלי».",
-
   "words.manage_header": "מס' {number} — {word}",
   "words.manage_translation": "תרגום: {translation}",
   "words.manage_status": "סטטוס: {status}",
@@ -232,7 +214,6 @@
   "words.manage_next_review_none": "החזרה הבאה: לא מתוכננת",
   "words.today": "היום",
   "words.tomorrow": "מחר",
-
   "words.bulk_header": "נבחרו:",
   "words.bulk_invalid": "הבחירה לא הובנה. ציין מספרים מופרדים בפסיק או ברווח, לדוגמה: 2,5,7",
   "words.bulk_out_of_range": "המספר {numbers} לא נמצא בעמוד הנוכחי.",
@@ -240,17 +221,14 @@
   "words.bulk_paused": "⏸ מילים שהוסרו מהחזרה: {count}.",
   "words.bulk_resumed": "🔄 מילים שהוחזרו לחזרה: {count}.",
   "words.bulk_deleted": "🗑 מילים שנמחקו: {count}.",
-
   "words.delete_confirm": "למחוק את המילה «{word}» מהמילון שלך?",
   "words.delete_confirm_bulk": "למחוק את המילים שנבחרו ({count}) מהמילון שלך?",
   "words.deleted": "🗑 המילה נמחקה מהמילון שלך.",
   "words.paused_single": "⏸ המילה הוסרה מהחזרה.",
   "words.resumed_single": "🔄 המילה הוחזרה לחזרה.",
-
   "words.search_prompt": "🔎 הזן את המילה שברצונך לחפש במילון שלך:",
   "words.search_not_found": "לא נמצא דבר במילון שלך.",
   "words.search_results_header": "נמצא במילון שלך:",
-
   "words.button.review": "🔄 הוסף לחזרה",
   "words.button.pause": "⏸ הסר מהחזרה",
   "words.button.delete": "🗑 מחק",
@@ -258,7 +236,6 @@
   "words.button.back": "⬅️ חזרה",
   "words.button.cancel": "❌ ביטול",
   "words.button.confirm_delete": "✅ כן, מחק",
-
   "learning.nothing_to_do": "🎉 כרגע אין מה לחזור עליו — כל המילים נלמדו או שעדיין לא הגיע זמנן.\n\nבקר ב-📖 מילון כדי להוסיף מילים חדשות.",
   "learning.nothing_due": "🎉 כרגע אין מילים שהגיע זמן חזרתן.",
   "learning.ready": "📚 הגיע הזמן ללמוד!\n\nהיום עליך לחזור על {count} מילים.\n\nנתחיל?",
@@ -285,26 +262,20 @@
   "learning.extra_limit_reached": "המכסה היומית של מילים נוספות הושגה. מחר תוכל להוסיף עוד.",
   "learning.extra_unavailable": "כרגע לא ניתן היה להוסיף מילים חדשות. נסה שוב בעוד זמן קצר.",
   "learning.known_no_replacement": "בסדר, המילה הזו סומנה כנלמדת. כרגע אין מילים חדשות פנויות.",
-
   "learning.card_front": "{flag} {word}\n\n{pronunciation}",
   "learning.card_back": "{flag} {word}\n\n{pronunciation}\n\n{translation_flag} {translation}\n\n{example}",
-
   "learning.rating.again": "😣 לא זוכר",
   "learning.rating.hard": "😐 קשה",
   "learning.rating.good": "🙂 זוכר",
   "learning.rating.easy": "😎 קל מאוד",
-
   "learning.session_gone": "השיעור הזה כבר אינו פעיל. בקר ב-📚 ללמוד מילים כדי להתחיל מחדש.",
-
   "learning.completion": "🎉 מצוין!\n\nהיום:\n📚 נחזרו: {total}\n🆕 מילים חדשות: {new_words}\n✅ נכונות: {correct}\n❌ שגיאות: {wrong}\n\n🔥 רצף: {streak} ימים",
-
   "notification.morning.new_only": "☀️ בוקר טוב!\n\nמילים חדשות מחכות לך.\n\n📚 היום: {new_count} מילים חדשות",
   "notification.morning.button": "▶️ התחל ללמוד",
   "notification.afternoon.button": "▶️ חזור",
   "notification.evening.button": "▶️ חזור",
   "notification.evening.done": "✅ הלימוד להיום הושלם!\n\nעבודה מצוינת.",
   "notification.review_list.header": "🔔 חזרה מהירה",
-
   "quiz.no_words": "עדיין אין לך מספיק מילים לחידון. הוסף קודם כמה מילים ב-📖 מילון!",
   "quiz.no_mistakes": "בפעם הקודמת לא היו שגיאות — עבודה מצוינת!",
   "quiz.progress": "שאלה {current} מתוך {total}",
@@ -318,7 +289,6 @@
   "quiz.feedback.correct": "✅ נכון!",
   "quiz.feedback.wrong": "❌ לא נכון. התשובה הנכונה: {answer}",
   "quiz.results": "🏆 החידון הסתיים!\n\n✅ נכון: {correct}\n❌ שגיאות: {wrong}\n🎯 דיוק: {accuracy}%",
-
   "quiz.button.start": "🏆 חידון",
   "quiz.button.reveal": "👁 הצג תשובה",
   "quiz.button.correct": "✅ כן",
@@ -328,13 +298,11 @@
   "quiz.button.retry_wrong": "🔁 חזור על הטעויות",
   "quiz.button.new_quiz": "🏆 חידון חדש",
   "quiz.button.main_menu": "⬅️ תפריט ראשי",
-
   "goal.general": "🌍 להתפתחות כללית",
   "goal.work": "💼 לעבודה",
   "goal.travel": "✈️ לנסיעות",
   "goal.study": "🎓 ללימודים",
   "goal.family": "👨‍👩‍👧 לתקשורת עם המשפחה",
-
   "industry.it": "💻 היי-טק",
   "industry.healthcare": "🏥 רפואה",
   "industry.education": "🎓 חינוך",
@@ -345,7 +313,6 @@
   "industry.legal": "⚖️ משפטים",
   "industry.marketing": "📈 שיווק",
   "industry.manufacturing": "🏭 תעשייה",
-
   "topic.daily_life": "🏠 חיי היומיום",
   "topic.business": "💼 עסקים",
   "topic.work": "🏢 עבודה",
@@ -356,7 +323,6 @@
   "topic.education": "🎓 חינוך",
   "topic.technology": "💻 טכנולוגיה",
   "topic.transport": "🚗 תחבורה",
-
   "onboarding.choose_goal": "לשם מה אתה לומד את השפה הזו?",
   "onboarding.goal_selected": "מעולה!\n\nבאיזה אזור זמן אתה נמצא?",
   "onboarding.choose_industry": "באיזה תחום אתה עובד?",
@@ -364,7 +330,6 @@
   "onboarding.industry_selected": "מעולה!\n\nבאיזה אזור זמן אתה נמצא?",
   "onboarding.button.skip": "⏭ דלג",
   "onboarding.button.other": "✏️ אחר",
-
   "settings.menu.topics": "🎯 נושאי לימוד",
   "settings.menu.goal": "🎯 מטרת הלימוד",
   "settings.topics_title": "🎯 נושאי לימוד\n\nהנושאים שנבחרו עוזרים ל-AI לבחור מילים רלוונטיות יותר.",
@@ -383,7 +348,6 @@
   "settings.current_industry": "💼 תחום: {industry}",
   "settings.current_topics": "📌 נושאים: {topics}",
   "settings.current_topics_none": "📌 נושאים: לא נבחרו",
-
   "revnow.count_prompt": "כמה מילים לחזור עליהן?",
   "revnow.count_prompt_mastered": "🏆 חזור על מילים שנלמדו\n\nכמה מילים לחזור עליהן?",
   "revnow.button.mastered": "🏆 חזור על מילים שנלמדו",
@@ -398,5 +362,46 @@
   "revnow.empty": "כרגע אין מילים לחזרה.\n\nבקר ב-📖 מילון כדי להוסיף מילים חדשות.",
   "revnow.button.new_words": "➕ מילים חדשות",
   "revnow.button.start_now": "▶️ התחל חזרה",
-  "revnow.button.skip": "⏭️ דלג"
+  "revnow.button.skip": "⏭️ דלג",
+  "menu.button.phrases": "💬 ביטויים שימושיים",
+  "phrases.menu.title": "💬 ביטויים שימושיים\n\nבחר/י מה לעשות:",
+  "phrases.menu.saved": "📚 ביטויים שמורים",
+  "phrases.menu.new": "✨ ביטוי חדש",
+  "phrases.menu.popular": "🔥 ביטויים פופולריים",
+  "phrases.menu.back": "⬅️ חזרה",
+  "phrases.saved.empty": "עדיין אין לך ביטויים שמורים.\n\nלחץ/י על \"✨ ביטוי חדש\" כדי ליצור את הראשון.",
+  "phrases.saved.header": "📚 הביטויים השימושיים שלי",
+  "phrases.popular.empty": "עדיין אין ביטויים פופולריים לשפה הזו.",
+  "phrases.popular.header": "🔥 ביטויים פופולריים",
+  "phrases.popular.translation_unavailable": "התרגום אינו זמין כרגע",
+  "phrases.situation.prompt": "🎯 בחר/י מצב שבשבילו את/ה צריך/ה ביטוי:",
+  "phrases.situation.custom": "🎯 מצב משלי",
+  "phrases.situation.custom_prompt": "תאר/י את המצב במילים שלך, ואמצא ביטוי מתאים.",
+  "phrases.situation.custom_empty": "אנא תאר/י את המצב בטקסט - לא ניתן לקרוא הודעה ריקה.",
+  "phrases.button.back": "⬅️ חזרה",
+  "phrases.button.analyze": "📖 פירוק / ➕ הוספת מילים",
+  "phrases.button.delete": "🗑️ מחיקה",
+  "phrases.button.delete_confirm": "🗑️ כן, למחוק",
+  "phrases.button.save": "💾 שמירה",
+  "phrases.button.another": "🔄 ביטוי אחר",
+  "phrases.not_found": "הביטוי הזה לא נמצא - ייתכן שכבר נמחק.",
+  "phrases.delete_confirm_prompt": "למחוק את הביטוי הזה לצמיתות?",
+  "phrases.deleted": "הביטוי נמחק",
+  "phrases.expired": "הביטוי הזה כבר לא פעיל. נסה/י שוב.",
+  "phrases.saved_ok": "💾 נשמר",
+  "phrases.already_saved": "הביטוי הזה כבר שמור",
+  "phrase_situation.work": "💼 עבודה",
+  "phrase_situation.shopping": "🛒 קניות",
+  "phrase_situation.restaurant": "🍽️ מסעדה",
+  "phrase_situation.travel": "✈️ נסיעות",
+  "phrase_situation.hotel": "🏨 מלון",
+  "phrase_situation.transport": "🚕 תחבורה",
+  "phrase_situation.meeting": "👋 היכרות",
+  "phrase_situation.daily_life": "🏠 חיי היומיום",
+  "phrase_situation.socializing": "❤️ שיחת חולין",
+  "phrase_situation.phone": "📞 טלפון",
+  "phrase_situation.doctor": "🏥 רופא",
+  "phrase_situation.bank": "🏦 בנק",
+  "phrase_situation.study": "🎓 לימודים",
+  "phrase_situation.customer_service": "🔧 שירות לקוחות"
 }

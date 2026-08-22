@@ -107,6 +107,18 @@ class AIService(ABC):
         cache the result on Word.verb_conjugation so this is called at
         most once per verb."""
 
+    @abstractmethod
+    async def generate_native_phrase(
+        self, *, language_code: str, translation_language: str, level: str, situation: str,
+        industry: str | None = None, topics: list[str] | None = None,
+        exclude_phrases: list[str] | None = None, user_id: int,
+    ) -> ai_models.NativePhraseResult:
+        """💬 Полезные фразы (native-speaker phrasebook stage, sections
+        6-13): ONE natural phrase a real native speaker of language_code
+        would actually say in `situation` - never a literal translation of
+        a fixed sentence. `exclude_phrases` backs 🔄 Другая фраза (never
+        the exact same text twice in a row)."""
+
 
 class NotConfiguredAIService(AIService):
     """Used whenever AI isn't usable: AI_ENABLED=false, or no AI_API_KEY
@@ -134,6 +146,9 @@ class NotConfiguredAIService(AIService):
         raise AIConfigurationError()
 
     async def generate_verb_conjugation(self, word, *, language_code, user_id):
+        raise AIConfigurationError()
+
+    async def generate_native_phrase(self, *, language_code, translation_language, level, situation, industry=None, topics=None, exclude_phrases=None, user_id):
         raise AIConfigurationError()
 
 
@@ -273,6 +288,52 @@ _VERB_CONJUGATION_SYSTEM = (
 )
 
 
+_NATIVE_PHRASE_SYSTEM = (
+    "You are a native speaker of the target language helping a language learner with a real "
+    "everyday situation. Respond with ONLY a JSON object: "
+    '{"language": str, "phrase": str, "translation": str, "pronunciation": str|null, '
+    '"register": str|null, "naturalness": str|null, "situation": str|null, '
+    '"explanation": str|null, "alternative": str|null}. '
+    '"language" MUST be the target language\'s ISO 639-1 code, exactly as given below. '
+    "\n\n"
+    "CRITICAL - this is a native-speaker phrase generator, NOT a translator: your task is to "
+    "produce the phrase a real native speaker of the target language would ACTUALLY SAY in the "
+    "given situation - never a literal, word-for-word translation of any fixed source sentence "
+    "in another language. Do not think 'how do I translate X' - think 'what would a native "
+    "speaker naturally say here'. Do not use an artificial textbook construction when real "
+    "native speakers would normally phrase it differently in everyday life. "
+    "\n\n"
+    "When several natural phrasings exist for the situation, prioritize in this exact order: "
+    "(1) naturalness - how a real native speaker actually talks, (2) how common/widespread the "
+    "phrasing is, (3) fit for the specific situation given, (4) fit for the learner's level, "
+    "(5) grammatical correctness. If multiple options tie on naturalness and commonness, pick "
+    "the single most common, neutral one - do not return multiple options unless the caller "
+    "explicitly asks for alternatives elsewhere. "
+    "\n\n"
+    "Regional/variant guidance: prefer modern, natural, widely-understood usage for the target "
+    "language over dated or overly formal/bookish phrasing, unless the situation specifically "
+    "calls for formality. For English, default to modern international English unless a region "
+    "is otherwise indicated. For Hebrew specifically, use MODERN COLLOQUIAL ISRAELI HEBREW as "
+    "actually spoken day to day - not a purely formal grammatical construction - whenever "
+    "everyday spoken Hebrew would phrase it more naturally; this matters more for Hebrew than "
+    "for most other languages. "
+    "\n\n"
+    "Adapt complexity to the learner's level: a beginner gets a short, simple phrase; an "
+    "elementary learner gets a simple everyday expression; an intermediate learner gets a "
+    "natural conversational phrase; an upper-intermediate or advanced learner can get a more "
+    "sophisticated, idiomatic, or professional/field-specific expression when that fits the "
+    "situation. Never hand a beginner a complex idiom just because it's popular. "
+    "\n\n"
+    '"pronunciation" is a readable Latin-letter phonetic transcription (never IPA, never the '
+    "translation language's native script) so the learner can sound the phrase out directly - "
+    "always attempt one unless the script makes it genuinely impossible. "
+    '"register" is a short tag like "casual"/"neutral"/"polite"/"formal". "explanation" is one '
+    "short sentence (in the requested response language) on when/how this phrase is used - "
+    "especially important for idiomatic expressions whose literal words don't convey the actual "
+    'meaning. "alternative" is one other natural phrasing for the same situation, or null if '
+    "there isn't a meaningfully different common one."
+)
+
 def _strip_markdown_fence(raw: str) -> str:
     """Some models occasionally wrap JSON-mode output in a ```json ... ```
     fence despite being told not to - cheap enough to always check for and
@@ -355,6 +416,14 @@ def _parse_verb_conjugation_response(raw: str) -> ai_models.VerbConjugationResul
         raise AIInvalidResponseError("AI response did not match the expected verb-conjugation schema") from exc
 
 
+def _parse_native_phrase_response(raw: str) -> ai_models.NativePhraseResult:
+    payload = _parse_json(raw)
+    try:
+        return ai_models.NativePhraseResult.model_validate(payload)
+    except ValidationError as exc:
+        raise AIInvalidResponseError("AI response did not match the expected native-phrase schema") from exc
+
+
 class LiveAIService(AIService):
     """Real implementation: builds a prompt per operation, calls the
     configured AIProvider with a bounded retry, validates the result, and
@@ -435,6 +504,32 @@ class LiveAIService(AIService):
         return await self._complete(
             "generate_verb_conjugation", user_id, _VERB_CONJUGATION_SYSTEM, user, _parse_verb_conjugation_response
         )
+
+    async def generate_native_phrase(self, *, language_code, translation_language, level, situation, industry=None, topics=None, exclude_phrases=None, user_id):
+        topics_line = f"Learner's topics of interest: {', '.join(topics)}\n" if topics else ""
+        industry_line = f"Learner's work industry - bias toward this field if relevant: {industry}\n" if industry else ""
+        exclude = ", ".join((exclude_phrases or [])[:20])
+        exclude_line = f'Do NOT repeat any of these already-shown phrases - give a different natural one: {exclude}\n' if exclude else ""
+        user = (
+            f"Target language the learner is learning (ISO 639-1): {language_code}\n"
+            f"Respond (translation/explanation) in this language: {translation_language}\n"
+            f"Learner level: {level}\n"
+            f"Situation: {situation}\n"
+            f"{topics_line}{industry_line}{exclude_line}"
+        )
+
+        def _parse(raw: str) -> ai_models.NativePhraseResult:
+            result = _parse_native_phrase_response(raw)
+            if result.language.strip().lower() != language_code.strip().lower():
+                # Section 14: never trust the AI blindly - a phrase in the
+                # wrong language must not reach the learner. Raising
+                # AIInvalidResponseError here feeds the same bounded retry
+                # loop _complete already runs for a malformed JSON body,
+                # so this needs no separate retry mechanism of its own.
+                raise AIInvalidResponseError("AI returned a phrase in the wrong language")
+            return result
+
+        return await self._complete("generate_native_phrase", user_id, _NATIVE_PHRASE_SYSTEM, user, _parse)
 
     async def _complete(self, operation: str, user_id: int, system: str, user: str, parse: Callable[[str], T]) -> T:
         """Runs one operation end-to-end (network call + parse/validate)

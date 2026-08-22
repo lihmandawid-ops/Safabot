@@ -29,6 +29,7 @@ from handlers import dictionary as dictionary_handler
 from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
 from handlers import media as media_handler
+from handlers import phrases as phrases_handler
 from handlers import review as review_handler
 from handlers import settings as settings_handler
 from handlers import text_analysis as text_analysis_handler
@@ -89,6 +90,11 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await grammar_handler.start_grammar(update, context)
         return
 
+    if action == main_menu.PHRASES:
+        context.user_data.pop("mode", None)
+        await phrases_handler.show_phrases_menu(update, context)
+        return
+
     if action == main_menu.PARSE_PHOTO:
         context.user_data.pop("mode", None)
         await media_handler.prompt_for_photo(update, context)
@@ -120,6 +126,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if mode == settings_handler.MODE:
         await settings_handler.handle_text_input(update, context, text)
+        return
+    if mode == phrases_handler.MODE:
+        await phrases_handler.handle_text_input(update, context, text)
         return
 
     await update.message.reply_text(t("menu.unknown_command", language))

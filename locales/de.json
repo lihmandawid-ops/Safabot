@@ -16,12 +16,10 @@
   "onboarding.registration_complete": "🎉 Registrierung abgeschlossen!\n\nDu lernst: {flag} {name}\nNeue Wörter pro Tag: {daily_words}\n\nDu hast {trial_days} Tage kostenlosen PRO-Zugang erhalten. Viel Erfolg beim Lernen!",
   "onboarding.main_menu_ready": "Hauptmenü:",
   "onboarding.cancelled": "Registrierung abgebrochen. Sende /start, um von vorne zu beginnen.",
-
   "menu.coming_soon": "🚧 Der Bereich «{feature}» befindet sich noch in Entwicklung. Schau später wieder vorbei!",
   "menu.unknown_command": "Diesen Befehl verstehe ich nicht. Nutze das Menü unten.",
   "menu.feature.progress": "Mein Fortschritt",
   "menu.feature.pro": "PRO-Abo",
-
   "menu.button.learn_words": "📚 Wörter lernen",
   "menu.button.review": "🔄 Wiederholen",
   "menu.button.dictionary": "📖 Wörterbuch",
@@ -33,7 +31,6 @@
   "menu.button.progress": "📊 Mein Fortschritt",
   "menu.button.settings": "⚙️ Einstellungen",
   "menu.button.pro": "💎 PRO",
-
   "settings.title": "⚙️ Deine Einstellungen",
   "settings.profile_not_found": "Profil nicht gefunden. Sende /start, um dich zu registrieren.",
   "settings.interface_language": "🗣 Interface-Sprache: {flag} {name}",
@@ -50,7 +47,6 @@
   "settings.your_languages": "🌍 Deine Sprachen:",
   "settings.language_row": "  {flag} {name} — {level}{current_marker}",
   "settings.current_marker": " — AKTIV",
-
   "settings.menu.language": "🌍 Meine Sprache",
   "settings.menu.interface_language": "🗣 Interface-Sprache",
   "settings.menu.daily_words": "📚 Wortanzahl",
@@ -63,7 +59,6 @@
   "settings.menu.add_language": "➕ Sprache hinzufügen",
   "settings.menu.timezone": "🌍 Zeitzone",
   "settings.menu.timezone_search": "🔎 Andere Zeitzone",
-
   "settings.pick_current_language": "Wähle die Sprache, die du aktivieren möchtest:",
   "settings.current_language_updated": "✅ Aktive Sprache geändert zu {flag} {name}.",
   "settings.add_language_limit_reached": "Dein Tarif erlaubt maximal {max} Sprachen gleichzeitig. Hol dir PRO, um mehr Sprachen zu lernen.",
@@ -97,7 +92,6 @@
   "settings.timezone_search_prompt": "Schreib eine Stadt, ein Land oder eine Region (z. B.: Tel Aviv, New York, Berlin):",
   "settings.timezone_search_empty": "Nichts gefunden. Versuch einen anderen Namen (auf Englisch, z. B.: Tel Aviv, Warsaw, Tokyo).",
   "settings.timezone_search_results": "Das haben wir gefunden — wähle die passende Zeitzone:",
-
   "language.name.en": "Englisch",
   "language.name.ru": "Russisch",
   "language.name.de": "Deutsch",
@@ -106,34 +100,27 @@
   "language.name.fr": "Französisch",
   "language.name.it": "Italienisch",
   "language.name.uk": "Ukrainisch",
-
   "subscription.status.trial": "Testzeitraum",
   "subscription.status.free": "Kostenlos",
   "subscription.status.pro": "PRO",
   "subscription.status.expired": "Abgelaufen",
-
   "level.beginner": "🟢 Anfänger",
   "level.elementary": "🟡 Grundstufe",
   "level.intermediate": "🟠 Mittelstufe",
   "level.upper_intermediate": "🔵 Obere Mittelstufe",
   "level.advanced": "🔴 Fortgeschritten",
-
   "notification_slot.morning": "Morgens",
   "notification_slot.afternoon": "Mittags",
   "notification_slot.evening": "Abends",
-
   "card.status.new": "🆕 Neu",
   "card.status.learning": "📖 Wird gelernt",
   "card.status.review": "🔄 In Wiederholung",
   "card.status.paused": "⏸ Pausiert",
   "card.status.mastered": "✅ Gelernt",
-
   "card.no_language": "Wähle zuerst eine Lernsprache in ⚙️ Einstellungen.",
   "ai.not_configured": "Die AI-Funktionen sind noch nicht eingerichtet.",
   "ai.generic_error": "Die Informationen konnten nicht abgerufen werden. Versuch es erneut.",
-
   "grammar.prompt": "✏️ Stell eine Grammatikfrage, z. B.: „Warum heißt es im Englischen 'went' statt 'goed'?“",
-
   "text_analysis.prompt": "📝 Sende einen Text zur Analyse:",
   "text_analysis.too_long": "Der Text ist zu lang (maximal {max_length} Zeichen). Kürze ihn und sende ihn erneut.",
   "text_analysis.title": "📝 Textanalyse",
@@ -184,13 +171,11 @@
   "card.forms_header": "🔤 Wortformen:",
   "card.no_forms": "Noch keine Wortformen hinzugefügt.",
   "card.button.forms_close": "✖️ Schließen",
-
   "card.button.add": "⭐ Zum Lernen hinzufügen",
   "card.button.forms": "🔤 Alle Formen",
   "card.button.usage": "💡 Wie wird es verwendet?",
   "card.button.pronounce": "🔊 Aussprache",
   "card.button.back": "⬅️ Zurück",
-
   "dictionary.prompt": "🔎 Gib das Wort ein, das du suchen möchtest:",
   "dictionary.not_found": "😕 Nichts gefunden. Versuch ein anderes Wort.",
   "dictionary.results_header": "Suchergebnisse:",
@@ -201,7 +186,6 @@
   "dictionary.resume_yes": "🔄 Zurück in die Wiederholung",
   "dictionary.resume_no": "⬅️ Zurück",
   "dictionary.already_active_status": "Dieses Wort ist bereits in deinem Wörterbuch.\nStatus: {status}",
-
   "words.add_button": "➕ Wort hinzufügen",
   "words.add_prompt": "✏️ Gib das Wort ein, das du zum Lernen hinzufügen möchtest.\n\nDu kannst mehrere Wörter auf einmal eingeben, getrennt durch Kommas oder Zeilenumbrüche.",
   "words.batch_header": "Ergebnis des Hinzufügens:",
@@ -209,7 +193,6 @@
   "words.batch_already_header": "⚠️ Bereits vorhanden ({count}):",
   "words.batch_failed_header": "❌ Konnte nicht erkannt werden ({count}):",
   "words.batch_resume_button": "🔄 „{word}“ zurückholen",
-
   "words.title": "⭐ Meine Wörter",
   "words.choose_filter": "Wähle eine Liste:",
   "words.filter.all": "📚 Alle",
@@ -224,7 +207,6 @@
   "words.invalid_number": "Das verstehe ich nicht. Sende die Nummer eines Wortes aus der obigen Liste.",
   "words.number_out_of_range": "Nummer {numbers} gibt es auf dieser Seite nicht.",
   "words.list_expired": "Die Liste ist abgelaufen. Öffne «⭐ Meine Wörter» erneut.",
-
   "words.manage_header": "Nr. {number} — {word}",
   "words.manage_translation": "Übersetzung: {translation}",
   "words.manage_status": "Status: {status}",
@@ -232,7 +214,6 @@
   "words.manage_next_review_none": "Nächste Wiederholung: nicht geplant",
   "words.today": "heute",
   "words.tomorrow": "morgen",
-
   "words.bulk_header": "Ausgewählt:",
   "words.bulk_invalid": "Die Auswahl wird nicht verstanden. Gib Nummern durch Komma oder Leerzeichen getrennt an, z. B.: 2,5,7",
   "words.bulk_out_of_range": "Nummer {numbers} gibt es auf dieser Seite nicht.",
@@ -240,17 +221,14 @@
   "words.bulk_paused": "⏸ Aus der Wiederholung entfernte Wörter: {count}.",
   "words.bulk_resumed": "🔄 Zurück in die Wiederholung geholte Wörter: {count}.",
   "words.bulk_deleted": "🗑 Gelöschte Wörter: {count}.",
-
   "words.delete_confirm": "Das Wort „{word}“ aus deinem Wörterbuch löschen?",
   "words.delete_confirm_bulk": "Die ausgewählten Wörter ({count}) aus deinem Wörterbuch löschen?",
   "words.deleted": "🗑 Wort aus deinem Wörterbuch gelöscht.",
   "words.paused_single": "⏸ Wort aus der Wiederholung entfernt.",
   "words.resumed_single": "🔄 Wort zurück in die Wiederholung geholt.",
-
   "words.search_prompt": "🔎 Gib das Wort ein, das du in deinem Wörterbuch suchen möchtest:",
   "words.search_not_found": "In deinem Wörterbuch wurde nichts gefunden.",
   "words.search_results_header": "In deinem Wörterbuch gefunden:",
-
   "words.button.review": "🔄 Zur Wiederholung hinzufügen",
   "words.button.pause": "⏸ Aus der Wiederholung entfernen",
   "words.button.delete": "🗑 Löschen",
@@ -258,7 +236,6 @@
   "words.button.back": "⬅️ Zurück",
   "words.button.cancel": "❌ Abbrechen",
   "words.button.confirm_delete": "✅ Ja, löschen",
-
   "learning.nothing_to_do": "🎉 Gerade gibt es nichts zu wiederholen — alle Wörter sind gelernt oder noch nicht fällig.\n\nSchau im 📖 Wörterbuch vorbei, um neue Wörter hinzuzufügen.",
   "learning.nothing_due": "🎉 Gerade sind keine Wörter zur Wiederholung fällig.",
   "learning.ready": "📚 Zeit zu lernen!\n\nHeute stehen {count} Wörter zur Wiederholung an.\n\nLos geht's?",
@@ -285,26 +262,20 @@
   "learning.extra_limit_reached": "Das Tageslimit für zusätzliche Wörter ist erreicht. Morgen kannst du wieder welche hinzufügen.",
   "learning.extra_unavailable": "Gerade konnten keine neuen Wörter hinzugefügt werden. Versuch es später noch einmal.",
   "learning.known_no_replacement": "Alles klar, dieses Wort wurde als gelernt markiert. Gerade sind keine freien neuen Wörter verfügbar.",
-
   "learning.card_front": "{flag} {word}\n\n{pronunciation}",
   "learning.card_back": "{flag} {word}\n\n{pronunciation}\n\n{translation_flag} {translation}\n\n{example}",
-
   "learning.rating.again": "😣 Weiß ich nicht mehr",
   "learning.rating.hard": "😐 Schwierig",
   "learning.rating.good": "🙂 Weiß ich",
   "learning.rating.easy": "😎 Ganz leicht",
-
   "learning.session_gone": "Diese Lerneinheit ist nicht mehr aktiv. Schau in 📚 Wörter lernen vorbei, um von vorne zu beginnen.",
-
   "learning.completion": "🎉 Klasse!\n\nHeute:\n📚 Wiederholt: {total}\n🆕 Neue Wörter: {new_words}\n✅ Richtig: {correct}\n❌ Fehler: {wrong}\n\n🔥 Serie: {streak} Tage",
-
   "notification.morning.new_only": "☀️ Guten Morgen!\n\nEs warten neue Wörter auf dich.\n\n📚 Heute: {new_count} neue Wörter",
   "notification.morning.button": "▶️ Lernen beginnen",
   "notification.afternoon.button": "▶️ Wiederholen",
   "notification.evening.button": "▶️ Wiederholen",
   "notification.evening.done": "✅ Das heutige Lernpensum ist erledigt!\n\nSehr gute Arbeit.",
   "notification.review_list.header": "🔔 Schnelle Wiederholung",
-
   "quiz.no_words": "Du hast noch nicht genug Wörter für ein Quiz. Füge zuerst ein paar Wörter im 📖 Wörterbuch hinzu!",
   "quiz.no_mistakes": "Beim letzten Mal gab es keine Fehler — sehr gute Arbeit!",
   "quiz.progress": "Frage {current} von {total}",
@@ -318,7 +289,6 @@
   "quiz.feedback.correct": "✅ Richtig!",
   "quiz.feedback.wrong": "❌ Falsch. Richtige Antwort: {answer}",
   "quiz.results": "🏆 Quiz beendet!\n\n✅ Richtig: {correct}\n❌ Fehler: {wrong}\n🎯 Genauigkeit: {accuracy}%",
-
   "quiz.button.start": "🏆 Quiz",
   "quiz.button.reveal": "👁 Antwort anzeigen",
   "quiz.button.correct": "✅ Ja",
@@ -328,13 +298,11 @@
   "quiz.button.retry_wrong": "🔁 Fehler wiederholen",
   "quiz.button.new_quiz": "🏆 Neues Quiz",
   "quiz.button.main_menu": "⬅️ Hauptmenü",
-
   "goal.general": "🌍 Zur allgemeinen Weiterbildung",
   "goal.work": "💼 Für die Arbeit",
   "goal.travel": "✈️ Fürs Reisen",
   "goal.study": "🎓 Fürs Studium",
   "goal.family": "👨‍👩‍👧 Um mit der Familie zu kommunizieren",
-
   "industry.it": "💻 IT",
   "industry.healthcare": "🏥 Gesundheitswesen",
   "industry.education": "🎓 Bildung",
@@ -345,7 +313,6 @@
   "industry.legal": "⚖️ Recht",
   "industry.marketing": "📈 Marketing",
   "industry.manufacturing": "🏭 Produktion",
-
   "topic.daily_life": "🏠 Alltag",
   "topic.business": "💼 Business",
   "topic.work": "🏢 Arbeit",
@@ -356,7 +323,6 @@
   "topic.education": "🎓 Bildung",
   "topic.technology": "💻 Technologie",
   "topic.transport": "🚗 Verkehr",
-
   "onboarding.choose_goal": "Warum lernst du diese Sprache?",
   "onboarding.goal_selected": "Super!\n\nIn welcher Zeitzone befindest du dich?",
   "onboarding.choose_industry": "In welcher Branche arbeitest du?",
@@ -364,7 +330,6 @@
   "onboarding.industry_selected": "Super!\n\nIn welcher Zeitzone befindest du dich?",
   "onboarding.button.skip": "⏭ Überspringen",
   "onboarding.button.other": "✏️ Andere",
-
   "settings.menu.topics": "🎯 Lernthemen",
   "settings.menu.goal": "🎯 Lernziel",
   "settings.topics_title": "🎯 Lernthemen\n\nAusgewählte Themen helfen der AI, passendere Wörter auszuwählen.",
@@ -383,7 +348,6 @@
   "settings.current_industry": "💼 Branche: {industry}",
   "settings.current_topics": "📌 Themen: {topics}",
   "settings.current_topics_none": "📌 Themen: nicht ausgewählt",
-
   "revnow.count_prompt": "Wie viele Wörter möchtest du wiederholen?",
   "revnow.count_prompt_mastered": "🏆 Gelernte wiederholen\n\nWie viele Wörter möchtest du wiederholen?",
   "revnow.button.mastered": "🏆 Gelernte wiederholen",
@@ -398,5 +362,46 @@
   "revnow.empty": "Gerade gibt es keine Wörter zum Wiederholen.\n\nSchau im 📖 Wörterbuch vorbei, um neue Wörter hinzuzufügen.",
   "revnow.button.new_words": "➕ Neue Wörter",
   "revnow.button.start_now": "▶️ Wiederholung starten",
-  "revnow.button.skip": "⏭️ Überspringen"
+  "revnow.button.skip": "⏭️ Überspringen",
+  "menu.button.phrases": "💬 Nützliche Sätze",
+  "phrases.menu.title": "💬 Nützliche Sätze\n\nWähle, was du tun möchtest:",
+  "phrases.menu.saved": "📚 Gespeicherte Sätze",
+  "phrases.menu.new": "✨ Neuer Satz",
+  "phrases.menu.popular": "🔥 Beliebte Sätze",
+  "phrases.menu.back": "⬅️ Zurück",
+  "phrases.saved.empty": "Du hast noch keine gespeicherten Sätze.\n\nTippe auf „✨ Neuer Satz“, um deinen ersten zu erstellen.",
+  "phrases.saved.header": "📚 Meine nützlichen Sätze",
+  "phrases.popular.empty": "Für diese Sprache gibt es noch keine beliebten Sätze.",
+  "phrases.popular.header": "🔥 Beliebte Sätze",
+  "phrases.popular.translation_unavailable": "Übersetzung vorübergehend nicht verfügbar",
+  "phrases.situation.prompt": "🎯 Wähle eine Situation, für die du einen Satz brauchst:",
+  "phrases.situation.custom": "🎯 Eigene Situation",
+  "phrases.situation.custom_prompt": "Beschreibe die Situation mit eigenen Worten, und ich finde einen passenden Satz.",
+  "phrases.situation.custom_empty": "Bitte beschreibe die Situation als Text - eine leere Nachricht kann ich nicht lesen.",
+  "phrases.button.back": "⬅️ Zurück",
+  "phrases.button.analyze": "📖 Zerlegen / ➕ Wörter hinzufügen",
+  "phrases.button.delete": "🗑️ Löschen",
+  "phrases.button.delete_confirm": "🗑️ Ja, löschen",
+  "phrases.button.save": "💾 Speichern",
+  "phrases.button.another": "🔄 Anderer Satz",
+  "phrases.not_found": "Dieser Satz wurde nicht gefunden - er wurde vielleicht bereits gelöscht.",
+  "phrases.delete_confirm_prompt": "Diesen Satz wirklich löschen?",
+  "phrases.deleted": "Satz gelöscht",
+  "phrases.expired": "Dieser Satz ist nicht mehr aktiv. Bitte versuche es erneut.",
+  "phrases.saved_ok": "💾 Gespeichert",
+  "phrases.already_saved": "Dieser Satz ist bereits gespeichert",
+  "phrase_situation.work": "💼 Arbeit",
+  "phrase_situation.shopping": "🛒 Einkaufen",
+  "phrase_situation.restaurant": "🍽️ Restaurant",
+  "phrase_situation.travel": "✈️ Reisen",
+  "phrase_situation.hotel": "🏨 Hotel",
+  "phrase_situation.transport": "🚕 Transport",
+  "phrase_situation.meeting": "👋 Neue Leute kennenlernen",
+  "phrase_situation.daily_life": "🏠 Alltag",
+  "phrase_situation.socializing": "❤️ Small Talk",
+  "phrase_situation.phone": "📞 Telefon",
+  "phrase_situation.doctor": "🏥 Arzt",
+  "phrase_situation.bank": "🏦 Bank",
+  "phrase_situation.study": "🎓 Studium",
+  "phrase_situation.customer_service": "🔧 Kundenservice"
 }

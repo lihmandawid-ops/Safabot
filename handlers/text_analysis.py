@@ -48,7 +48,7 @@ async def _current_language(session, telegram_id: int):
     return user, current
 
 
-def _render_results(
+def render_results(
     text: str,
     translation: str,
     text_pronunciation: str | None,
@@ -60,7 +60,15 @@ def _render_results(
     pronunciation shown inline when the AI provided one - key words and
     phrases keep pronunciation in parentheses right on their existing
     numbered/bulleted line rather than a second line each, so the list
-    stays as compact as it already was."""
+    stays as compact as it already was.
+
+    Public (not underscore-prefixed) because handlers/phrases.py's
+    📖 Разобрать / ➕ Добавить слова reuses this exact renderer (plus
+    handle_text_analysis_callback's add_all/add_selected) for breaking a
+    saved/generated phrase down into its significant words - the same
+    "significant words worth adding" semantics analyze_text's key_words
+    already has, so this is not a second word-extraction implementation.
+    """
     lines = [t("text_analysis.title", get_current_language()), "", text, translation]
     if text_pronunciation:
         lines.append("")
@@ -131,7 +139,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         phrases = [(ph.phrase, ph.pronunciation) for ph in result.useful_phrases]
         context.user_data["text_analysis"] = {"words": [kw.word for kw in result.key_words]}
         await update.message.reply_text(
-            _render_results(result.original_text, result.translation, result.pronunciation, key_words, phrases),
+            render_results(result.original_text, result.translation, result.pronunciation, key_words, phrases),
             reply_markup=results_keyboard() if key_words else None,
         )
 

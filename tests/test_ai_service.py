@@ -271,6 +271,67 @@ async def test_generate_verb_conjugation_rejects_empty_forms():
         await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
 
 
+# --- 14. generate_native_phrase (💬 Полезные фразы) ---
+
+GOOD_NATIVE_PHRASE_JSON = (
+    '{"language": "en", "phrase": "Could you give me a hand with this?", '
+    '"translation": "Не мог бы ты мне с этим помочь?", "pronunciation": "kud yu giv mi a hand with this", '
+    '"register": "casual", "naturalness": "native", "situation": "work", '
+    '"explanation": "Natural informal phrase commonly used when asking someone for help.", '
+    '"alternative": "Can you give me a hand with this?"}'
+)
+
+
+async def test_generate_native_phrase_returns_validated_result():
+    svc, provider = _service([GOOD_NATIVE_PHRASE_JSON])
+    result = await svc.generate_native_phrase(
+        language_code="en", translation_language="ru", level="intermediate",
+        situation="asking a colleague for help", user_id=1,
+    )
+    assert isinstance(result, ai_models.NativePhraseResult)
+    assert result.phrase == "Could you give me a hand with this?"
+    assert result.translation == "Не мог бы ты мне с этим помочь?"
+    assert result.pronunciation == "kud yu giv mi a hand with this"
+    assert result.register_type == "casual"
+    assert result.alternative == "Can you give me a hand with this?"
+    assert "native speaker" in provider.last_system.lower()
+    assert "literal" in provider.last_system.lower()
+
+
+async def test_generate_native_phrase_retries_when_language_does_not_match():
+    """Section 14: never trust the AI blindly - a phrase in the wrong
+    language must be rejected and retried, not shown to the learner."""
+    wrong_language_json = GOOD_NATIVE_PHRASE_JSON.replace('"language": "en"', '"language": "ru"')
+    svc, provider = _service([wrong_language_json, GOOD_NATIVE_PHRASE_JSON])
+    result = await svc.generate_native_phrase(
+        language_code="en", translation_language="ru", level="intermediate",
+        situation="asking a colleague for help", user_id=1,
+    )
+    assert result.language == "en"
+    assert provider.calls == 2
+
+
+async def test_generate_native_phrase_gives_up_after_repeated_wrong_language():
+    wrong_language_json = GOOD_NATIVE_PHRASE_JSON.replace('"language": "en"', '"language": "ru"')
+    svc, _ = _service([wrong_language_json, wrong_language_json], max_retries=1)
+    with pytest.raises(AIInvalidResponseError):
+        await svc.generate_native_phrase(
+            language_code="en", translation_language="ru", level="beginner", situation="shopping", user_id=1,
+        )
+
+
+async def test_generate_native_phrase_prompt_includes_industry_topics_and_exclusions():
+    svc, provider = _service([GOOD_NATIVE_PHRASE_JSON])
+    await svc.generate_native_phrase(
+        language_code="en", translation_language="ru", level="advanced", situation="at work",
+        industry="construction", topics=["business", "travel"],
+        exclude_phrases=["Can you help me?"], user_id=1,
+    )
+    assert "construction" in provider.last_user
+    assert "business" in provider.last_user and "travel" in provider.last_user
+    assert "Can you help me?" in provider.last_user
+
+
 # --- 13. AI disabled / not configured ---
 
 async def test_not_configured_service_raises_configuration_error_for_every_method():
@@ -289,6 +350,10 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
         await svc.extract_learning_words("hi", language_code="en", user_id=1)
     with pytest.raises(AIConfigurationError):
         await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+    with pytest.raises(AIConfigurationError):
+        await svc.generate_native_phrase(
+            language_code="en", translation_language="ru", level="beginner", situation="work", user_id=1,
+        )
 
 
 def test_get_ai_service_factory_respects_ai_enabled_and_api_key(monkeypatch):

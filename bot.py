@@ -21,6 +21,7 @@ from handlers.dictionary import dictionary_callback_handler
 from handlers.learning import learning_callback_handler
 from handlers.media import handle_photo_message, handle_voice_message
 from handlers.menu import main_menu_handler
+from handlers.phrases import phrases_callback_handler
 from handlers.quiz import quiz_callback_handler
 from handlers.review_now import review_now_callback_handler
 from handlers.settings import settings_callback_handler
@@ -91,6 +92,7 @@ def build_application() -> Application:
     application.add_handler(quiz_callback_handler)
     application.add_handler(review_now_callback_handler)
     application.add_handler(text_analysis_callback_handler)
+    application.add_handler(phrases_callback_handler)
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     application.add_handler(main_menu_handler)

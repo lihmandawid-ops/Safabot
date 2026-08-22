@@ -341,3 +341,50 @@ class VerbConjugationResult(BaseModel):
         if not cleaned:
             raise ValueError("forms must contain at least one non-empty tense")
         return cleaned
+
+
+class NativePhraseResult(BaseModel):
+    """💬 Полезные фразы (native-speaker phrasebook stage, sections 6-13):
+    a single natural, native-speaker phrase for a situation - never a
+    literal translation of a fixed source sentence. `language` is checked
+    by the caller (services/ai_service.py's generate_native_phrase)
+    against the requested language_code, so a response in the wrong
+    language is treated as invalid and retried through the normal
+    _complete retry loop rather than silently shown to the learner.
+
+    The field is `register_type`, not `register` - pydantic's BaseModel
+    already has an attribute named `register`, and shadowing it triggers
+    a UserWarning on every import. The AI's JSON key is still plain
+    "register" (matching the prompt's documented response shape); the
+    "before" validator below just renames that one key on the way in.
+    """
+
+    language: str
+    phrase: str
+    translation: str
+    pronunciation: str | None = None
+    register_type: str | None = None
+    naturalness: str | None = None
+    situation: str | None = None
+    explanation: str | None = None
+    alternative: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_register_key(cls, value: object) -> object:
+        if isinstance(value, dict) and "register" in value and "register_type" not in value:
+            value = {**value, "register_type": value["register"]}
+        return value
+
+    @field_validator("language", "phrase", "translation")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("pronunciation", "register_type", "naturalness", "situation", "explanation", "alternative", mode="before")
+    @classmethod
+    def _clean_optional(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
