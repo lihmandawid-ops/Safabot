@@ -444,79 +444,122 @@ Safabot использует AI как необязательный интелл
 незнакомых слов, автогенерация, `💡 Как использовать?`, `📝 Разбор
 текста` и `✏️ Грамматика`.
 
-**Провайдер по умолчанию — DeepSeek** (`deepseek-chat`, API OpenAI-
-совместимый, `AI_BASE_URL=https://api.deepseek.com`). Ключ уже настроен в
-`.env` на этом деплое — ничего дополнительно указывать не нужно; ниже
-описано, как это устроено и как проверить, что подключение реально
-работает.
+**Провайдер по умолчанию — Google Gemini** (PRIMARY), с **DeepSeek**
+(`deepseek-chat`, API OpenAI-совместимый, `AI_BASE_URL=https://api.deepseek.com`)
+как FALLBACK для текстовых задач, если Gemini временно недоступен. Ключи
+уже настроены в `.env` на этом деплое — ничего дополнительно указывать не
+нужно; ниже описано, как это устроено и как проверить, что подключение
+реально работает.
 
 ### Архитектура
 
 ```
-handlers/*.py, DictionaryService, WordGenerationService
-        │        (никогда не строят HTTP-запрос сами)
+handlers/*.py, DictionaryService, WordGenerationService, PhraseService
+        │        (никогда не строят HTTP-запрос сами, никогда не
+        │         обращаются к Gemini/DeepSeek напрямую)
         ▼
 services/ai_service.py — AIService (интерфейс)
         │  lookup_word / generate_words / explain_word /
-        │  analyze_text / explain_grammar / extract_learning_words
+        │  analyze_text / explain_grammar / extract_learning_words /
+        │  generate_verb_conjugation / generate_native_phrase /
+        │  translate_phrases / generate_popular_phrases
         │  + retry, per-user rate limit, логирование, кэш фабрики
         ▼
 services/ai_provider.py — AIProvider (интерфейс)
         │  единственный метод: complete(system, user) -> raw text
         ▼
-HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
+FallbackAIProvider (когда настроены оба ключа)
+        │
+        ├─ 1) GeminiTextProvider (services/gemini_provider.py) — PRIMARY
+        │       Gemini `generateContent` REST API
+        │
+        └─ 2) HttpAIProvider (services/ai_provider.py) — FALLBACK,
+                только при ошибке Gemini (timeout/сеть/rate limit/quota/
+                недоступность/невалидный ответ) — OpenAI-совместимый
+                Chat Completions API (DeepSeek по умолчанию)
 ```
 
+Для 📷 фото и 🎤 голоса — отдельные интерфейсы (`services/ocr_service.py`,
+`services/stt_service.py`), которые Gemini занимает так же: если
+`GEMINI_API_KEY` настроен, `GeminiOCRProvider`/`GeminiSTTProvider`
+(тот же `services/gemini_provider.py`) читают изображение/аудио напрямую
+в одном вызове — DeepSeek туда никогда не подставляется (его чат-API не
+заявляет поддержку изображений/аудио), а прежний `OCR_API_KEY`/
+`STT_API_KEY`-путь остаётся рабочим для тех, у кого `GEMINI_API_KEY` не
+задан — поведение идентично тому, что было до этой интеграции.
+
 - **Handlers никогда не вызывают AI напрямую** — только через
-  `services.ai_service.get_ai_service()`.
-- **AIService — единственная точка входа** для всего AI-функционала;
-  `DictionaryService` и `WordGenerationService` тоже вызывают только его.
-- **AIProvider — заменяемый транспорт.** `HttpAIProvider` (единственная
-  реализация сегодня) работает с любым OpenAI-совместимым API — сама
-  OpenAI, Azure OpenAI, OpenRouter, self-hosted шлюз — через `AI_BASE_URL`.
-  Добавить провайдера для другого протокола (например, Anthropic) —
-  значит реализовать `AIProvider.complete()`, ни `AIService`, ни
-  вызывающий код трогать не нужно.
+  `services.ai_service.get_ai_service()` /
+  `services.ocr_service.get_ocr_service()` /
+  `services.stt_service.get_stt_service()`.
+- **AIService — единственная точка входа** для всего текстового
+  AI-функционала; `DictionaryService`, `WordGenerationService`,
+  `PhraseService` тоже вызывают только его.
+- **AIProvider — заменяемый транспорт.** `HttpAIProvider` работает с любым
+  OpenAI-совместимым API — сама OpenAI, Azure OpenAI, OpenRouter,
+  self-hosted шлюз, DeepSeek — через `AI_BASE_URL`. `GeminiTextProvider`
+  реализует тот же интерфейс против Gemini. `FallbackAIProvider`
+  (`services/ai_provider.py`) composes two `AIProvider`s: пробует
+  `primary` (Gemini), при **любой** `AIError` логирует и переходит на
+  `secondary` (DeepSeek) — но каждый **следующий** вызов снова начинает с
+  `primary`, так что восстановившийся Gemini подхватывается сам собой,
+  без "залипания" на fallback. Ни `AIService`, ни вызывающий код это не
+  видят — как и добавление провайдера для другого протокола: реализовать
+  `AIProvider.complete()`, ничего больше трогать не нужно.
 - **Структурированный вывод.** Всё, что должно попасть в базу
   (`GeneratedWord`, `TextAnalysisResult`, ...), — Pydantic-модели в
-  `services/ai_models.py`; сырой JSON от AI никогда не покидает
-  `ai_service.py` непровалидированным.
+  `services/ai_models.py`; сырой JSON от AI (от Gemini или от DeepSeek —
+  одинаково) никогда не покидает `ai_service.py` непровалидированным.
+  Gemini-запросы используют `responseMimeType: application/json`
+  (JSON-режим), тот же ПРОМПТ и тот же Pydantic-парсер/retry, что и
+  DeepSeek — ни один prompt не пришлось переписывать под другого
+  провайдера.
 
 ### `.env`: какие переменные нужны
 
 | Переменная | Обязательна | Назначение |
 |---|---|---|
-| `AI_API_KEY` | нет | Пусто = AI выключен, работает только локальная база. **Никогда не коммитить.** |
-| `AI_MODEL` | нет (умолч. `gpt-4o-mini`) | Имя модели у провайдера. |
+| `GEMINI_API_KEY` | нет | PRIMARY-провайдер. Пусто = используется только `AI_API_KEY` (DeepSeek) как единственный текстовый провайдер, либо только локальная база, если и он пуст. **Никогда не коммитить.** |
+| `GEMINI_MODEL` | нет (умолч. `gemini-flash-latest`) | Модель Gemini. `-latest`-алиас — всегда актуальная модель линейки; можно закрепить конкретную версию (например `gemini-2.5-flash`). |
+| `GEMINI_TEXT_MODEL` / `GEMINI_MULTIMODAL_MODEL` | нет | Необязательные переопределения `GEMINI_MODEL` отдельно для текста и для фото/аудио — оставьте пустыми, чтобы использовать одну модель для всего. |
+| `GEMINI_BASE_URL` | нет | Только для нестандартного эндпоинта Gemini. |
+| `GEMINI_ENABLED` | нет (умолч. `true`) | Явный выключатель поверх `GEMINI_API_KEY`. |
+| `AI_API_KEY` | нет | FALLBACK-провайдер (DeepSeek по умолчанию) для текстовых задач — используется только если Gemini не настроен или временно недоступен. Пусто = нет fallback. **Никогда не коммитить.** |
+| `AI_MODEL` | нет (умолч. `gpt-4o-mini`) | Имя модели у fallback-провайдера. |
 | `AI_BASE_URL` | нет | Только для не-OpenAI, но OpenAI-совместимого эндпоинта. |
-| `AI_ENABLED` | нет (умолч. `true`) | Явный выключатель поверх `AI_API_KEY` — `false` держит бота на локальной базе, даже если ключ указан. |
-| `AI_TIMEOUT_SECONDS` | нет (умолч. `30`) | Таймаут одного запроса к AI. |
-| `MAX_AI_RETRIES` | нет (умолч. `2`) | Повторы при timeout/сетевой ошибке/невалидном ответе. Никогда не повторяется при 401/403 (неверный ключ). |
-| `AI_REQUESTS_PER_MINUTE` / `AI_REQUESTS_PER_DAY` | нет (умолч. `5` / `200`) | Базовый лимит запросов к AI на пользователя (в памяти процесса). |
-| `MAX_GENERATION_ATTEMPTS` | нет (умолч. `3`) | Сколько раз `WordGenerationService` переспросит AI, если часть слов оказалась дублями. |
+| `AI_ENABLED` | нет (умолч. `true`) | Явный выключатель поверх `AI_API_KEY`. |
+| `AI_TIMEOUT_SECONDS` | нет (умолч. `30`) | Таймаут одного запроса к AI — используется и для Gemini, и для fallback-провайдера. |
+| `MAX_AI_RETRIES` | нет (умолч. `2`) | Повторы при timeout/сетевой ошибке/невалидном ответе (весь цикл Gemini→fallback повторяется целиком). Никогда не повторяется при 401/403 (неверный ключ). |
+| `AI_REQUESTS_PER_MINUTE` / `AI_REQUESTS_PER_DAY` | нет (умолч. `5` / `200`) | Базовый лимит запросов к AI на пользователя (в памяти процесса), общий для всей цепочки Gemini+fallback. |
+| `MAX_GENERATION_ATTEMPTS` | нет (умолч. `3`) | Сколько раз `WordGenerationService`/`PhraseService` переспросит AI, если часть результатов оказалась дублями. |
 
 **Как настроить:**
 
 1. `cp .env.example .env` (если ещё не сделано).
-2. Получите ключ у вашего провайдера (например, на platform.openai.com)
-   и вставьте его **только** в свой локальный `.env` — файл уже в
-   `.gitignore`, никогда не попадёт в Git.
-3. При необходимости укажите `AI_MODEL`/`AI_BASE_URL` под вашего
-   провайдера.
+2. Получите ключ Gemini на aistudio.google.com (или платный доступ Gemini
+   API) и вставьте его **только** в свой локальный `.env` — файл уже в
+   `.gitignore`, никогда не попадёт в Git. При желании оставьте
+   существующий `AI_API_KEY` (DeepSeek) настроенным — он станет
+   text-only fallback-ом автоматически, ничего больше делать не нужно.
+3. При необходимости укажите `GEMINI_MODEL`/`AI_MODEL`/`AI_BASE_URL` под
+   ваших провайдеров.
 4. Перезапустите бота (`python bot.py`).
 
 **Как проверить подключение:**
 
-- `services/ai_diagnostics.test_deepseek_connection()` делает один
-  минимальный запрос к настроенному провайдеру и возвращает
-  `ConnectionTestResult(ok, reason, detail)` — никогда не бросает
-  исключение и никогда не печатает сам ключ. Вызывается автоматически при
-  каждом старте бота (`bot.py`'s `on_startup`, не блокирует запуск даже
-  при сбое) и пишет в лог ровно `DeepSeek connection: OK` при успехе, либо
-  `AI connection check failed (reason=...)` с точной причиной при неудаче
+- `services/ai_diagnostics.test_gemini_connection()` и
+  `test_deepseek_connection()` каждая делает один минимальный запрос к
+  своему провайдеру и возвращает `ConnectionTestResult(ok, reason,
+  detail)` — никогда не бросает исключение и никогда не печатает сам
+  ключ. Обе вызываются автоматически при каждом старте бота (`bot.py`'s
+  `on_startup`, не блокируют запуск даже при сбое) и пишут в лог ровно
+  `Gemini connection: OK` / `DeepSeek connection: OK` при успехе, либо
+  `Gemini connection check failed (reason=...)` / `DeepSeek connection
+  check failed (reason=...)` с точной причиной при неудаче
   (`missing_api_key` / `disabled` / `unauthorized` / `rate_limited` /
   `timeout` / `network_error` / `invalid_response`).
-- Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_deepseek_connection; print(asyncio.run(test_deepseek_connection()))"`.
+- Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_gemini_connection; print(asyncio.run(test_gemini_connection()))"`
+  (аналогично с `test_deepseek_connection`).
 - В 📖 Словарь введите слово, которого точно нет в seed-наборе
   (`database/seed_words.py`) — например `serendipity`. Если AI настроен
   правильно, придёт карточка с переводом; при следующем вводе того же
@@ -561,28 +604,46 @@ HttpAIProvider — OpenAI-совместимый Chat Completions API (httpx)
 
 Ни одна из этих ситуаций не должна ронять бота или зависать:
 
-- **`AI_API_KEY` пуст или `AI_ENABLED=false`** → `get_ai_service()`
-  возвращает `NotConfiguredAIService`, каждый метод сразу бросает
-  `AIConfigurationError("AI-функции пока не настроены.")` — без сетевого
-  запроса.
-- **AI недоступен/ошибся** (timeout, сеть, 5xx, невалидный JSON) →
+- **И `GEMINI_API_KEY`, и `AI_API_KEY` пусты (или отключены)** →
+  `get_ai_service()` возвращает `NotConfiguredAIService`, каждый метод
+  сразу бросает `AIConfigurationError("AI-функции пока не настроены.")` —
+  без сетевого запроса.
+- **Gemini ошибся, а DeepSeek настроен** (timeout, сеть, 5xx, rate limit,
+  невалидный JSON — любой `AIError`) → `FallbackAIProvider` прозрачно
+  переходит на DeepSeek **для этого запроса**; следующий запрос снова
+  пробует Gemini первым. Ничего из этого не видно вызывающему коду.
+- **Оба провайдера ошиблись** (или только один настроен и он ошибся) →
   `services/ai_errors.py`: `AITimeoutError`/`AIUnavailableError`/
-  `AIInvalidResponseError` — повторяются до `MAX_AI_RETRIES` раз, затем
-  поднимаются вызывающему. `DictionaryProvider`/`WordGenerationService`
-  ловят это и откатываются на локальную базу; 📝 Разбор текста и
-  `💡 Как использовать?` показывают понятное сообщение.
-- **Неверный ключ** (401/403) → `AIAuthenticationError`, **никогда** не
-  повторяется — не имеет смысла и не тратит лимит зря.
-- **Превышен лимит запросов** → `AIRateLimitedError`.
+  `AIInvalidResponseError` — весь цикл (Gemini→DeepSeek) повторяется до
+  `MAX_AI_RETRIES` раз, затем поднимается вызывающему.
+  `DictionaryProvider`/`WordGenerationService` ловят это и откатываются
+  на локальную базу; 📝 Разбор текста и `💡 Как использовать?` показывают
+  понятное сообщение.
+- **Неверный ключ** (401/403) → `AIAuthenticationError` для ЭТОГО
+  провайдера — Gemini с неверным ключом всё равно откатывается на
+  DeepSeek (если настроен), но сам по себе никогда не повторяется без
+  толку.
+- **Превышен лимит запросов/квота** → `AIRateLimitedError` — тоже
+  триггерит откат на DeepSeek.
+- **📷/🎤 (фото/аудио) и Gemini недоступен** → `OCRError`/`STTError`
+  показывают понятное сообщение ("Не удалось распознать текст на фото" /
+  аналог для голоса) — **без** отката на DeepSeek (не умеет
+  изображения/аудио) и без отката на прежний `OCR_API_KEY`/`STT_API_KEY`
+  на лету (тот путь используется только когда `GEMINI_API_KEY` вообще не
+  задан).
 
 ### Безопасность ключей
 
-- Ключ читается только из `.env` (`config.py` → `Settings.ai_api_key`) —
-  нигде в Python-коде, README или тестах нет реального значения.
+- Оба ключа читаются только из `.env` (`config.py` →
+  `Settings.gemini_api_key` / `Settings.ai_api_key`) — нигде в
+  Python-коде, README или тестах нет реального значения.
 - `.env` в `.gitignore`; `.env.example` содержит только пустые значения.
-- `services/ai_provider.py` передаёт ключ исключительно в заголовке
-  `Authorization` одного HTTP-запроса — никогда не логирует его; логи
-  AI-вызовов (`services/ai_service.py`) содержат только операцию,
+- `services/ai_provider.py` (DeepSeek/fallback) передаёт ключ
+  исключительно в заголовке `Authorization`; `services/gemini_provider.py`
+  (Gemini) — в заголовке `x-goog-api-key` (официально рекомендованная
+  Google альтернатива query-параметру `?key=`, именно чтобы ключ не
+  оседал в access-логах/URL). Ни один из провайдеров не логирует ключ;
+  логи AI-вызовов (`services/ai_service.py`) содержат только операцию,
   user_id, provider/model, время выполнения и тип ошибки (без текста
   запроса/ответа и без ключа).
 
@@ -664,7 +725,12 @@ Telegram-обработчики (`handlers/media.py`), а не заглушки:
 **Важно: распознавание — это НЕ DeepSeek.** Ни одна документация
 DeepSeek не заявляет поддержку изображений или голоса в чат-модели,
 поэтому bugfix-спецификация прямо требует не притворяться, что это
-работает — вместо этого раздельная архитектура:
+работает. **Gemini умеет и то, и другое нативно** (тот же
+`generateContent`-вызов с картинкой/аудио в base64 вместо отдельного
+эндпоинта) и берёт на себя оба интерфейса автоматически, если
+`GEMINI_API_KEY` настроен — раздельная архитектура (`OCRService`/
+`SpeechToTextService`) при этом не меняется, меняется только то, какой
+провайдер за ней стоит:
 
 ```
 handlers/media.py (скачать файл, проверить размер, удалить temp-файл)
@@ -677,22 +743,29 @@ services/ocr_service.py                   services/stt_service.py
 services/ocr_provider.py                  services/stt_provider.py
   OCRProvider (интерфейс)                   SpeechToTextProvider (интерфейс)
         │                                          │
-        ▼                                          ▼
-HttpOCRProvider                           HttpSpeechToTextProvider
-  (Chat Completions + image_url,            (`/audio/transcriptions`,
-   OpenAI-совместимый vision API)            Whisper-совместимый API)
+        ▼ GEMINI_API_KEY настроен?                 ▼ GEMINI_API_KEY настроен?
+   да │         │ нет                          да │         │ нет
+      ▼         ▼                                 ▼         ▼
+GeminiOCRProvider   HttpOCRProvider       GeminiSTTProvider   HttpSpeechToTextProvider
+(services/          (Chat Completions +   (services/          (`/audio/transcriptions`,
+ gemini_provider.py)  image_url, OpenAI-    gemini_provider.py)  Whisper-совместимый API)
+                      совместимый vision
+                      API)
 ```
 
-- **`OCR_API_KEY`/`STT_API_KEY` не заданы по умолчанию.** Пока они пусты,
-  `get_ocr_service()`/`get_stt_service()` возвращают
-  `NotConfiguredOCRService`/`NotConfiguredSpeechToTextService`: реальное
-  скачивание файла из Telegram, проверка размера и удаление temp-файла всё
-  равно происходят, а на этапе распознавания пользователь получает честное
-  «Распознавание текста на фото/голосовых сообщений пока не настроено.» —
-  никогда не выдуманный результат.
+- **`GEMINI_API_KEY`/`OCR_API_KEY`/`STT_API_KEY` не заданы по
+  умолчанию.** Пока все они пусты, `get_ocr_service()`/`get_stt_service()`
+  возвращают `NotConfiguredOCRService`/`NotConfiguredSpeechToTextService`:
+  реальное скачивание файла из Telegram, проверка размера и удаление
+  temp-файла всё равно происходят, а на этапе распознавания пользователь
+  получает честное «Распознавание текста на фото/голосовых сообщений пока
+  не настроено.» — никогда не выдуманный результат. DeepSeek никогда не
+  подставляется сюда, даже если он настроен как текстовый fallback — не
+  умеет изображения/аудио.
 - **Независимая конфигурация от AI.** `OCR_PROVIDER`/`OCR_MODEL`/
   `OCR_BASE_URL` и `STT_PROVIDER`/`STT_MODEL`/`STT_BASE_URL` — отдельные
-  переменные (см. `.env.example`); подключить реальный vision- или
+  переменные (см. `.env.example`), используемые только когда
+  `GEMINI_API_KEY` не задан; подключить реальный vision- или
   Whisper-совместимый провайдер можно, не трогая `handlers/media.py`
   вообще — только `.env`.
 - **Cost control:** `MAX_IMAGE_SIZE_BYTES` (по умолчанию 10 МБ) и

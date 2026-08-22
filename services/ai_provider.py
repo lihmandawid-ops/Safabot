@@ -18,6 +18,7 @@ import httpx
 
 from services.ai_errors import (
     AIAuthenticationError,
+    AIError,
     AIInvalidResponseError,
     AIRateLimitedError,
     AITimeoutError,
@@ -37,6 +38,41 @@ class AIProvider(ABC):
         caller's job, not the provider's). Raises a services.ai_errors
         subclass on any failure; never returns None and never raises a
         bare Exception."""
+
+
+class FallbackAIProvider(AIProvider):
+    """Gemini = PRIMARY, DeepSeek (or whatever AI_* is configured to) =
+    FALLBACK for text-only tasks (spec: "Gemini недоступен -> text-only
+    запрос переходит на DeepSeek. Gemini снова работает -> Safabot
+    возвращается к Gemini").
+
+    Composes two existing AIProvider implementations behind the same
+    single-provider seam services/ai_service.py already depends on - so
+    LiveAIService, its retry loop, and every prompt/parser need zero
+    changes to gain a fallback; they just get handed one of these instead
+    of a bare HttpAIProvider/GeminiTextProvider.
+
+    ALWAYS tries `primary` first on every call, independent of whether the
+    previous call fell back - a Gemini outage is never "sticky" past the
+    single request that hit it, so the very next call automatically goes
+    back to Gemini the moment it recovers.
+    """
+
+    def __init__(self, *, primary: AIProvider, secondary: AIProvider, primary_label: str, secondary_label: str) -> None:
+        self._primary = primary
+        self._secondary = secondary
+        self._primary_label = primary_label
+        self._secondary_label = secondary_label
+
+    async def complete(self, *, system: str, user: str) -> str:
+        try:
+            return await self._primary.complete(system=system, user=user)
+        except AIError as exc:
+            logger.warning(
+                "Primary AI provider (%s) failed (%s), falling back to %s",
+                self._primary_label, type(exc).__name__, self._secondary_label,
+            )
+            return await self._secondary.complete(system=system, user=user)
 
 
 class HttpAIProvider(AIProvider):

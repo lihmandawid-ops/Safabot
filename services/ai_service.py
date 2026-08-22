@@ -38,7 +38,7 @@ from services.ai_errors import (
     AIRateLimitedError,
     AIUnavailableError,
 )
-from services.ai_provider import AIProvider, HttpAIProvider
+from services.ai_provider import AIProvider, FallbackAIProvider, HttpAIProvider
 from utils.logging import get_logger
 from utils.phrase_situations import PRESET_SITUATIONS
 
@@ -715,23 +715,60 @@ def get_ai_service() -> AIService:
     """Factory selecting the configured AI backend. Cached like
     config.get_settings() - call get_ai_service.cache_clear() after
     changing AI-related environment variables mid-process (tests only;
-    the real bot reads .env once at startup)."""
+    the real bot reads .env once at startup).
+
+    Gemini = PRIMARY, DeepSeek (AI_API_KEY et al.) = FALLBACK for
+    text-only tasks, when both are configured (FallbackAIProvider). Either
+    one alone still works exactly as before this integration - Gemini-only
+    if only GEMINI_API_KEY is set, DeepSeek-only if only AI_API_KEY is
+    set (identical to every prior release), or NotConfiguredAIService if
+    neither is - AI-backed features always degrade to the local database,
+    never block the bot from starting."""
     from config import get_settings
+    from services.gemini_provider import GeminiTextProvider
 
     settings = get_settings()
-    if not settings.ai_enabled or not settings.ai_api_key:
+
+    gemini_provider: AIProvider | None = None
+    if settings.gemini_enabled and settings.gemini_api_key:
+        gemini_provider = GeminiTextProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_text_model or settings.gemini_model,
+            base_url=settings.gemini_base_url,
+            timeout=settings.ai_timeout_seconds,
+        )
+
+    deepseek_provider: AIProvider | None = None
+    if settings.ai_enabled and settings.ai_api_key:
+        deepseek_provider = HttpAIProvider(
+            api_key=settings.ai_api_key,
+            model=settings.ai_model,
+            base_url=settings.ai_base_url,
+            timeout=settings.ai_timeout_seconds,
+        )
+
+    if gemini_provider is not None and deepseek_provider is not None:
+        provider: AIProvider = FallbackAIProvider(
+            primary=gemini_provider, secondary=deepseek_provider,
+            primary_label="gemini", secondary_label=settings.ai_provider,
+        )
+        provider_label = f"gemini+{settings.ai_provider}"
+        model_label = settings.gemini_text_model or settings.gemini_model
+    elif gemini_provider is not None:
+        provider = gemini_provider
+        provider_label = "gemini"
+        model_label = settings.gemini_text_model or settings.gemini_model
+    elif deepseek_provider is not None:
+        provider = deepseek_provider
+        provider_label = settings.ai_provider
+        model_label = settings.ai_model
+    else:
         return NotConfiguredAIService()
 
-    provider = HttpAIProvider(
-        api_key=settings.ai_api_key,
-        model=settings.ai_model,
-        base_url=settings.ai_base_url,
-        timeout=settings.ai_timeout_seconds,
-    )
     return LiveAIService(
         provider=provider,
-        model=settings.ai_model,
-        provider_label=settings.ai_provider,
+        model=model_label,
+        provider_label=provider_label,
         max_retries=settings.max_ai_retries,
         requests_per_minute=settings.ai_requests_per_minute,
         requests_per_day=settings.ai_requests_per_day,

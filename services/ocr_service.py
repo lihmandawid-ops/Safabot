@@ -58,10 +58,29 @@ class LiveOCRService(OCRService):
 def get_ocr_service() -> OCRService:
     """Factory selecting the configured OCR backend. Cached like
     config.get_settings() - call get_ocr_service.cache_clear() after
-    changing OCR-related environment variables mid-process (tests only)."""
+    changing OCR-related environment variables mid-process (tests only).
+
+    Gemini takes over 📷 Разбор фото whenever it's configured (it reads
+    images natively - no separate OCR-specific endpoint needed). No
+    DeepSeek fallback here: DeepSeek's chat API is not documented as
+    vision-capable, so falling back to it for images would silently
+    produce garbage rather than a clear error. The pre-Gemini OCR_*
+    config stays fully intact as the path for anyone who hasn't set
+    GEMINI_API_KEY - identical behavior to every prior release."""
     from config import get_settings
+    from services.gemini_provider import GeminiOCRProvider
 
     settings = get_settings()
+
+    if settings.gemini_enabled and settings.gemini_api_key:
+        provider = GeminiOCRProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_multimodal_model or settings.gemini_model,
+            base_url=settings.gemini_base_url,
+            timeout=settings.ai_timeout_seconds,
+        )
+        return LiveOCRService(provider=provider, provider_label="gemini")
+
     if not settings.ocr_enabled or not settings.ocr_api_key:
         return NotConfiguredOCRService()
 

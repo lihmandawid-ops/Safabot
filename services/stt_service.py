@@ -58,10 +58,28 @@ class LiveSpeechToTextService(SpeechToTextService):
 def get_stt_service() -> SpeechToTextService:
     """Factory selecting the configured STT backend. Cached like
     config.get_settings() - call get_stt_service.cache_clear() after
-    changing STT-related environment variables mid-process (tests only)."""
+    changing STT-related environment variables mid-process (tests only).
+
+    Gemini takes over 🎤 Разбор голоса whenever it's configured (it
+    transcribes audio natively - no separate Whisper-style endpoint
+    needed). No DeepSeek fallback here: DeepSeek does not do audio
+    transcription at all. The pre-Gemini STT_* config stays fully intact
+    as the path for anyone who hasn't set GEMINI_API_KEY - identical
+    behavior to every prior release."""
     from config import get_settings
+    from services.gemini_provider import GeminiSTTProvider
 
     settings = get_settings()
+
+    if settings.gemini_enabled and settings.gemini_api_key:
+        provider = GeminiSTTProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_multimodal_model or settings.gemini_model,
+            base_url=settings.gemini_base_url,
+            timeout=settings.ai_timeout_seconds,
+        )
+        return LiveSpeechToTextService(provider=provider, provider_label="gemini")
+
     if not settings.stt_enabled or not settings.stt_api_key:
         return NotConfiguredSpeechToTextService()
 

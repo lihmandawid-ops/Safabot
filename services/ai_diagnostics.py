@@ -1,15 +1,18 @@
-"""A safe, minimal connectivity check for the configured AI provider
-(DeepSeek by default) - spec section 2: "Создай безопасную функцию
-проверки подключения: test_deepseek_connection()".
+"""A safe, minimal connectivity check for the configured AI provider(s) -
+spec section 2: "Создай безопасную функцию проверки подключения:
+test_deepseek_connection()", extended to cover Gemini once it became the
+primary provider (Gemini integration stage).
 
-Never logs the API key. On success logs exactly "DeepSeek connection: OK"
-(per spec); on failure logs the precise technical reason (missing key,
-invalid key, rate limit, timeout, network error, invalid response) so an
-operator can fix the right thing without guessing - and never the key.
+Never logs an API key. On success logs exactly "DeepSeek connection: OK"
+/ "Gemini connection: OK" (per spec); on failure logs the precise
+technical reason (missing key, invalid key, rate limit, timeout, network
+error, invalid response) so an operator can fix the right thing without
+guessing - and never the key.
 
 Safe to call at bot startup (see bot.py's on_startup) or from an admin
-command: it never raises and never blocks anything on failure - a broken
-AI connection must not stop the bot from serving the rest of its features.
+command: neither function ever raises or blocks anything on failure - a
+broken AI connection must not stop the bot from serving the rest of its
+features.
 """
 from __future__ import annotations
 
@@ -96,4 +99,59 @@ async def test_deepseek_connection(*, provider: AIProvider | None = None) -> Con
         return ConnectionTestResult(ok=False, reason="invalid_response", detail="empty response body")
 
     logger.info("DeepSeek connection: OK")
+    return ConnectionTestResult(ok=True)
+
+
+async def test_gemini_connection(*, provider: AIProvider | None = None) -> ConnectionTestResult:
+    """Same minimal round-trip as test_deepseek_connection(), against the
+    configured Gemini provider (GEMINI_API_KEY/GEMINI_MODEL). Reads from
+    the existing config - never a second/new key. Pass `provider` in
+    tests to inject a mock instead of making a real HTTP call."""
+    settings = get_settings()
+
+    if not settings.gemini_enabled:
+        logger.warning("Gemini connection: FAILED (disabled)")
+        return ConnectionTestResult(ok=False, reason="disabled", detail="GEMINI_ENABLED=false")
+    if not settings.gemini_api_key:
+        logger.warning("Gemini connection: FAILED (missing_api_key)")
+        return ConnectionTestResult(ok=False, reason="missing_api_key", detail="GEMINI_API_KEY is not set")
+
+    if provider is None:
+        from services.gemini_provider import GeminiTextProvider
+
+        provider = GeminiTextProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_text_model or settings.gemini_model,
+            base_url=settings.gemini_base_url,
+            timeout=settings.ai_timeout_seconds,
+        )
+
+    try:
+        raw = await provider.complete(system=_TEST_SYSTEM, user=_TEST_USER)
+    except AIAuthenticationError:
+        logger.warning("Gemini connection: FAILED (unauthorized)")
+        return ConnectionTestResult(ok=False, reason="unauthorized", detail="provider rejected the API key (401/403)")
+    except AIRateLimitedError:
+        logger.warning("Gemini connection: FAILED (rate_limited)")
+        return ConnectionTestResult(ok=False, reason="rate_limited", detail="provider rate-limited this request (429)")
+    except AITimeoutError:
+        logger.warning("Gemini connection: FAILED (timeout)")
+        return ConnectionTestResult(
+            ok=False, reason="timeout", detail=f"no response within {settings.ai_timeout_seconds}s"
+        )
+    except AIUnavailableError:
+        logger.warning("Gemini connection: FAILED (network_error)")
+        return ConnectionTestResult(ok=False, reason="network_error", detail="network error or provider 5xx")
+    except AIInvalidResponseError:
+        logger.warning("Gemini connection: FAILED (invalid_response)")
+        return ConnectionTestResult(ok=False, reason="invalid_response", detail="provider returned an unexpected response")
+    except Exception as exc:  # pragma: no cover - genuinely unexpected
+        logger.warning("Gemini connection: FAILED (unknown_error)")
+        return ConnectionTestResult(ok=False, reason="unknown_error", detail=type(exc).__name__)
+
+    if not raw or not raw.strip():
+        logger.warning("Gemini connection: FAILED (invalid_response)")
+        return ConnectionTestResult(ok=False, reason="invalid_response", detail="empty response body")
+
+    logger.info("Gemini connection: OK")
     return ConnectionTestResult(ok=True)
