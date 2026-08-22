@@ -151,7 +151,7 @@ class User(Base):
     )
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
 
-    level: Mapped[str] = mapped_column(String(32), nullable=False, default="beginner")
+    level: Mapped[str] = mapped_column(String(32), nullable=False, default="a1")
     daily_new_words: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
 
     morning_time: Mapped[time] = mapped_column(Time, nullable=False)
@@ -235,7 +235,20 @@ class UserLanguage(Base):
     language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
     translation_language: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
 
-    level: Mapped[str] = mapped_column(String(32), nullable=False, default="beginner")
+    # `level` doubles as the "estimated level" (level-and-difficulty
+    # stage): set once at onboarding, from then on it's the ONE field
+    # services.level_progress_service moves forward over time as the
+    # learner's accumulated stats justify it - never a second
+    # "estimated_level" column duplicating it (there's nothing else that
+    # needs to know a level besides this evolving estimate).
+    level: Mapped[str] = mapped_column(String(32), nullable=False, default="a1")
+    # difficulty_mode="automatic" means word generation uses `level`
+    # directly; "manual" means it uses `learning_difficulty` instead - the
+    # learner's own pick from ⚙️ Настройки → "Уровень сложности изучения
+    # языка", independent of (and never overwriting) the auto-tracked
+    # `level`. See services.level_progress_service.effective_difficulty().
+    difficulty_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    learning_difficulty: Mapped[str] = mapped_column(String(32), nullable=False, default="a1")
     daily_new_words: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

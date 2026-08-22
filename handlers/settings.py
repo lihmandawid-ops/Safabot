@@ -32,11 +32,11 @@ from keyboards.settings import (
     add_language_words_keyboard,
     back_to_settings_keyboard,
     daily_words_pick_keyboard,
+    difficulty_pick_keyboard,
     goal_pick_keyboard,
     industry_pick_keyboard,
     interface_language_pick_keyboard,
     language_switch_keyboard,
-    level_pick_keyboard,
     notification_slot_keyboard,
     notification_time_keyboard,
     review_settings_keyboard,
@@ -561,16 +561,29 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
 
-        elif data == "set:level:list":
+        elif data == "set:difficulty:list":
             await query.answer()
             await query.edit_message_text(
-                t("settings.pick_level", get_current_language()), reply_markup=level_pick_keyboard()
+                t("settings.pick_difficulty", get_current_language()), reply_markup=difficulty_pick_keyboard()
             )
 
-        elif data.startswith("set:level:pick:"):
-            level = data.removeprefix("set:level:pick:")
-            await users_repo.update_user(session, user, level=level)
-            await query.answer(t("settings.level_updated", get_current_language(), level=t(f"level.{level}", get_current_language())))
+        elif data.startswith("set:difficulty:pick:"):
+            level = data.removeprefix("set:difficulty:pick:")
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            await user_languages_repo.set_manual_difficulty(session, current, level=level)
+            await query.answer(t("settings.difficulty_updated", get_current_language(), level=t(f"level.{level}", get_current_language())))
+            await _render_home(query, session, user)
+
+        elif data == "set:difficulty:auto":
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            await user_languages_repo.set_automatic_difficulty(session, current)
+            await query.answer(t("settings.difficulty_auto_updated", get_current_language()))
             await _render_home(query, session, user)
 
         elif data == "set:tz:list":

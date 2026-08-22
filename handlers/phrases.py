@@ -212,7 +212,11 @@ async def _run_phrase_analysis(query, session, user, current, phrase_text: str) 
     try:
         result = await get_ai_service().analyze_text(
             phrase_text, language_code=current.language_code, translation_language=current.translation_language,
-            interface_language=user.interface_language, user_id=user.id,
+            # bugfix stage: this must match translation_language, not the
+            # global interface_language - the two can differ (see the same
+            # fix in handlers/dictionary.py, handlers/grammar.py,
+            # handlers/text_analysis.py).
+            interface_language=current.translation_language, user_id=user.id,
         )
     except AIConfigurationError:
         await query.message.reply_text(t("ai.not_configured", get_current_language()))

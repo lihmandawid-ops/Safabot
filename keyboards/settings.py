@@ -36,10 +36,9 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.notification_time", get_current_language()), callback_data="set:notif:slots")],
             [InlineKeyboardButton(t("settings.menu.notifications_toggle", get_current_language()), callback_data="set:notif:toggle")],
             [InlineKeyboardButton(t("settings.menu.review_settings", get_current_language()), callback_data="set:revsettings:home")],
-            [InlineKeyboardButton(t("settings.menu.level", get_current_language()), callback_data="set:level:list")],
+            [InlineKeyboardButton(t("settings.menu.difficulty", get_current_language()), callback_data="set:difficulty:list")],
             [InlineKeyboardButton(t("settings.menu.timezone", get_current_language()), callback_data="set:tz:list")],
             [InlineKeyboardButton(t("settings.menu.goal", get_current_language()), callback_data="set:goal:list")],
-            [InlineKeyboardButton(t("settings.menu.topics", get_current_language()), callback_data="set:topics:list")],
             [InlineKeyboardButton(t("settings.menu.subscription", get_current_language()), callback_data="set:sub")],
         ]
     )
@@ -199,11 +198,18 @@ def review_settings_keyboard(user) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def level_pick_keyboard() -> InlineKeyboardMarkup:
+def difficulty_pick_keyboard() -> InlineKeyboardMarkup:
+    """"Уровень сложности изучения языка" (level-and-difficulty stage,
+    replaces the old "Мой уровень"): A1-C2 manual picks plus
+    🤖 Автоматически, which switches UserLanguage.difficulty_mode back to
+    "automatic" so word generation uses the auto-tracked estimated level
+    instead - never the other way around (picking a manual level never
+    touches that estimate, see services.level_progress_service)."""
     rows = [
-        [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"set:level:pick:{code}")]
+        [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"set:difficulty:pick:{code}")]
         for code in LEVEL_CODES
     ]
+    rows.append([InlineKeyboardButton(t("settings.difficulty.automatic", get_current_language()), callback_data="set:difficulty:auto")])
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
 
@@ -245,7 +251,14 @@ def topics_keyboard(selected_topics: list[str]) -> InlineKeyboardMarkup:
     """One toggle button per preset topic (✅ prefix when selected), one
     remove button per already-selected custom topic (anything in
     `selected_topics` that isn't a preset code), an "add custom" entry,
-    and back - settings-improvements stage section 22."""
+    a "generate now" trigger once at least one topic is picked, and back.
+
+    Level-and-difficulty stage: relocated from ⚙️ Настройки into
+    📚 Учить слова → 🎯 Новые слова по теме (spec section 10 - the
+    capability moves, the screen and its callback_data prefix don't
+    change, so this stays the exact same tested toggle/add-custom
+    mechanics as before, just reached from a new place - back now
+    returns to the learning submenu, its only entry point today)."""
     preset_set = set(PRESET_TOPICS)
     rows = []
     for code in PRESET_TOPICS:
@@ -259,5 +272,7 @@ def topics_keyboard(selected_topics: list[str]) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(f"✅ {topic}", callback_data=f"set:topics:removecustom:{i}")])
 
     rows.append([InlineKeyboardButton(t("settings.topics_add_custom", get_current_language()), callback_data="set:topics:add_custom")])
-    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
+    if selected_topics:
+        rows.append([InlineKeyboardButton(t("learning.topics.generate_now", get_current_language()), callback_data="learn:topicgen")])
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="learn:menu")])
     return InlineKeyboardMarkup(rows)

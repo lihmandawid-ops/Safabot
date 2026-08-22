@@ -89,6 +89,15 @@ class Settings:
     ai_gateway_base_url: str
     ai_gateway_enabled: bool
     max_generation_attempts: int
+    # LevelProgressService thresholds (level-and-difficulty stage) - a
+    # learner's estimated CEFR level only advances one tier when ALL
+    # three hold, never from elapsed time or a handful of lucky answers:
+    # enough distinct words at the CURRENT level genuinely mastered, each
+    # one reviewed enough times to rule out a fluke, and a high enough
+    # aggregate accuracy across all of them.
+    level_up_min_mastered_words: int
+    level_up_min_repetitions_per_word: int
+    level_up_min_accuracy: float
     max_extra_words_per_day: int
     max_text_length: int
     max_image_size_bytes: int
@@ -190,6 +199,13 @@ def get_settings() -> Settings:
         ai_gateway_base_url=os.getenv("AI_GATEWAY_BASE_URL", "https://ai-gateway.vercel.sh/v1"),
         ai_gateway_enabled=_get_bool("AI_GATEWAY_ENABLED", True),
         max_generation_attempts=_get_int("MAX_GENERATION_ATTEMPTS", 3),
+        # Deliberately conservative defaults (spec: never advance a level
+        # from a handful of correct answers or from time passing alone) -
+        # 15 distinct words genuinely mastered at the current level, each
+        # reviewed at least 3 times, at 85%+ aggregate accuracy.
+        level_up_min_mastered_words=_get_int("LEVEL_UP_MIN_MASTERED_WORDS", 15),
+        level_up_min_repetitions_per_word=_get_int("LEVEL_UP_MIN_REPETITIONS_PER_WORD", 3),
+        level_up_min_accuracy=_get_float("LEVEL_UP_MIN_ACCURACY", 0.85),
         # Bugfix stage: "➕ Ещё новые слова" draws from a separate daily
         # pool than daily_new_words, precisely so an eager user can ask for
         # more today without silently raising everyone's default pace -

@@ -335,3 +335,121 @@ async def test_completion_screen_offers_after_session_keyboard(handler_db):
     kwargs = last_call[1]
     assert "Отлично" in text
     assert kwargs["reply_markup"] is not None
+
+
+# --- 📚 Учить слова submenu (level-and-difficulty stage, spec sections
+# 10-16, 40-62): 🆕 Новые слова / 🎯 Новые слова по теме, both AI-first. ---
+
+async def test_menu_button_shows_the_two_options(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:menu")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.edit_message_text.assert_awaited_once()
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "learn:newwords" in callbacks
+    assert "learn:topics" in callbacks
+
+
+async def test_newwords_without_ai_shows_the_exact_failure_message(handler_db):
+    """Spec sections 40-62: on AI failure this must be shown verbatim -
+    never a silent fallback to random database words."""
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:newwords")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert text == "Сейчас не удалось подобрать новые слова. Попробуйте ещё раз."
+
+
+async def test_newwords_with_working_ai_adds_words_never_touching_local_pool(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.seed_words import seed_words
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    async with session_scope() as s:
+        await seed_words(s)  # plenty of local words available - must be ignored (AI-first, never DB-first)
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:newwords")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "1" in text
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert any(uw.word.word == "aiword" for uw in words)
+
+
+async def test_topics_button_shows_topic_picker(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:topics")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.edit_message_text.assert_awaited_once()
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    assert markup is not None
+
+
+async def test_topicgen_with_no_topics_selected_returns_to_menu(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:topicgen")
+    await learning_handler.handle_learning_callback(q, context)
+
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "learn:newwords" in callbacks  # back on the submenu, not a crash
+
+
+async def test_topicgen_uses_selected_topics_for_ai_first_generation(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        await user_languages_repo.set_topics(s, current, topics=["cooking"])
+
+    captured = {}
+
+    class _FakeAI:
+        async def generate_words(self, *, category=None, **kwargs):
+            captured["category"] = category
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="topicword", translations=[ai_models.TranslationResult(translation="тема-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:topicgen")
+    await learning_handler.handle_learning_callback(q, context)
+
+    assert captured["category"] == "cooking"
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "1" in text

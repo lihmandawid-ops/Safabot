@@ -67,6 +67,48 @@ async def ensure_pronunciation(session: AsyncSession, word: Word, *, translation
     return await words_repo.set_pronunciation(session, word, pronunciation=result.pronunciation, phonetic=result.phonetic)
 
 
+async def ensure_translation(session: AsyncSession, word: Word, *, translation_language: str, user_id: int) -> Word:
+    """On-demand AI backfill for a missing translation (level-and-
+    difficulty stage, spec sections 18-25's global language audit): a
+    local/seed Word can carry translations into only SOME languages (a lot
+    of seed data, for example, was only ever translated into Russian) - a
+    learner whose translation_language isn't one of those must never be
+    shown a blank translation line just because the word itself already
+    existed locally. No-op, no AI call, once a translation for this exact
+    language exists - mirrors ensure_pronunciation's cache-first,
+    swallow-AI-failure, never-touch-other-languages' rows behavior.
+
+    Re-fetches `word` through get_by_id first (eager-loads .translations)
+    rather than trusting the caller already touched that relationship
+    safely - a bare Word straight out of get_or_create_word/create() has
+    an unloaded collection, and reading it directly would hit an
+    unsupported lazy-load under async SQLAlchemy."""
+    word = await words_repo.get_by_id(session, word.id)
+    if any(t.language_code == translation_language for t in word.translations):
+        return word
+
+    from services.dictionary_service import get_dictionary_provider
+
+    result = await get_dictionary_provider().lookup(
+        word.word, language_code=word.language_code, translation_language=translation_language,
+        user_level=None, user_id=user_id,
+    )
+    if result is None or not result.translations:
+        return word
+
+    for translation in result.translations:
+        row = await words_repo.add_translation(
+            session, word_id=word.id, language_code=translation_language,
+            translation=translation.translation, usage_note=translation.usage_note,
+        )
+        # Append directly onto the already-loaded collection rather than
+        # re-fetching again - `word.translations` was already safely
+        # loaded above, so this stays in sync with the DB without risking
+        # another lazy-load.
+        word.translations.append(row)
+    return word
+
+
 async def get_or_create_word(
     session: AsyncSession, *, language_code: str, word: str, **fields: object
 ) -> tuple[Word, bool]:

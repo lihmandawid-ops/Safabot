@@ -180,6 +180,49 @@ async def test_select_specific_words_then_add_selected(handler_db, monkeypatch):
     assert words == {"schedule", "doctor"}  # "appointment" was never selected
 
 
+async def test_analyze_text_uses_translation_language_not_interface_language(handler_db, monkeypatch):
+    """Regression: same fix as handlers/dictionary.py's explain_word - the
+    prose language must follow this learning pair's own
+    translation_language, not the global menu language. Also covers 📷
+    OCR / 🎤 voice, which both reuse this same handle_text_input path."""
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import text_analysis as text_analysis_handler
+    from services.ai_service import LiveAIService, get_ai_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 77)
+        added = await user_languages_repo.add_language(
+            s, user_id=user.id, language_code="en", translation_language="de",
+            level="beginner", daily_new_words=4,
+        )
+        await user_languages_repo.set_active_language(s, user_id=user.id, user_language_id=added.id)
+
+    class _CapturingProvider(AIProvider):
+        def __init__(self):
+            self.last_user: str | None = None
+
+        async def complete(self, *, system: str, user: str) -> str:
+            self.last_user = user
+            return TEXT_ANALYSIS_JSON
+
+    provider = _CapturingProvider()
+    live = LiveAIService(
+        provider=provider, model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("handlers.text_analysis.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    update = _message("I need to schedule an appointment with my doctor tomorrow.")
+    await text_analysis_handler.handle_text_input(update, context, update.message.text)
+
+    assert "Respond in this language for any prose (ISO 639-1): de" in provider.last_user
+    assert "Respond in this language for any prose (ISO 639-1): ru" not in provider.last_user
+
+
 async def test_analyze_text_without_ai_configured_shows_friendly_message(handler_db):
     from handlers import text_analysis as text_analysis_handler
     from services.ai_service import get_ai_service

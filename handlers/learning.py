@@ -27,6 +27,7 @@ from keyboards.learning import (
     continue_keyboard,
     extra_amount_keyboard,
     known_keyboard,
+    learn_menu_keyboard,
     old_words_amount_keyboard,
     rating_keyboard,
     reveal_keyboard,
@@ -35,6 +36,7 @@ from keyboards.learning import (
 )
 from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
+from keyboards.settings import topics_keyboard
 from keyboards.words import filter_keyboard
 from services import learning_service, pronunciation_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
@@ -101,6 +103,14 @@ async def _show_current_word(session, edit, learning_session, translation_langua
     # though opening its dictionary card moments later would fix it. A
     # no-op (no AI call) whenever pronunciation is already set.
     await pronunciation_service.ensure(
+        session, item.user_word.word, translation_language=translation_language, user_id=user_id,
+    )
+    # level-and-difficulty stage, spec sections 18-25: same reasoning as
+    # the pronunciation backfill above, but for a missing translation - a
+    # lot of seed data was only ever translated into Russian, so a
+    # learner translating into a different language must never see a
+    # blank translation line for an otherwise-known word.
+    await word_service.ensure_translation(
         session, item.user_word.word, translation_language=translation_language, user_id=user_id,
     )
     await edit(_render_front(item.user_word), reply_markup=reveal_keyboard(item.user_word_id, is_new_word=item.is_new_word))
@@ -203,6 +213,46 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             text, keyboard = await _compute_intro(session, user, current, include_new_words=True)
             await edit(text, reply_markup=keyboard)
+
+        elif data == "learn:menu":
+            await query.answer()
+            await edit(t("learning.menu.header", get_current_language()), reply_markup=learn_menu_keyboard())
+
+        elif data == "learn:newwords":
+            await query.answer()
+            result = await word_generation_service.generate_words_ai_first(
+                session, user=user, user_language=current, amount=current.daily_new_words,
+                trigger="explicit_new_words",
+            )
+            text = (
+                t("learning.generation_failed", get_current_language())
+                if not result
+                else t("learning.extra_added", get_current_language(), count=len(result))
+            )
+            await edit(text, reply_markup=after_session_keyboard())
+
+        elif data == "learn:topics":
+            await query.answer()
+            await edit(
+                t("settings.topics_title", get_current_language()),
+                reply_markup=topics_keyboard(current.selected_topics),
+            )
+
+        elif data == "learn:topicgen":
+            await query.answer()
+            if not current.selected_topics:
+                await edit(t("learning.menu.header", get_current_language()), reply_markup=learn_menu_keyboard())
+                return
+            result = await word_generation_service.generate_words_ai_first(
+                session, user=user, user_language=current, amount=current.daily_new_words,
+                topics=current.selected_topics, trigger="explicit_new_words_topic",
+            )
+            text = (
+                t("learning.generation_failed", get_current_language())
+                if not result
+                else t("learning.extra_added", get_current_language(), count=len(result))
+            )
+            await edit(text, reply_markup=after_session_keyboard())
 
         elif data == "learn:extra":
             await query.answer()

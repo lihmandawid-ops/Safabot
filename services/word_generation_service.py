@@ -71,13 +71,15 @@ async def generate_new_words(
     if amount <= 0:
         return []
 
+    from services.level_progress_service import effective_difficulty
+
     created: list[UserWord] = []
 
     local_candidates = await words_repo.find_unknown_words_for_generation(
         session,
         user_id=user.id,
         language_code=user_language.language_code,
-        level=user_language.level,
+        level=effective_difficulty(user_language),
         limit=amount,
         topics=user_language.selected_topics,
     )
@@ -148,13 +150,79 @@ async def generate_extra_words(
     return ExtraWordsResult(words=created, limit_reached=False, remaining_today=max(0, available - len(created)))
 
 
-def _topic_hint(user_language: UserLanguage) -> str | None:
+async def generate_words_ai_first(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    amount: int,
+    topics: list[str] | None = None,
+    trigger: str = "explicit_new_words",
+) -> list[UserWord]:
+    """🆕 Новые слова / 🎯 Новые слова по теме (level-and-difficulty stage,
+    spec sections 40-62): explicit, deliberate requests where the AI must
+    genuinely pick words for THIS learner - level, goal, industry,
+    topic/interests, and what they already know - never "take some rows
+    out of the local pool first" like generate_new_words()'s daily-quota/
+    ➕-extra/already-know-it callers do (those stay on generate_new_words,
+    completely unchanged).
+
+    Goes straight to _top_up_via_ai with an empty `created` seed, so the
+    local database is used only for existence/duplicate checks inside that
+    call (via word_service.get_or_create_word and user_word_service.
+    add_word_to_learning), never as a source of which words to suggest -
+    and it inherits the exact same bounded-retry, no-random-padding
+    behavior already covering generate_new_words' AI shortfall path.
+
+    `topics` is the ONE topic (or short list) this specific call is
+    scoped to - pass None for a plain 🆕 Новые слова request (falls back
+    to the profile's saved selected_topics/goal/industry, same hints
+    generate_new_words already uses), or the user's freshly typed/picked
+    topic(s) for 🎯 Новые слова по теме. Returns [] (never raises) if AI
+    couldn't produce anything usable - callers show the standard "couldn't
+    find new words, try again" message rather than falling back to random
+    database words.
+    """
+    if amount <= 0:
+        return []
+
+    created: list[UserWord] = []
+    provider = await _top_up_via_ai(
+        session, user=user, user_language=user_language, amount=amount, created=created, topics_override=topics,
+    )
+
+    await generation_logs_repo.log(
+        session,
+        user_id=user.id,
+        language_code=user_language.language_code,
+        requested_amount=amount,
+        generated_amount=len(created),
+        provider=provider,
+        trigger=trigger,
+    )
+
+    return [await user_words_repo.get_by_id(session, uw.id) for uw in created]
+
+
+def _topic_hint(user_language: UserLanguage, *, override: list[str] | None = None) -> str | None:
     """🎯 Темы обучения (settings-improvements stage section 22): joined
     into a single free-text "Category" line for the AI prompt - it
     already accepts a phrase there, not just one of the fixed local
     Word.category values, so a mix of preset and custom topics both work
-    unchanged."""
-    return ", ".join(user_language.selected_topics) if user_language.selected_topics else None
+    unchanged.
+
+    `override` (level-and-difficulty stage, spec sections 40-58) lets
+    🎯 Новые слова по теме pass the ONE topic the user just picked for this
+    single generation call, instead of the profile's whole saved
+    selected_topics list."""
+    topics = override if override is not None else user_language.selected_topics
+    return ", ".join(topics) if topics else None
+
+
+def _goal_hint(user_language: UserLanguage) -> str | None:
+    """Spec sections 40-58: the AI-first generation path must factor the
+    learner's stated goal, not just topic/industry."""
+    return user_language.learning_goal or None
 
 
 def _industry_hint(user_language: UserLanguage) -> str | None:
@@ -167,20 +235,27 @@ def _industry_hint(user_language: UserLanguage) -> str | None:
 
 
 async def _top_up_via_ai(
-    session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int, created: list[UserWord]
+    session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int, created: list[UserWord],
+    topics_override: list[str] | None = None,
 ) -> str:
     """Asks AI for the shortfall, retrying up to MAX_GENERATION_ATTEMPTS
     times if what came back was entirely (or partly) duplicates of
     something the user already has - never unbounded (spec section 12).
     Mutates `created` in place; returns the provider label to log.
+
+    Section 6: the effective difficulty for generation is the manual pick
+    when difficulty_mode == "manual", never the auto-tracked estimate -
+    see services.level_progress_service.effective_difficulty.
     """
     from config import get_settings
+    from services.level_progress_service import effective_difficulty
 
     settings = get_settings()
     provider_label = settings.ai_provider
     known_words = await _recent_known_words(session, user=user, user_language=user_language)
-    category = _topic_hint(user_language)
+    category = _topic_hint(user_language, override=topics_override)
     industry = _industry_hint(user_language)
+    goal = _goal_hint(user_language)
 
     attempts = 0
     while len(created) < amount and attempts < settings.max_generation_attempts:
@@ -189,10 +264,11 @@ async def _top_up_via_ai(
         entries = await _generate_via_ai(
             language_code=user_language.language_code,
             translation_language=user_language.translation_language,
-            level=user_language.level,
+            level=effective_difficulty(user_language),
             amount=shortfall,
             category=category,
             industry=industry,
+            goal=goal,
             known_words=known_words,
             user_id=user.id,
         )
@@ -222,6 +298,8 @@ async def _recent_known_words(session: AsyncSession, *, user: User, user_languag
 async def _persist_and_add(
     session: AsyncSession, *, entry: ai_models.GeneratedWord, user: User, user_language: UserLanguage
 ) -> UserWord | None:
+    from services.level_progress_service import effective_difficulty
+
     word, was_created = await word_service.get_or_create_word(
         session,
         language_code=user_language.language_code,
@@ -230,7 +308,7 @@ async def _persist_and_add(
         pronunciation=entry.pronunciation,
         phonetic=entry.phonetic,
         definition=entry.definition,
-        difficulty=entry.difficulty or user_language.level,
+        difficulty=entry.difficulty or effective_difficulty(user_language),
         category=entry.category,
     )
     if was_created:
@@ -261,7 +339,7 @@ async def _persist_and_add(
 
 async def _generate_via_ai(
     *, language_code: str, translation_language: str, level: str, amount: int,
-    category: str | None = None, industry: str | None = None,
+    category: str | None = None, industry: str | None = None, goal: str | None = None,
     known_words: list[str], user_id: int,
 ) -> list[ai_models.GeneratedWord]:
     """Never raises: any AI failure (not configured, network error,
@@ -275,6 +353,7 @@ async def _generate_via_ai(
             amount=amount,
             category=category,
             industry=industry,
+            goal=goal,
             known_words=known_words,
             user_id=user_id,
         )

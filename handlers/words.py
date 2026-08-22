@@ -356,6 +356,12 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 await pronunciation_service.ensure(
                     session, user_word.word, translation_language=current.translation_language, user_id=user.id
                 )
+                # level-and-difficulty stage, spec sections 18-25: same
+                # reasoning as the pronunciation backfill above, but for a
+                # missing translation.
+                await word_service.ensure_translation(
+                    session, user_word.word, translation_language=current.translation_language, user_id=user.id
+                )
                 card = await word_service.get_word_card(
                     session, word_id=user_word.word_id, translation_language=current.translation_language
                 )

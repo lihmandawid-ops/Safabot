@@ -23,12 +23,12 @@ NOW = datetime(2026, 6, 15, 10, 0, 0)
 async def _create_user(session, *, telegram_id=2000, daily_new_words=4, timezone="UTC"):
     user = await users_repo.create_user(
         session, telegram_id=telegram_id, username=None, first_name="Test",
-        interface_language="ru", timezone=timezone, level="beginner", daily_new_words=daily_new_words,
+        interface_language="ru", timezone=timezone, level="a1", daily_new_words=daily_new_words,
         morning_time=time(9, 0), afternoon_time=time(14, 0), evening_time=time(20, 0),
     )
     ul = await user_languages_repo.add_language(
         session, user_id=user.id, language_code="en", translation_language="ru",
-        level="beginner", daily_new_words=daily_new_words,
+        level="a1", daily_new_words=daily_new_words,
     )
     return user, ul
 
@@ -212,6 +212,51 @@ async def test_finish_session_updates_user_word_and_marks_complete(session):
     assert finished is True
     assert learning_session.status == "completed"
     assert learning_session.completed_at is not None
+
+
+async def test_finish_session_checks_level_progress(session, monkeypatch):
+    """Level-and-difficulty stage: finish_session_if_complete must trigger
+    the LevelProgressService check for the session's own UserLanguage -
+    not just mark it complete."""
+    from config import get_settings
+    from database.models import WordStatus
+
+    monkeypatch.setenv("LEVEL_UP_MIN_MASTERED_WORDS", "3")
+    monkeypatch.setenv("LEVEL_UP_MIN_REPETITIONS_PER_WORD", "3")
+    monkeypatch.setenv("LEVEL_UP_MIN_ACCURACY", "0.85")
+    get_settings.cache_clear()
+    try:
+        user, ul = await _create_user(session, telegram_id=2750, daily_new_words=4)
+        assert ul.level == "a1"
+
+        # Pre-existing mastered words at the user's current level, well
+        # past the thresholds - the one new word answered below is what
+        # triggers finish_session_if_complete, not what satisfies the
+        # threshold itself.
+        for i in range(5):
+            w, _ = await word_service.get_or_create_word(
+                session, language_code="en", word=f"priormaster{i}", difficulty=ul.level,
+            )
+            uw = await user_words_repo.add_word(session, user_id=user.id, word_id=w.id, language_code="en")
+            uw.status = WordStatus.MASTERED
+            uw.repetitions = 5
+            uw.correct_answers = 5
+            uw.wrong_answers = 0
+        await session.flush()
+
+        words = await _make_words(session, 1, prefix="triggerword")
+        await _add_as_new(session, user.id, words)
+        await session.commit()
+
+        learning_session = await learning_service.build_learning_session(session, user=user, user_language=ul, now=NOW)
+        uw_id = learning_session.items[0].user_word_id
+        await learning_service.record_review_answer(session, learning_session, uw_id, grade=ReviewGrade.GOOD, now=NOW)
+
+        await learning_service.finish_session_if_complete(session, user, learning_session, now=NOW)
+
+        assert ul.level == "a2"  # advanced exactly one CEFR tier
+    finally:
+        get_settings.cache_clear()
 
 
 async def test_streak_increments_on_consecutive_local_days(session):

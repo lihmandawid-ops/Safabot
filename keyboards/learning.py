@@ -14,7 +14,27 @@ from utils.i18n import get_current_language, t
 
 
 def start_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(t("learning.button.start", get_current_language()), callback_data="learn:start")]])
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("learning.button.start", get_current_language()), callback_data="learn:start")],
+            [InlineKeyboardButton(t("learning.button.pick_words", get_current_language()), callback_data="learn:menu")],
+        ]
+    )
+
+
+def learn_menu_keyboard() -> InlineKeyboardMarkup:
+    """📚 Учить слова -> "how should new words be picked" submenu
+    (level-and-difficulty stage, spec sections 10-16): exactly two ways to
+    get new words, both AI-first (services.word_generation_service.
+    generate_words_ai_first) - never a third "random from the database"
+    option. 🎯 leads into the existing, unchanged topics_keyboard()."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("learning.button.new_words_now", get_current_language()), callback_data="learn:newwords")],
+            [InlineKeyboardButton(t("learning.button.new_words_topic", get_current_language()), callback_data="learn:topics")],
+            [InlineKeyboardButton(t("card.button.back", get_current_language()), callback_data="learn:intro")],
+        ]
+    )
 
 
 def start_review_keyboard() -> InlineKeyboardMarkup:
@@ -46,6 +66,7 @@ def after_session_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("learning.button.old_words", get_current_language()), callback_data="learn:oldwords")],
             [InlineKeyboardButton(t("quiz.button.start", get_current_language()), callback_data="quiz:start")],
             [InlineKeyboardButton(t("learning.button.learn_more", get_current_language()), callback_data="learn:intro")],
+            [InlineKeyboardButton(t("learning.button.pick_words", get_current_language()), callback_data="learn:menu")],
             [InlineKeyboardButton(t("learning.button.extra", get_current_language()), callback_data="learn:extra")],
             [InlineKeyboardButton(t("learning.button.mywords", get_current_language()), callback_data="learn:mywords")],
             [InlineKeyboardButton(t("learning.button.dictionary", get_current_language()), callback_data="learn:dictionary")],

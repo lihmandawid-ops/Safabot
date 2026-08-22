@@ -121,10 +121,15 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             return
 
         try:
+            # current.translation_language, not user.interface_language -
+            # same fix/reasoning as handlers/dictionary.py's
+            # _explain_word_text: the prose here must match this learning
+            # language's own translation language. This one call also
+            # covers 📷 OCR and 🎤 voice (both reuse handle_text_input).
             result = await get_ai_service().analyze_text(
                 text, language_code=current.language_code,
                 translation_language=current.translation_language,
-                interface_language=user.interface_language, user_id=user.id,
+                interface_language=current.translation_language, user_id=user.id,
             )
         except AIConfigurationError:
             context.user_data.pop("text_analysis", None)

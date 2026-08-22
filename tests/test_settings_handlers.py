@@ -149,8 +149,14 @@ async def test_daily_words_pick_answers_once_and_updates_screen(handler_db):
     q.edit_message_text.assert_awaited_once()
 
 
-async def test_level_pick_answers_once_and_updates_screen(handler_db):
-    q = await _run("set:level:pick:advanced")
+async def test_difficulty_pick_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:difficulty:pick:c1")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_difficulty_auto_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:difficulty:auto")
     assert q.answer.call_count == 1
     q.edit_message_text.assert_awaited_once()
 

@@ -56,10 +56,13 @@ class _FakeAIService:
         self._raises = raises
         self.calls = 0
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, known_words=None, user_id=None):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, user_id=None):
         self.calls += 1
         self.last_category = category
         self.last_industry = industry
+        self.last_goal = goal
+        self.last_known_words = list(known_words) if known_words is not None else None
+        self.last_level = level
         if self._raises is not None:
             raise self._raises
         return ai_models.GenerateWordsResult(words=self._words)
@@ -438,3 +441,145 @@ async def test_generation_is_isolated_between_languages_for_the_same_user(sessio
     assert {uw.language_code for uw in en_created} == {"en"}
     assert {uw.language_code for uw in de_created} == {"de"}
     assert {uw.word.word for uw in en_created}.isdisjoint({uw.word.word for uw in de_created})
+
+
+# --- generate_words_ai_first() (level-and-difficulty stage, spec sections
+# 40-62: 🆕 Новые слова / 🎯 Новые слова по теме must be AI-first, never a
+# local-pool draw, even when the local pool has plenty of unused words.) ---
+
+async def test_generate_words_ai_first_never_touches_the_local_pool(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5020)
+    await _seed_local_words(session, 10)  # plenty available locally - must be ignored
+    monkeypatch.setattr(words_repo, "find_unknown_words_for_generation", _fail_if_called())
+
+    fake = _FakeAIService([_generated("aiword1"), _generated("aiword2")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    created = await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=2)
+
+    assert len(created) == 2
+    assert fake.calls == 1
+    assert {uw.word.word for uw in created} == {"aiword1", "aiword2"}
+    assert all(uw.source == WordSource.GENERATED for uw in created)
+
+
+async def test_generate_words_ai_first_returns_empty_list_never_raises_on_ai_failure(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5021)
+    monkeypatch.setattr(
+        word_generation_service, "get_ai_service",
+        lambda: _FakeAIService(raises=AIUnavailableError("down")),
+    )
+
+    created = await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=3)
+
+    assert created == []  # never a random-DB fallback in disguise
+
+
+async def test_generate_words_ai_first_amount_zero_is_a_noop(session):
+    user, ul = await _create_user(session, telegram_id=5022)
+    assert await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=0) == []
+
+
+async def test_generate_words_ai_first_topics_override_beats_saved_selected_topics(session, monkeypatch):
+    """🎯 Новые слова по теме passes its own one-off topic, which must win
+    over whatever is saved on the profile for this single call."""
+    user, ul = await _create_user(session, telegram_id=5023)
+    ul.selected_topics = ["travel", "food"]
+    await session.commit()
+
+    fake = _FakeAIService([_generated("topicword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(
+        session, user=user, user_language=ul, amount=1, topics=["cooking"]
+    )
+
+    assert fake.last_category == "cooking"
+
+
+async def test_generate_words_ai_first_falls_back_to_saved_topics_when_no_override(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5024)
+    ul.selected_topics = ["business"]
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_category == "business"
+
+
+async def test_generate_words_ai_first_passes_learning_goal(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5025)
+    ul.learning_goal = "travel"
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_goal == "travel"
+
+
+async def test_generate_words_ai_first_logs_with_its_own_trigger(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5026)
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(
+        session, user=user, user_language=ul, amount=1, trigger="explicit_new_words_topic"
+    )
+    await session.commit()
+
+    logs = (await session.execute(select(WordGenerationLog).where(WordGenerationLog.user_id == user.id))).scalars().all()
+    assert len(logs) == 1
+    assert logs[0].trigger == "explicit_new_words_topic"
+
+
+async def test_generate_words_ai_first_excludes_already_known_words(session, monkeypatch):
+    """Same known-words hint mechanism generate_new_words already uses -
+    the AI must be told what this learner already has."""
+    user, ul = await _create_user(session, telegram_id=5027)
+    known = await _seed_local_words(session, 2, prefix="known")
+    for word in known:
+        await user_words_repo.add_word(session, user_id=user.id, word_id=word.id, language_code="en")
+    await session.commit()
+
+    fake = _FakeAIService([_generated("newword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
+
+    assert set(fake.last_known_words) == {"known0", "known1"}
+
+
+async def test_generate_words_ai_first_effective_difficulty_uses_manual_pick(session, monkeypatch):
+    """Section 6: manual difficulty_mode must drive AI-first generation
+    too, not just the daily-quota path - never the auto-tracked estimate."""
+    user, ul = await _create_user(session, telegram_id=5028, level="a1")
+    ul.difficulty_mode = "manual"
+    ul.learning_difficulty = "c1"
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_level == "c1"
+
+
+async def test_generate_words_ai_first_effective_difficulty_uses_estimated_level_when_automatic(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5029, level="a1")
+    ul.difficulty_mode = "automatic"
+    ul.learning_difficulty = "c1"  # stale manual pick from before switching back - must be ignored
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_level == "a1"

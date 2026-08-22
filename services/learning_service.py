@@ -18,8 +18,9 @@ from config import get_settings
 from database.models import LearningSession, LearningSessionItem, User, UserLanguage, UserWord
 from database.repositories import learning as learning_repo
 from database.repositories import sessions as sessions_repo
+from database.repositories import user_languages as user_languages_repo
 from database.repositories import word_generation_logs as generation_logs_repo
-from services import user_word_service, word_generation_service
+from services import level_progress_service, user_word_service, word_generation_service
 from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import local_day_bounds, local_today, utc_now
 
@@ -376,6 +377,16 @@ async def finish_session_if_complete(
     now = now if now is not None else utc_now()
     await sessions_repo.complete_session(session, learning_session, now=now)
     await _update_streak(user, now)
+
+    # LevelProgressService (level-and-difficulty stage): checked once per
+    # completed session, never per-answer - cheap, and matches the "only
+    # advance on accumulated results, never a handful of answers" rule.
+    user_language = await user_languages_repo.get_by_language_code(
+        session, user_id=user.id, language_code=learning_session.language_code
+    )
+    if user_language is not None:
+        await level_progress_service.maybe_advance_level(session, user_language=user_language)
+
     return True
 
 

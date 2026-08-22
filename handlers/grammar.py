@@ -40,11 +40,16 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             return
 
         try:
+            # current.translation_language, not user.interface_language:
+            # the explanation must match this learning language's own
+            # translation language, which can differ from the menu
+            # chrome's language (see handlers/dictionary.py's
+            # _explain_word_text for the same fix/reasoning).
             explanation = await get_ai_service().explain_grammar(
                 text,
                 language_code=current.language_code,
                 level=current.level,
-                interface_language=user.interface_language,
+                interface_language=current.translation_language,
                 user_id=user.id,
             )
         except AIConfigurationError:

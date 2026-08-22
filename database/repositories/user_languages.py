@@ -39,6 +39,21 @@ async def get_current_language(session: AsyncSession, user_id: int) -> UserLangu
     return result.scalar_one_or_none()
 
 
+async def get_by_language_code(session: AsyncSession, *, user_id: int, language_code: str) -> UserLanguage | None:
+    """Level-and-difficulty stage: services.learning_service needs "the
+    UserLanguage a just-completed LearningSession belongs to", and a
+    session only ever stores language_code (not a translation_language) -
+    prefers the row marked is_current, falling back to any match, since a
+    session is always built against whichever pair was current at the
+    time."""
+    result = await session.execute(
+        select(UserLanguage)
+        .where(UserLanguage.user_id == user_id, UserLanguage.language_code == language_code)
+        .order_by(UserLanguage.is_current.desc())
+    )
+    return result.scalars().first()
+
+
 async def add_language(
     session: AsyncSession,
     *,
@@ -50,6 +65,8 @@ async def add_language(
     learning_goal: str | None = None,
     work_industry: str | None = None,
     selected_topics: list[str] | None = None,
+    difficulty_mode: str = "manual",
+    learning_difficulty: str | None = None,
 ) -> UserLanguage:
     existing = await session.execute(
         select(UserLanguage).where(
@@ -80,6 +97,12 @@ async def add_language(
         learning_goal=learning_goal,
         work_industry=work_industry,
         selected_topics=selected_topics or [],
+        difficulty_mode=difficulty_mode,
+        # learning_difficulty starts out matching the level the learner
+        # just picked at onboarding - never the column's own static
+        # default, which would silently mismatch whatever CEFR tier they
+        # actually chose.
+        learning_difficulty=learning_difficulty or level,
     )
     session.add(user_language)
     await session.flush()
@@ -135,6 +158,25 @@ async def set_goal(
 
 async def set_topics(session: AsyncSession, user_language: UserLanguage, *, topics: list[str]) -> UserLanguage:
     user_language.selected_topics = topics
+    await session.flush()
+    return user_language
+
+
+async def set_manual_difficulty(session: AsyncSession, user_language: UserLanguage, *, level: str) -> UserLanguage:
+    """"Уровень сложности изучения языка" manual pick (spec sections 6-9):
+    switches to manual mode and stores the chosen CEFR tier - never touches
+    `level` (the auto-tracked estimate), which keeps advancing independently
+    via services.level_progress_service regardless of this choice."""
+    user_language.difficulty_mode = "manual"
+    user_language.learning_difficulty = level
+    await session.flush()
+    return user_language
+
+
+async def set_automatic_difficulty(session: AsyncSession, user_language: UserLanguage) -> UserLanguage:
+    """Switches word generation back onto the auto-tracked estimated level
+    (`level`) instead of a fixed manual pick - see effective_difficulty()."""
+    user_language.difficulty_mode = "automatic"
     await session.flush()
     return user_language
 

@@ -182,10 +182,16 @@ async def _explain_word_text(card, current, user) -> str:
     when AI is unavailable), and only as a last resort to a placeholder.
     """
     try:
+        # AIService's "interface_language" param picks the prose response
+        # language - deliberately current.translation_language here, not
+        # user.interface_language (the global menu language): they can
+        # differ (a user can browse menus in English while translating
+        # this learning language into Hebrew), and the explanation must
+        # match the translation, never the menu chrome.
         explanation = await get_ai_service().explain_word(
             card.word.word, language_code=current.language_code,
             translation_language=current.translation_language,
-            level=current.level, interface_language=user.interface_language,
+            level=current.level, interface_language=current.translation_language,
             user_id=user.id,
         )
         return truncate_text(explanation, _USAGE_EXPLANATION_MAX_LENGTH)
@@ -208,6 +214,12 @@ async def _send_card(send, session, word_id: int, translation_language: str, *, 
     # rejected by Telegram the same way any other slow AI-backed action
     # in the bot would be.
     await pronunciation_service.ensure(session, word, translation_language=translation_language, user_id=user_id)
+    # level-and-difficulty stage, spec sections 18-25: a local word may
+    # only have been translated into a different language than this
+    # user's translation_language (a lot of seed data was only ever
+    # translated into Russian) - back it before rendering, never show a
+    # blank translation line for a word that otherwise exists locally.
+    word = await word_service.ensure_translation(session, word, translation_language=translation_language, user_id=user_id)
     card = word_service.build_word_card(word, translation_language=translation_language)
     await send(render_word_card_text(card), reply_markup=word_card_keyboard(word_id))
 

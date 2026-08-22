@@ -64,7 +64,7 @@ async def update_user(session: AsyncSession, user: User, **fields: Any) -> User:
     """Set arbitrary column values on `user` and flush.
 
     Used by handlers/settings.py so it never has to reach into the ORM
-    object directly - e.g. update_user(session, user, level="advanced").
+    object directly - e.g. update_user(session, user, level="c1").
     """
     for field_name, value in fields.items():
         if not hasattr(user, field_name):
