@@ -317,11 +317,11 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
             )
 
         elif data == "phr:save":
-            await query.answer()
             gen_state = context.user_data.get("phrase_gen")
             pop_state = context.user_data.get("phrase_popular")
             source = gen_state or pop_state
             if source is None:
+                await query.answer()
                 await edit(t("phrases.expired", get_current_language()), reply_markup=phrases_menu_keyboard())
                 return
             saved = await phrases_repo.add_phrase(
