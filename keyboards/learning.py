@@ -115,6 +115,22 @@ def known_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def candidate_keyboard() -> InlineKeyboardMarkup:
+    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
+    4-7): shown under every AI-generated candidate card BEFORE it becomes
+    a real UserWord - no id in callback_data (unlike reveal_keyboard/
+    rating_keyboard) since these always act on whichever candidate is
+    currently at context.user_data["new_words_candidates"]["position"],
+    the same ephemeral-state pattern handlers/quiz.py and handlers/
+    review_now.py already use for their own in-progress state."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("learning.button.add_candidate", get_current_language()), callback_data="learn:candidate:add")],
+            [InlineKeyboardButton(t("learning.button.reject_candidate", get_current_language()), callback_data="learn:candidate:reject")],
+        ]
+    )
+
+
 def rating_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -126,5 +142,10 @@ def rating_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(t("learning.rating.good", get_current_language()), callback_data=f"review:{user_word_id}:{ReviewGrade.GOOD.value}"),
                 InlineKeyboardButton(t("learning.rating.easy", get_current_language()), callback_data=f"review:{user_word_id}:{ReviewGrade.EASY.value}"),
             ],
+            # AI-new-words stage sections 16-17, 35, 38: independent of the
+            # 4-button grading ladder above - skips straight to MASTERED
+            # (learn:mastered:<id>, handlers/learning.py), same bypass
+            # 🤔 Я это уже знаю already uses for a brand-new word.
+            [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data=f"learn:mastered:{user_word_id}")],
         ]
     )

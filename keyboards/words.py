@@ -11,16 +11,19 @@ from utils.pagination import NEXT_LABEL, PREVIOUS_LABEL
 
 
 def filter_keyboard() -> InlineKeyboardMarkup:
-    """📚 Мои слова (bugfix stage: "Мои слова" restructure) - EXACTLY 5
-    sections, numbered, nothing else: 1) all words, 2) words currently in
-    the repetition system (LEARNING+REVIEW - the "words:filter:review"
-    code was never renamed, only its label/position here), 3) mastered
-    words, 4) search-your-own-words, 5) AI-backed add. The old "Новые"/
-    "Приостановлено" top-level filters are gone from THIS screen only -
-    words.py's underlying "new"/"paused" filter codes and callback
-    branches are untouched (a paused word is still reachable and
-    manageable from within "Все", and from its own card's actions), so no
-    capability is actually lost, just no longer a top-level button here."""
+    """📚 Мои слова (bugfix stage: "Мои слова" restructure; AI-new-words
+    stage section 18: plain button labels, no 1️⃣-5️⃣ numbering prefix) -
+    EXACTLY 5 sections, nothing else: all words, words currently in the
+    repetition system (LEARNING+REVIEW - the "words:filter:review" code
+    was never renamed, only its label/position here), mastered words,
+    search-your-own-words, AI-backed add. The old "Новые"/"Приостановлено"
+    top-level filters are gone from THIS screen only - words.py's
+    underlying "new"/"paused" filter codes and callback branches are
+    untouched (a paused word is still reachable and manageable from within
+    "Все", and from its own card's actions), so no capability is actually
+    lost, just no longer a top-level button here. In-list word numbering
+    (rendered separately, in _render_list_text) is unaffected - only the
+    MENU buttons dropped their emoji-digit prefix."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("words.filter.all", get_current_language()), callback_data="words:filter:all")],

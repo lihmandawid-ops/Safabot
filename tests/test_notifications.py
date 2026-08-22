@@ -111,6 +111,25 @@ async def test_morning_notification_sent_when_due_words_exist(notif_db):
     assert "1️⃣" in kwargs["text"]
 
 
+async def test_morning_notification_includes_quiz_button(notif_db):
+    """AI-new-words stage section 23: every review-reminder broadcast
+    (morning/afternoon/evening, whichever has due words) carries a
+    🧠 Викторина button that launches a quiz over exactly this batch."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    markup = bot.send_message.await_args.kwargs["reply_markup"]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("🧠" in label for label in labels)
+
+
 async def test_morning_notification_shows_cached_pronunciation_per_word(notif_db):
     """Global pronunciation rule section 48: each word line gets its own
     cached pronunciation - never a live AI call from the scheduler's hot

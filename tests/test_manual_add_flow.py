@@ -443,3 +443,17 @@ async def test_my_words_menu_no_longer_offers_new_or_paused_as_top_level_filters
     callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
     assert "words:filter:new" not in callbacks
     assert "words:filter:paused" not in callbacks
+
+
+async def test_my_words_menu_buttons_have_no_numbering_prefix(handler_db):
+    """AI-new-words stage section 18: plain button labels ("Все",
+    "Повторение", ...) - no 1️⃣-5️⃣ emoji-digit prefix. In-list word
+    numbering elsewhere is untouched by this."""
+    from handlers import words as words_handler
+
+    update = _message("dummy")
+    await words_handler.show_words_menu(update, SimpleNamespace(user_data={}))
+    kwargs = update.message.reply_text.call_args[1]
+    labels = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert labels == ["📚 Все", "🔄 Повторение", "✅ Выученные слова", "🔎 Найти моё слово", "➕ Добавить слово для изучения"]
+    assert not any(label[0].isdigit() or "️⃣" in label for label in labels)

@@ -702,3 +702,35 @@ class WordGenerationLog(Base):
             f"WordGenerationLog(user_id={self.user_id}, language_code={self.language_code!r}, "
             f"requested={self.requested_amount}, generated={self.generated_amount})"
         )
+
+
+class RejectedWord(Base):
+    """"❌ Я уже знаю это слово" on a freshly AI-generated candidate (AI-
+    new-words stage sections 6-7): the user is saying "I already know
+    this, don't add it to my active learning" - NOT "mark it learned"
+    (they never actually studied it through Safabot, so it doesn't belong
+    in "Выученные слова" either). No UserWord row is created for a
+    rejection at all - this table exists purely so
+    services.word_generation_service can tell the AI "don't suggest this
+    one again" on the next candidate batch, the same way it already
+    excludes words the user is actively learning or has mastered.
+
+    normalized_word (not the raw display form) is the match key, mirroring
+    Word.normalized_word, so "Go" and "go" are recognized as the same
+    rejection regardless of how a later AI response capitalizes it.
+    """
+
+    __tablename__ = "rejected_words"
+    __table_args__ = (UniqueConstraint("user_id", "language_code", "normalized_word", name="uq_rejected_word"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    word: Mapped[str] = mapped_column(String(128), nullable=False)
+    normalized_word: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"RejectedWord(user_id={self.user_id}, language_code={self.language_code!r}, word={self.word!r})"

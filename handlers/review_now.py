@@ -48,7 +48,7 @@ from keyboards.review_now import (
     mode_picker_keyboard,
     review_pool_keyboard,
 )
-from services import learning_service, quiz_service, review_now_service
+from services import learning_service, quiz_service, review_now_service, user_word_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.time import local_today, utc_now
 
@@ -209,6 +209,29 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
             user_word = await user_words_repo.get_by_id(session, item["user_word_id"])
             if user_word is not None:
                 await learning_service.record_on_demand_answer(session, user_word, correct=(data == "revnow:know"))
+            state["position"] += 1
+            if state["position"] >= len(state["items"]):
+                await _finish_flashcards(edit, context, state)
+            else:
+                await _render_flashcard(edit, state)
+
+        elif data == "revnow:mastered":
+            # AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже
+            # выучено - skips the normal repetition ladder entirely
+            # (unlike revnow:know/dontknow above), removing the word from
+            # active repetition and moving it straight to "Выученные
+            # слова" - the word stays in the DB, only its status changes
+            # (never a delete - spec section 17).
+            state = context.user_data.get("revnow")
+            if state is None:
+                await query.answer()
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            item = state["items"][state["position"]]
+            user_word = await user_words_repo.get_by_id(session, item["user_word_id"])
+            if user_word is not None:
+                await user_word_service.mark_mastered(session, user_word)
+            await query.answer(t("revnow.mastered_confirmed", get_current_language()), show_alert=True)
             state["position"] += 1
             if state["position"] >= len(state["items"]):
                 await _finish_flashcards(edit, context, state)

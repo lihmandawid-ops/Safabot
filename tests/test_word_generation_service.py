@@ -251,10 +251,29 @@ async def test_generate_new_words_passes_selected_topics_and_industry_to_ai(sess
     assert fake.last_industry == "healthcare"
 
 
-async def test_generate_new_words_omits_industry_when_goal_is_not_work(session, monkeypatch):
+async def test_generate_new_words_includes_industry_even_when_goal_is_not_work(session, monkeypatch):
+    """AI-new-words stage section 1: a stated profession is useful context
+    regardless of the learner's stated goal - no longer gated behind
+    learning_goal == "work" (that used to hide a legitimately set
+    profession from the AI just because the goal field said something
+    else)."""
     user, ul = await _create_user(session, telegram_id=5012)
     ul.learning_goal = "travel"
-    ul.work_industry = "healthcare"  # leftover from a previous goal - must not leak
+    ul.work_industry = "healthcare"
+    await session.commit()
+
+    fake = _FakeAIService([_generated("word1")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=1)
+
+    assert fake.last_industry == "healthcare"
+
+
+async def test_generate_new_words_omits_industry_when_unset(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5013)
+    ul.learning_goal = "travel"
+    ul.work_industry = None
     await session.commit()
 
     fake = _FakeAIService([_generated("word1")])
@@ -583,3 +602,98 @@ async def test_generate_words_ai_first_effective_difficulty_uses_estimated_level
     await word_generation_service.generate_words_ai_first(session, user=user, user_language=ul, amount=1)
 
     assert fake.last_level == "a1"
+
+
+# --- generate_candidates() / add_candidate_to_learning() / reject_word()
+# (AI-new-words stage sections 1-7, 32-33): the interactive per-word
+# candidate flow behind 🆕 Новые слова / 🎯 Новые слова по теме - unlike
+# generate_words_ai_first, nothing is persisted until the caller explicitly
+# accepts a candidate. ---
+
+async def test_generate_candidates_does_not_persist_anything(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5030)
+    fake = _FakeAIService([_generated("candword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+
+    assert [c.word for c in candidates] == ["candword"]
+    words = await user_words_repo.get_user_words(session, user_id=user.id, language_code="en")
+    assert words == []
+
+
+async def test_generate_candidates_amount_zero_is_a_noop(session):
+    user, ul = await _create_user(session, telegram_id=5031)
+    assert await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=0) == []
+
+
+async def test_generate_candidates_excludes_known_and_rejected_words(session, monkeypatch):
+    from database.repositories import rejected_words as rejected_words_repo
+
+    user, ul = await _create_user(session, telegram_id=5032)
+    known = await _seed_local_words(session, 1, prefix="known")
+    await user_words_repo.add_word(session, user_id=user.id, word_id=known[0].id, language_code="en")
+    await rejected_words_repo.add(session, user_id=user.id, language_code="en", word="rejectedword")
+    await session.commit()
+
+    fake = _FakeAIService([_generated("newword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+
+    assert set(fake.last_known_words) == {"known0", "rejectedword"}
+
+
+async def test_generate_candidates_topics_override_scopes_a_single_call(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5033)
+    fake = _FakeAIService([_generated("topicword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1, topics=["travel"])
+
+    assert fake.last_category == "travel"
+
+
+async def test_add_candidate_to_learning_persists_as_new_status(session, monkeypatch):
+    user, ul = await _create_user(session, telegram_id=5034)
+    fake = _FakeAIService([_generated("candword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+    added = await word_generation_service.add_candidate_to_learning(session, entry=candidates[0], user=user, user_language=ul)
+
+    assert added is not None
+    assert added.status == WordStatus.NEW
+    words = await user_words_repo.get_user_words(session, user_id=user.id, language_code="en")
+    assert [uw.word.word for uw in words] == ["candword"]
+
+
+async def test_reject_word_creates_no_userword_and_is_idempotent(session):
+    from database.repositories import rejected_words as rejected_words_repo
+
+    user, ul = await _create_user(session, telegram_id=5035)
+
+    await word_generation_service.reject_word(session, user=user, user_language=ul, word="skipword")
+    await word_generation_service.reject_word(session, user=user, user_language=ul, word="SkipWord")  # same word, different case
+    await session.commit()
+
+    rejected = await rejected_words_repo.list_words(session, user_id=user.id, language_code="en")
+    assert rejected == ["skipword"]  # idempotent, not duplicated
+    words = await user_words_repo.get_user_words(session, user_id=user.id, language_code="en")
+    assert words == []
+
+
+async def test_generate_candidates_excludes_a_previously_rejected_word_from_a_later_batch(session, monkeypatch):
+    """End-to-end proof of spec section 7: reject once, never suggested
+    again."""
+    user, ul = await _create_user(session, telegram_id=5036)
+
+    await word_generation_service.reject_word(session, user=user, user_language=ul, word="alreadyrejected")
+    await session.commit()
+
+    fake = _FakeAIService([_generated("freshword")])
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+
+    assert "alreadyrejected" in fake.last_known_words

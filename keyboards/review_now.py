@@ -31,12 +31,18 @@ def mode_picker_keyboard(*, count: int, mastered: bool) -> InlineKeyboardMarkup:
 
 
 def flashcard_keyboard() -> InlineKeyboardMarkup:
+    """AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже выучено
+    skips straight to MASTERED (services.user_word_service.mark_mastered -
+    the exact same bypass 🤔 Я это уже знаю already uses for a brand-new
+    word), independent of the ✅/❌ Знаю/Не знаю grading row, which still
+    always goes through the normal spaced-repetition ladder."""
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(t("revnow.button.know", get_current_language()), callback_data="revnow:know"),
                 InlineKeyboardButton(t("revnow.button.dontknow", get_current_language()), callback_data="revnow:dontknow"),
-            ]
+            ],
+            [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data="revnow:mastered")],
         ]
     )
 
@@ -64,11 +70,15 @@ def notification_keyboard(slot: str) -> InlineKeyboardMarkup:
 
 
 def completion_keyboard() -> InlineKeyboardMarkup:
+    """AI-new-words stage sections 14-15, 26: after a review session, never
+    offer a way back into 📚 Учить слова from here - only ▶️ Начать
+    следующее повторение (reuses the existing count-free revnow:menu pool-
+    choice screen - "which pool" is not the "how many words" question the
+    spec forbids asking), 🏆 Викторина, and the main menu."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("revnow.button.again", get_current_language()), callback_data="revnow:menu")],
             [InlineKeyboardButton(t("quiz.button.start", get_current_language()), callback_data="quiz:start")],
-            [InlineKeyboardButton(t("revnow.button.new_words", get_current_language()), callback_data="learn:intro")],
             [InlineKeyboardButton(t("quiz.button.main_menu", get_current_language()), callback_data="revnow:mainmenu")],
         ]
     )

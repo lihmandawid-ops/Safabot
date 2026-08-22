@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User, UserLanguage, UserWord, WordSource
+from database.repositories import rejected_words as rejected_words_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import word_generation_logs as generation_logs_repo
 from database.repositories import words as words_repo
@@ -30,6 +31,7 @@ from services import ai_models, user_word_service, word_service
 from services.ai_errors import AIError
 from services.ai_service import get_ai_service
 from utils.logging import get_logger
+from utils.text import normalize_word
 from utils.time import local_day_bounds, utc_now
 
 logger = get_logger(__name__)
@@ -204,6 +206,116 @@ async def generate_words_ai_first(
     return [await user_words_repo.get_by_id(session, uw.id) for uw in created]
 
 
+async def generate_candidates(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_language: UserLanguage,
+    amount: int,
+    topics: list[str] | None = None,
+) -> list[ai_models.GeneratedWord]:
+    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
+    1-7, 32-33): unlike generate_words_ai_first (which persists every AI
+    result as a UserWord immediately), this hands back raw, NOT-YET-
+    PERSISTED candidates for handlers/learning.py to walk through one at a
+    time - a word only becomes a real UserWord row once the learner taps
+    ➕ Добавить в обучение (services.user_word_service.add_word_to_learning,
+    called from the handler), and a ❌ Я уже знаю это слово tap never
+    touches UserWord at all (see reject_word below). Still fully AI-first,
+    still bounded-retry (MAX_GENERATION_ATTEMPTS), still logged to
+    WordGenerationLog - only the persistence timing differs.
+
+    Excludes both what the learner already owns (known_words, same 150-
+    word hint generate_new_words/generate_words_ai_first already use) AND
+    everything they've previously rejected (rejected_words) - spec section
+    7's "AI не должен повторно предлагать отклонённые слова". Both lists
+    are merged into the single `known_words` prompt field the AI already
+    understands as "never suggest these again", so no AIService interface
+    change is needed for the exclusion itself.
+    """
+    if amount <= 0:
+        return []
+
+    from config import get_settings
+    from services.level_progress_service import effective_difficulty
+
+    settings = get_settings()
+    known_words = await _recent_known_words(session, user=user, user_language=user_language)
+    rejected = await rejected_words_repo.list_words(session, user_id=user.id, language_code=user_language.language_code)
+    excluded = list(known_words)
+    seen_normalized = {normalize_word(w) for w in excluded}
+    for word in rejected:
+        key = normalize_word(word)
+        if key not in seen_normalized:
+            seen_normalized.add(key)
+            excluded.append(word)
+
+    category = _topic_hint(user_language, override=topics)
+    industry = _industry_hint(user_language)
+    goal = _goal_hint(user_language)
+
+    candidates: list[ai_models.GeneratedWord] = []
+    attempts = 0
+    while len(candidates) < amount and attempts < settings.max_generation_attempts:
+        attempts += 1
+        shortfall = amount - len(candidates)
+        entries = await _generate_via_ai(
+            language_code=user_language.language_code,
+            translation_language=user_language.translation_language,
+            level=effective_difficulty(user_language),
+            amount=shortfall,
+            category=category,
+            industry=industry,
+            goal=goal,
+            known_words=excluded,
+            user_id=user.id,
+        )
+        if not entries:
+            break
+        for entry in entries:
+            if len(candidates) >= amount:
+                break
+            key = normalize_word(entry.word)
+            if key in seen_normalized:
+                continue
+            seen_normalized.add(key)
+            excluded.append(entry.word)
+            candidates.append(entry)
+
+    await generation_logs_repo.log(
+        session,
+        user_id=user.id,
+        language_code=user_language.language_code,
+        requested_amount=amount,
+        generated_amount=len(candidates),
+        provider=(settings.ai_provider if attempts > 0 else "local"),
+        trigger="explicit_new_words" if topics is None else "explicit_new_words_topic",
+    )
+    return candidates
+
+
+async def add_candidate_to_learning(
+    session: AsyncSession, *, entry: ai_models.GeneratedWord, user: User, user_language: UserLanguage
+) -> UserWord | None:
+    """➕ Добавить в обучение on a candidate from generate_candidates - the
+    ONLY point a candidate actually becomes a UserWord row. Reuses the
+    exact same persist-then-add path _persist_and_add already validated
+    (get_or_create_word + add_word_to_learning, status NEW, source
+    GENERATED) so an added candidate is indistinguishable from any other
+    generated word once it's in the learner's list."""
+    return await _persist_and_add(session, entry=entry, user=user, user_language=user_language)
+
+
+async def reject_word(session: AsyncSession, *, user: User, user_language: UserLanguage, word: str) -> None:
+    """❌ Я уже знаю это слово (AI-new-words stage sections 6-7): records
+    the rejection so future generate_candidates calls exclude it, WITHOUT
+    creating any UserWord row - the learner never studied this word
+    through Safabot, so it must not appear in "Выученные слова" (only a
+    real learning->mastered progression, or the existing 🤔 Я это уже
+    знаю inside an active session, does that)."""
+    await rejected_words_repo.add(session, user_id=user.id, language_code=user_language.language_code, word=word)
+
+
 def _topic_hint(user_language: UserLanguage, *, override: list[str] | None = None) -> str | None:
     """🎯 Темы обучения (settings-improvements stage section 22): joined
     into a single free-text "Category" line for the AI prompt - it
@@ -226,12 +338,12 @@ def _goal_hint(user_language: UserLanguage) -> str | None:
 
 
 def _industry_hint(user_language: UserLanguage) -> str | None:
-    """Only meaningful alongside learning_goal == "work" (section 20) -
-    an industry set under any other goal (e.g. left over from a changed
-    goal) must never leak into the prompt."""
-    if user_language.learning_goal == "work" and user_language.work_industry:
-        return user_language.work_industry
-    return None
+    """AI-new-words stage section 1: a stated profession is relevant
+    context regardless of the learner's stated goal (someone whose goal is
+    "travel" but who happens to be a car mechanic still benefits from
+    work_industry biasing the AI's word choice on request) - no longer
+    gated behind learning_goal == "work"."""
+    return user_language.work_industry or None
 
 
 async def _top_up_via_ai(

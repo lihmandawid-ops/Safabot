@@ -24,6 +24,7 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from keyboards.learning import (
     after_session_keyboard,
+    candidate_keyboard,
     continue_keyboard,
     extra_amount_keyboard,
     known_keyboard,
@@ -38,7 +39,7 @@ from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
 from keyboards.settings import topic_picker_keyboard
 from keyboards.words import filter_keyboard
-from services import learning_service, pronunciation_service, word_generation_service, word_service
+from services import learning_service, pronunciation_service, user_word_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
@@ -166,26 +167,116 @@ async def _compute_intro(session, user, current, *, include_new_words: bool) -> 
     return t("learning.ready_review", get_current_language(), count=total), start_review_keyboard()
 
 
-async def _generate_and_report(
-    edit, session, *, user, current, topics: list[str] | None = None, trigger: str
+def _render_candidate_card(entry, *, language_code: str, translation_language: str) -> str:
+    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
+    4, 9): shown for a candidate BEFORE it's persisted, so this reads
+    straight off the AI's ai_models.GeneratedWord rather than a WordCard
+    built from a saved Word row (which _render_back/render_word_card_text
+    need, since those assume the word already exists in the DB)."""
+    lang = LANGUAGE_BY_CODE.get(language_code)
+    lines = [f"{lang.flag if lang else ''} {entry.word}".strip()]
+
+    pronunciation = entry.pronunciation or entry.phonetic
+    if pronunciation:
+        lines.append("")
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation))
+
+    if entry.translations:
+        lines.append("")
+        lines.append(", ".join(tr.translation for tr in entry.translations))
+
+    if entry.definition:
+        lines.append("")
+        lines.append(t("card.definition_header", get_current_language()))
+        lines.append(entry.definition)
+
+    if entry.examples:
+        lines.append("")
+        lines.append(t("card.example_label", get_current_language()))
+        example = entry.examples[0]
+        lines.append(example.text)
+        if example.translation:
+            lines.append(example.translation)
+
+    return "\n".join(lines)
+
+
+async def _show_current_candidate(edit, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = context.user_data.get("new_words_candidates")
+    if state is None:
+        await edit(t("learning.session_gone", get_current_language()))
+        return
+    entries = state["entries"]
+    position = state["position"]
+    if position >= len(entries):
+        added = state["added"]
+        context.user_data.pop("new_words_candidates", None)
+        await edit(t("learning.candidates_done", get_current_language(), count=added), reply_markup=after_session_keyboard())
+        return
+    text = _render_candidate_card(
+        entries[position], language_code=state["language_code"], translation_language=state["translation_language"]
+    )
+    await edit(text, reply_markup=candidate_keyboard())
+
+
+async def _start_candidate_flow(
+    edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, topics: list[str] | None
 ) -> None:
-    """🆕 Новые слова / 🎯 Новые слова по теме (level-and-difficulty stage
-    sections 40-62; instant-generation UX stage sections 14-20): always
-    AI-first (word_generation_service.generate_words_ai_first, never the
-    local-pool-first generate_new_words). Generated words are only ever
-    added with status NEW, the same "add to the queue" outcome any other
-    new word gets - never marked MASTERED/learned automatically, so the
-    existing reveal -> rate confirmation flow is what actually teaches
-    them (spec section 20)."""
-    result = await word_generation_service.generate_words_ai_first(
-        session, user=user, user_language=current, amount=current.daily_new_words, topics=topics, trigger=trigger,
+    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
+    1-13): AI generates a batch of candidates (word_generation_service.
+    generate_candidates - context-aware, excludes owned + rejected words,
+    never persisted yet) and the user is walked through them one at a
+    time via _show_current_candidate/candidate_keyboard - a word only
+    becomes a real UserWord on ➕ Добавить в обучение."""
+    entries = await word_generation_service.generate_candidates(
+        session, user=user, user_language=current, amount=current.daily_new_words, topics=topics,
     )
-    text = (
-        t("learning.generation_failed", get_current_language())
-        if not result
-        else t("learning.extra_added", get_current_language(), count=len(result))
-    )
-    await edit(text, reply_markup=after_session_keyboard())
+    if not entries:
+        await edit(t("learning.generation_failed", get_current_language()), reply_markup=after_session_keyboard())
+        return
+    context.user_data["new_words_candidates"] = {
+        "entries": entries,
+        "position": 0,
+        "added": 0,
+        "language_code": current.language_code,
+        "translation_language": current.translation_language,
+    }
+    await _show_current_candidate(edit, context)
+
+
+async def _handle_candidate_decision(
+    query, edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, accept: bool
+) -> None:
+    state = context.user_data.get("new_words_candidates")
+    if state is None or state["position"] >= len(state["entries"]):
+        await query.answer()
+        await edit(t("learning.session_gone", get_current_language()))
+        return
+
+    entry = state["entries"][state["position"]]
+    if accept:
+        # §5: ➕ Добавить в обучение - persists as a real UserWord, status
+        # NEW, joins the normal repetition system exactly like any other
+        # generated word (services.user_word_service.add_word_to_learning).
+        added = await word_generation_service.add_candidate_to_learning(
+            session, entry=entry, user=user, user_language=current
+        )
+        if added is not None:
+            state["added"] += 1
+            await query.answer(t("learning.candidate_added", get_current_language()), show_alert=True)
+        else:
+            # Already owned under some other status (rare AI-echo edge
+            # case) - nothing to add, but not an error either.
+            await query.answer()
+    else:
+        # §6-7: ❌ Я уже знаю это слово - excluded from future candidate
+        # batches, but NEVER added as a UserWord (never "learned" through
+        # Safabot - see word_generation_service.reject_word's docstring).
+        await word_generation_service.reject_word(session, user=user, user_language=current, word=entry.word)
+        await query.answer()
+
+    state["position"] += 1
+    await _show_current_candidate(edit, context)
 
 
 async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, include_new_words: bool) -> None:
@@ -255,7 +346,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "learn:newwords":
             await query.answer()
-            await _generate_and_report(edit, session, user=user, current=current, trigger="explicit_new_words")
+            await _start_candidate_flow(edit, session, context, user=user, current=current, topics=None)
 
         elif data == "learn:topics":
             await query.answer()
@@ -277,9 +368,13 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             code = data.removeprefix("learn:topicgen:")
             await query.answer()
             await user_languages_repo.set_topics(session, current, topics=[code])
-            await _generate_and_report(
-                edit, session, user=user, current=current, topics=[code], trigger="explicit_new_words_topic",
-            )
+            await _start_candidate_flow(edit, session, context, user=user, current=current, topics=[code])
+
+        elif data == "learn:candidate:add":
+            await _handle_candidate_decision(query, edit, session, context, user=user, current=current, accept=True)
+
+        elif data == "learn:candidate:reject":
+            await _handle_candidate_decision(query, edit, session, context, user=user, current=current, accept=False)
 
         elif data == "learn:extra":
             await query.answer()
@@ -345,6 +440,39 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 return
             item = await learning_service.mark_known_and_replace(
                 session, user=user, user_language=current, learning_session=learning_session, user_word_id=user_word_id
+            )
+            if item is None:
+                await edit(t("learning.session_gone", get_current_language()))
+                return
+            finished = await learning_service.finish_session_if_complete(session, user, learning_session)
+            if finished:
+                stats = sessions_repo.session_stats(learning_session)
+                await edit(
+                    t(
+                        "learning.completion", get_current_language(),
+                        total=stats["total_reviewed"], new_words=stats["new_words"],
+                        correct=stats["correct"], wrong=stats["wrong"], streak=user.current_streak,
+                    ),
+                    reply_markup=after_session_keyboard(),
+                )
+            else:
+                await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
+
+        elif data.startswith("learn:mastered:"):
+            # AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже
+            # выучено - answer first, same reasoning as learn:know: above
+            # (mark_mastered can be a slow-ish DB write, never risk a
+            # too-late callback-query answer).
+            user_word_id = int(data.removeprefix("learn:mastered:"))
+            await query.answer(t("revnow.mastered_confirmed", get_current_language()), show_alert=True)
+            learning_session = await sessions_repo.get_active_session(
+                session, user_id=user.id, language_code=current.language_code
+            )
+            if learning_session is None:
+                await edit(t("learning.session_gone", get_current_language()))
+                return
+            item = await learning_service.mark_word_mastered_in_session(
+                session, learning_session=learning_session, user_word_id=user_word_id
             )
             if item is None:
                 await edit(t("learning.session_gone", get_current_language()))
@@ -446,7 +574,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await update.message.reply_text(text_, reply_markup=reply_markup)
 
         await user_languages_repo.set_topics(session, current, topics=[topic])
-        await _generate_and_report(edit, session, user=user, current=current, topics=[topic], trigger="explicit_new_words_topic")
+        await _start_candidate_flow(edit, session, context, user=user, current=current, topics=[topic])
 
 
 learning_callback_handler = CallbackQueryHandler(handle_learning_callback, pattern="^(learn|review):")

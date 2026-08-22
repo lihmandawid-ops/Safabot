@@ -162,6 +162,45 @@ async def test_know_button_rejects_id_not_in_session(handler_db):
     assert "больше не активна" in text
 
 
+async def test_mastered_button_skips_ladder_and_moves_to_learned(handler_db):
+    """AI-new-words stage sections 16-17, 35, 38: works on a due REVIEW
+    item too (not just a brand-new word like learn:know:), skips the
+    normal repetition ladder entirely, and never deletes the word - only
+    its status changes."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from handlers import learning as learning_handler
+
+    learning_session = await _build_main_session()
+    uw_id = learning_session.items[0].user_word_id
+
+    context = SimpleNamespace(user_data={})
+    q = _query(f"learn:mastered:{uw_id}")
+    await learning_handler.handle_learning_callback(q, context)
+
+    q.callback_query.answer.assert_awaited_once()
+    assert "выученные" in q.callback_query.answer.call_args[0][0]
+    q.callback_query.edit_message_text.assert_awaited_once()  # shows next word or completion
+
+    async with session_scope() as s:
+        uw = await user_words_repo.get_by_id(s, uw_id)
+    assert uw.status == WordStatus.MASTERED
+    assert uw.status != WordStatus.DELETED  # §17: never deleted, only a status change
+
+
+async def test_mastered_button_rejects_id_not_in_session(handler_db):
+    from handlers import learning as learning_handler
+
+    await _build_main_session()
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:mastered:999999")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "больше не активна" in text
+
+
 async def test_mywords_button_switches_mode_and_shows_filters(handler_db):
     from handlers import learning as learning_handler
     from handlers.words import MODE as WORDS_MODE
@@ -313,9 +352,12 @@ async def test_review_word_reveal_still_shows_the_4_button_rating_scale(handler_
 
     markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
     buttons = [b for row in markup.inline_keyboard for b in row]
-    assert len(buttons) == 4
+    # AI-new-words stage §16-17: the 4-button grading scale plus a 5th,
+    # independent ✅ Слово уже выучено shortcut.
+    assert len(buttons) == 5
     assert {b.callback_data for b in buttons} == {
         f"review:{uw_id}:again", f"review:{uw_id}:hard", f"review:{uw_id}:good", f"review:{uw_id}:easy",
+        f"learn:mastered:{uw_id}",
     }
 
 
@@ -367,7 +409,11 @@ async def test_newwords_without_ai_shows_the_exact_failure_message(handler_db):
     assert text == "Сейчас не удалось подобрать новые слова. Попробуйте ещё раз."
 
 
-async def test_newwords_with_working_ai_adds_words_never_touching_local_pool(handler_db, monkeypatch):
+async def test_newwords_with_working_ai_shows_a_candidate_card_not_yet_added(handler_db, monkeypatch):
+    """AI-new-words stage sections 1-5: tapping 🆕 Новые слова must show
+    the candidate as a full card (word/pronunciation/translation) with
+    ➕/❌ buttons - the word must NOT be added to the learner's list until
+    they explicitly tap ➕ Добавить в обучение."""
     from database.database import session_scope
     from database.repositories import user_words as user_words_repo
     from database.repositories import users as users_repo
@@ -391,12 +437,88 @@ async def test_newwords_with_working_ai_adds_words_never_touching_local_pool(han
     await learning_handler.handle_learning_callback(q, context)
 
     text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "1" in text
+    assert "aiword" in text
+    assert "ии-слово" in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["learn:candidate:add", "learn:candidate:reject"]
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
         words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
-    assert any(uw.word.word == "aiword" for uw in words)
+    assert not any(uw.word.word == "aiword" for uw in words)
+
+
+async def test_candidate_add_persists_word_and_advances(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.models import WordStatus as _WordStatus
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+
+    q2 = _query("learn:candidate:add")
+    await learning_handler.handle_learning_callback(q2, context)
+
+    q2.callback_query.answer.assert_awaited_once()
+    assert "✅" in q2.callback_query.answer.call_args[0][0]
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    added = [uw for uw in words if uw.word.word == "aiword"]
+    assert len(added) == 1
+    assert added[0].status == _WordStatus.NEW
+
+    # Exactly one candidate was requested (daily_new_words=2 in this
+    # fixture would normally ask for 2, but only one entry was returned) -
+    # after handling it, the flow must end, not crash on an empty list.
+    text = q2.callback_query.edit_message_text.call_args[0][0]
+    assert "Добавлено: 1" in text
+    assert "new_words_candidates" not in context.user_data
+
+
+async def test_candidate_reject_excludes_from_future_batches_without_adding(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import rejected_words as rejected_words_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+
+    q2 = _query("learn:candidate:reject")
+    await learning_handler.handle_learning_callback(q2, context)
+
+    q2.callback_query.answer.assert_awaited_once_with()  # no alert text for a reject
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+        assert not any(uw.word.word == "aiword" for uw in words)
+        rejected = await rejected_words_repo.list_words(s, user_id=user.id, language_code="en")
+    assert "aiword" in rejected
 
 
 async def test_topics_button_shows_topic_picker(handler_db):
@@ -445,7 +567,7 @@ async def test_tapping_a_preset_topic_immediately_generates_words(handler_db, mo
 
     assert captured["category"] == code
     text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "1" in text
+    assert "topicword" in text
     # exactly one edit_message_text call - no intermediate confirmation screen
     assert q.callback_query.edit_message_text.call_count == 1
 
@@ -515,7 +637,7 @@ async def test_custom_topic_free_text_immediately_generates_words(handler_db, mo
     assert captured["category"] == "Слова для работы в автомастерской"
     message.reply_text.assert_awaited_once()
     text = message.reply_text.call_args[0][0]
-    assert "1" in text
+    assert "autoword" in text
     assert "mode" not in context.user_data
     assert "learning_submode" not in context.user_data
 

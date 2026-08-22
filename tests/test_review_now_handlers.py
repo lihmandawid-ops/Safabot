@@ -133,13 +133,52 @@ async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetitio
     await handle_review_now_callback(q2, context)
 
     final_text = q2.callback_query.edit_message_text.call_args[0][0]
-    assert "Повторение завершено" in final_text
+    assert "Ещё один маленький шаг" in final_text  # AI-new-words stage §26: celebratory close, not "завершено"
     assert "revnow" not in context.user_data
+
+    # §14: no path back into 📚 Учить слова from the completion screen -
+    # only "start next review", quiz, and main menu.
+    markup = q2.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:menu", "quiz:start", "revnow:mainmenu"]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("следующее повторение" in label for label in labels)
 
     async with session_scope() as s:
         uw = await user_words_repo.get_by_id(s, uw_id)
     assert uw.repetitions == old_repetitions + 1
     assert uw.wrong_answers >= 1
+
+
+async def test_mastered_button_during_flashcard_review_skips_ladder(handler_db):
+    """AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже выучено
+    during 🔄 Повторить jumps straight to MASTERED - never the normal
+    repetition ladder record_on_demand_answer uses - and the word is never
+    deleted, only its status changes."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from handlers.review_now import handle_review_now_callback
+
+    context = SimpleNamespace(user_data={})
+    q = _query("revnow:mode:flashcard:4:0")
+    await handle_review_now_callback(q, context)
+
+    state = context.user_data["revnow"]
+    uw_id = state["items"][0]["user_word_id"]
+
+    q2 = _query("revnow:mastered")
+    await handle_review_now_callback(q2, context)
+
+    q2.callback_query.answer.assert_awaited_once()
+    assert "выученные" in q2.callback_query.answer.call_args[0][0]
+
+    async with session_scope() as s:
+        uw = await user_words_repo.get_by_id(s, uw_id)
+    assert uw.status == WordStatus.MASTERED
+
+    final_text = q2.callback_query.edit_message_text.call_args[0][0]
+    assert "Ещё один маленький шаг" in final_text
+    assert "revnow" not in context.user_data
 
 
 async def test_quiz_mode_hands_off_to_existing_quiz_state_machine(handler_db):

@@ -366,6 +366,28 @@ async def mark_known_and_replace(
     return item
 
 
+async def mark_word_mastered_in_session(
+    session: AsyncSession, *, learning_session: LearningSession, user_word_id: int,
+) -> LearningSessionItem | None:
+    """✅ Слово уже выучено (AI-new-words stage sections 16-17, 35, 38):
+    works for the session's current item whether it's a brand-new word or
+    a due REVIEW - unlike mark_known_and_replace above, it isn't restricted
+    to is_new_word, and it never generates a replacement word: the learner
+    is asking to REMOVE this word from active repetition, not to keep
+    today's total the same. Skips the normal repetition ladder entirely
+    (services.user_word_service.mark_mastered), then completes this
+    session item with a "known" rating so session_stats doesn't count it
+    as wrong. Returns None if `user_word_id` isn't the session's current
+    item (spec section 36 - never trust the id alone)."""
+    item = sessions_repo.next_incomplete_item(learning_session)
+    if item is None or item.user_word_id != user_word_id:
+        return None
+
+    await user_word_service.mark_mastered(session, item.user_word)
+    await sessions_repo.complete_item(session, item, rating="known")
+    return item
+
+
 async def finish_session_if_complete(
     session: AsyncSession, user: User, learning_session: LearningSession, *, now: datetime | None = None
 ) -> bool:
