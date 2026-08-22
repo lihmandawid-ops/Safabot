@@ -119,6 +119,17 @@ class AIService(ABC):
         a fixed sentence. `exclude_phrases` backs 🔄 Другая фраза (never
         the exact same text twice in a row)."""
 
+    @abstractmethod
+    async def translate_phrases(
+        self, phrases: list[str], *, language_code: str, translation_language: str, user_id: int,
+    ) -> list[str]:
+        """🔥 Популярные фразы' translation cache (native-speaker
+        phrasebook stage bugfix): translates the WHOLE given batch of
+        target-language phrases into translation_language in ONE call,
+        same order - services/phrase_service.py calls this at most once
+        per (language_code, translation_language) pair, ever, caching the
+        result so no later view or page ever needs a live call again."""
+
 
 class NotConfiguredAIService(AIService):
     """Used whenever AI isn't usable: AI_ENABLED=false, or no AI_API_KEY
@@ -149,6 +160,9 @@ class NotConfiguredAIService(AIService):
         raise AIConfigurationError()
 
     async def generate_native_phrase(self, *, language_code, translation_language, level, situation, industry=None, topics=None, exclude_phrases=None, user_id):
+        raise AIConfigurationError()
+
+    async def translate_phrases(self, phrases, *, language_code, translation_language, user_id):
         raise AIConfigurationError()
 
 
@@ -252,12 +266,18 @@ _ANALYZE_TEXT_SYSTEM = (
     '"difficulty": str|null, "useful_phrases": [{"phrase": str, "pronunciation": str|null}]}. '
     "key_words should list the words most worth learning from the text, in the order they appear. "
     'The top-level "pronunciation" is a phonetic transcription of the WHOLE original_text, and each '
-    'key word\'s and each useful_phrase\'s own "pronunciation" is a transcription of just that word or '
-    "phrase - all using the translation language's own spelling conventions (not IPA, not a "
-    "transcription system for a third language) so a reader of the translation language can sound "
-    "it out using that language's own spelling. Always attempt a pronunciation for the whole text, "
-    "for every key word, and for every useful phrase, rather than leaving it null, unless the "
-    "script makes this genuinely impossible - these fields are shown to the learner directly."
+    'key word\'s and each useful_phrase\'s own "pronunciation" is a transcription of just that word '
+    "or phrase - ALWAYS of the TARGET-language text itself (original_text/the key word/the useful "
+    "phrase), NEVER of its translation. Every \"pronunciation\" value MUST be written using LATIN "
+    "LETTERS ONLY - a simple, readable Latin transliteration, never Cyrillic, Hebrew, or any other "
+    "non-Latin script, and never IPA - regardless of what script the translation language itself "
+    "uses, so it stays readable no matter which language the learner's interface is in. A "
+    '"pronunciation" value must never be identical to, or a rephrasing of, the translation text - '
+    "it represents SOUND, not meaning; if you find yourself writing something that reads like a "
+    "translation rather than a sound-it-out guide, that is wrong. Always attempt a pronunciation "
+    "for the whole text, for every key word, and for every useful phrase, rather than leaving it "
+    "null, unless the script makes this genuinely impossible - these fields are shown to the "
+    "learner directly."
 )
 
 _EXTRACT_WORDS_SYSTEM = (
@@ -333,6 +353,16 @@ _NATIVE_PHRASE_SYSTEM = (
     'meaning. "alternative" is one other natural phrasing for the same situation, or null if '
     "there isn't a meaningfully different common one."
 )
+
+_TRANSLATE_PHRASES_SYSTEM = (
+    "You translate a numbered list of short target-language phrases for a language-learning "
+    'app. Respond with ONLY a JSON object: {"translations": [str, ...]}. The array MUST have '
+    "EXACTLY the same number of items, in the EXACT same order, as the numbered phrases given "
+    "below - one natural, idiomatic translation per phrase (not an overly literal word-for-word "
+    "translation). Never add, merge, split, skip, or reorder entries - every input phrase gets "
+    "exactly one output translation at the same position."
+)
+
 
 def _strip_markdown_fence(raw: str) -> str:
     """Some models occasionally wrap JSON-mode output in a ```json ... ```
@@ -422,6 +452,14 @@ def _parse_native_phrase_response(raw: str) -> ai_models.NativePhraseResult:
         return ai_models.NativePhraseResult.model_validate(payload)
     except ValidationError as exc:
         raise AIInvalidResponseError("AI response did not match the expected native-phrase schema") from exc
+
+
+def _parse_translate_phrases_response(raw: str) -> ai_models.PhraseTranslationsResult:
+    payload = _parse_json(raw)
+    try:
+        return ai_models.PhraseTranslationsResult.model_validate(payload)
+    except ValidationError as exc:
+        raise AIInvalidResponseError("AI response did not match the expected phrase-translations schema") from exc
 
 
 class LiveAIService(AIService):
@@ -530,6 +568,18 @@ class LiveAIService(AIService):
             return result
 
         return await self._complete("generate_native_phrase", user_id, _NATIVE_PHRASE_SYSTEM, user, _parse)
+
+    async def translate_phrases(self, phrases, *, language_code, translation_language, user_id):
+        numbered = "\n".join(f"{i + 1}. {phrase}" for i, phrase in enumerate(phrases))
+        user = (
+            f"Phrases are in language code (ISO 639-1): {language_code}\n"
+            f"Translate into language code: {translation_language}\n"
+            f"Phrases:\n{numbered}\n"
+        )
+        result = await self._complete(
+            "translate_phrases", user_id, _TRANSLATE_PHRASES_SYSTEM, user, _parse_translate_phrases_response
+        )
+        return result.translations
 
     async def _complete(self, operation: str, user_id: int, system: str, user: str, parse: Callable[[str], T]) -> T:
         """Runs one operation end-to-end (network call + parse/validate)

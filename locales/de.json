@@ -403,5 +403,7 @@
   "phrase_situation.doctor": "🏥 Arzt",
   "phrase_situation.bank": "🏦 Bank",
   "phrase_situation.study": "🎓 Studium",
-  "phrase_situation.customer_service": "🔧 Kundenservice"
+  "phrase_situation.customer_service": "🔧 Kundenservice",
+  "phrases.popular.next": "➡️ Weitere Sätze",
+  "phrases.popular.prev": "⬅️ Zurück"
 }

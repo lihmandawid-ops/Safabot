@@ -186,7 +186,7 @@ async def test_explain_word_returns_formatted_string():
 # --- 12. analyze_text ---
 
 async def test_analyze_text_returns_validated_result():
-    svc, _ = _service([GOOD_TEXT_ANALYSIS_JSON])
+    svc, provider = _service([GOOD_TEXT_ANALYSIS_JSON])
     result = await svc.analyze_text(
         "I go home.", language_code="en", translation_language="ru", interface_language="ru", user_id=1,
     )
@@ -196,6 +196,18 @@ async def test_analyze_text_returns_validated_result():
     assert result.key_words[0].pronunciation == "goh"
     assert result.useful_phrases[0].phrase == "go home"
     assert result.useful_phrases[0].pronunciation == "goh hohm"
+    # Real-incident regression (🔥 Популярные фразы pronunciation bug): the
+    # prompt used to tell the AI to write pronunciation "using the
+    # translation language's own spelling conventions", which for a
+    # Cyrillic/Hebrew/etc. translation_language meant non-Latin script -
+    # and in practice sometimes degenerated into a near-copy of the
+    # translation itself. The prompt must now mandate Latin letters only,
+    # for the TARGET-language text, and explicitly forbid copying the
+    # translation.
+    system = provider.last_system.lower()
+    assert "latin" in system
+    assert "never cyrillic" in system or "never" in system and "cyrillic" in system
+    assert "never be identical to" in system or "never a rephrasing" in system or "not the translation" in system
 
 
 async def test_explain_grammar_returns_formatted_string():
@@ -354,6 +366,33 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
         await svc.generate_native_phrase(
             language_code="en", translation_language="ru", level="beginner", situation="work", user_id=1,
         )
+    with pytest.raises(AIConfigurationError):
+        await svc.translate_phrases(["hi"], language_code="en", translation_language="ru", user_id=1)
+
+
+# --- 15. translate_phrases (🔥 Популярные фразы batch translation cache) ---
+
+async def test_translate_phrases_returns_translations_in_order():
+    raw = '{"translations": ["Как дела?", "Спасибо большое"]}'
+    svc, provider = _service([raw])
+    result = await svc.translate_phrases(
+        ["How are you?", "Thanks a lot"], language_code="en", translation_language="ru", user_id=1,
+    )
+    assert result == ["Как дела?", "Спасибо большое"]
+    assert "1. How are you?" in provider.last_user
+    assert "2. Thanks a lot" in provider.last_user
+
+
+async def test_translate_phrases_tolerates_a_mismatched_count():
+    """The parser itself doesn't enforce count equality - callers
+    (services/phrase_service.py) are responsible for matching returned
+    translations back up against the phrases they asked for."""
+    raw = '{"translations": ["Как дела?"]}'
+    svc, _ = _service([raw])
+    result = await svc.translate_phrases(
+        ["How are you?", "Thanks a lot"], language_code="en", translation_language="ru", user_id=1,
+    )
+    assert result == ["Как дела?"]
 
 
 def test_get_ai_service_factory_respects_ai_enabled_and_api_key(monkeypatch):

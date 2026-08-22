@@ -12,7 +12,7 @@ def phrases_menu_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("phrases.menu.saved", get_current_language()), callback_data="phr:saved")],
             [InlineKeyboardButton(t("phrases.menu.new", get_current_language()), callback_data="phr:new")],
-            [InlineKeyboardButton(t("phrases.menu.popular", get_current_language()), callback_data="phr:popular")],
+            [InlineKeyboardButton(t("phrases.menu.popular", get_current_language()), callback_data="phr:popular:0")],
             [InlineKeyboardButton(t("phrases.menu.back", get_current_language()), callback_data="phr:mainmenu")],
         ]
     )
@@ -42,12 +42,33 @@ def saved_list_keyboard(phrase_ids: list[int]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def popular_list_keyboard(count: int) -> InlineKeyboardMarkup:
-    numbers = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
-    rows = []
-    for i in range(count):
-        label = numbers[i] if i < len(numbers) else str(i + 1)
-        rows.append([InlineKeyboardButton(label, callback_data=f"phr:popularopen:{i}")])
+_NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
+
+
+def popular_list_keyboard(page_indices: list[int], *, page: int, has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
+    """🔥 Популярные фразы pagination (bugfix stage sections 8-10): one
+    numbered "open to save" button per phrase on THIS page - numbered
+    globally (matching the spec's own example: page 2 continues 6️⃣-🔟,
+    it doesn't restart at 1️⃣) - plus ➡️/⬅️ page navigation. Navigating
+    pages never touches AI - phrase_service.get_translated_popular_phrases
+    already cached everything before this keyboard is ever built."""
+    buttons = [
+        InlineKeyboardButton(
+            _NUMBER_EMOJI[idx] if idx < len(_NUMBER_EMOJI) else str(idx + 1),
+            callback_data=f"phr:popularopen:{idx}",
+        )
+        for idx in page_indices
+    ]
+    rows = [buttons[i : i + 5] for i in range(0, len(buttons), 5)]
+
+    nav_row = []
+    if has_prev:
+        nav_row.append(InlineKeyboardButton(t("phrases.popular.prev", get_current_language()), callback_data=f"phr:popular:{page - 1}"))
+    if has_next:
+        nav_row.append(InlineKeyboardButton(t("phrases.popular.next", get_current_language()), callback_data=f"phr:popular:{page + 1}"))
+    if nav_row:
+        rows.append(nav_row)
+
     rows.append([InlineKeyboardButton(t("phrases.button.back", get_current_language()), callback_data="phr:menu")])
     return InlineKeyboardMarkup(rows)
 
@@ -86,11 +107,11 @@ def generated_phrase_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def popular_phrase_keyboard() -> InlineKeyboardMarkup:
+def popular_phrase_keyboard(back_page: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("phrases.button.save", get_current_language()), callback_data="phr:save")],
             [InlineKeyboardButton(t("phrases.button.analyze", get_current_language()), callback_data="phr:analyze:pending")],
-            [InlineKeyboardButton(t("phrases.button.back", get_current_language()), callback_data="phr:popular")],
+            [InlineKeyboardButton(t("phrases.button.back", get_current_language()), callback_data=f"phr:popular:{back_page}")],
         ]
     )

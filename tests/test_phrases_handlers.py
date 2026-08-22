@@ -50,6 +50,13 @@ def _mock_ai_service(script=None):
                 return self._script.pop(0)
             if "native speaker" in system.lower():
                 return NATIVE_PHRASE_JSON
+            if "translate" in system.lower() and "phrase" in system.lower():
+                # 🔥 Популярные фразы' batch translate_phrases call - one
+                # translation per numbered input line, same order.
+                lines = [ln for ln in user.splitlines() if ln[:1].isdigit()]
+                import json as _json
+
+                return _json.dumps({"translations": [f"[перевод] {ln.split('. ', 1)[-1]}" for ln in lines]})
             return ANALYZE_TEXT_JSON
 
     provider = _MockProvider()
@@ -352,9 +359,12 @@ async def test_opening_saved_phrase_card_makes_no_ai_call(handler_db, monkeypatc
     assert len(provider.calls) == calls_after_save  # no new AI call just to open the card
 
 
-async def test_popular_phrases_list_makes_no_ai_call(handler_db, monkeypatch):
-    """§16: showing the popular-phrases LIST must never call DeepSeek per
-    item - only opening a specific one does."""
+async def test_popular_phrases_list_shows_translation_inline_with_one_batch_ai_call(handler_db, monkeypatch):
+    """Bugfix stage sections 3, 10: the list itself must show phrase +
+    pronunciation + translation directly (no tap needed), and - since
+    this is the very FIRST view for this (language, translation_language)
+    pair - exactly ONE batch AI call fills the whole cache (never one
+    call per phrase)."""
     from handlers import phrases as phrases_handler
 
     live, provider = _mock_ai_service()
@@ -362,12 +372,66 @@ async def test_popular_phrases_list_makes_no_ai_call(handler_db, monkeypatch):
     monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
 
     context = SimpleNamespace(user_data={})
-    q = _query("phr:popular")
+    q = _query("phr:popular:0")
     await phrases_handler.handle_phrases_callback(q, context)
 
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "How are you doing?" in text
-    assert len(provider.calls) == 0
+    assert "how ar yoo DOO-ing" in text  # pronunciation shown inline
+    assert "[перевод] How are you doing?" in text  # translation shown inline, no extra tap
+    assert len(provider.calls) == 1  # one batch call for the whole page's language pair, not one per phrase
+
+
+async def test_popular_phrases_second_view_makes_no_further_ai_call(handler_db, monkeypatch):
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    await phrases_handler.handle_phrases_callback(_query("phr:popular:0"), context)
+    assert len(provider.calls) == 1
+
+    q2 = _query("phr:popular:0")
+    await phrases_handler.handle_phrases_callback(q2, context)
+    assert len(provider.calls) == 1  # still one - the second view reused the cache
+
+
+async def test_popular_phrases_pagination(handler_db, monkeypatch):
+    """§18 test_popular_phrases_pagination: page 1 -> next -> page 2, no
+    duplicate phrases across pages, and paging never calls AI again."""
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    page1_q = _query("phr:popular:0")
+    await phrases_handler.handle_phrases_callback(page1_q, context)
+    page1_text = page1_q.callback_query.edit_message_text.call_args[0][0]
+    page1_markup = page1_q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    next_buttons = [
+        btn.callback_data for row in page1_markup.inline_keyboard for btn in row
+        if btn.callback_data.startswith("phr:popular:") and btn.callback_data != "phr:popular:0"
+    ]
+    assert next_buttons, "expected a 'next page' button on page 1"
+
+    page2_q = _query(next_buttons[0])
+    await phrases_handler.handle_phrases_callback(page2_q, context)
+    page2_text = page2_q.callback_query.edit_message_text.call_args[0][0]
+
+    # No AI call for either page beyond the single initial batch fill.
+    assert len(provider.calls) == 1
+
+    from utils.popular_phrases import get_popular_phrases
+
+    seed = get_popular_phrases("en")
+    page1_phrases = {e.phrase for e in seed[:5] if e.phrase in page1_text}
+    page2_phrases = {e.phrase for e in seed[5:] if e.phrase in page2_text}
+    assert page1_phrases, "page 1 should contain at least one seed phrase"
+    assert not (page1_phrases & page2_phrases)  # no phrase repeated across pages
 
 
 async def test_regenerate_asks_for_a_different_phrase_excluding_the_current_one(handler_db, monkeypatch):
@@ -423,6 +487,7 @@ async def test_opening_a_popular_phrase_fetches_its_translation(handler_db, monk
     from handlers import phrases as phrases_handler
 
     live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
     monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
 
     context = SimpleNamespace(user_data={})
@@ -431,6 +496,22 @@ async def test_opening_a_popular_phrase_fetches_its_translation(handler_db, monk
 
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "How are you doing?" in text
-    assert "Не мог бы ты мне с этим помочь?" in text  # from the mocked analyze_text translation
-    assert len(provider.calls) == 1
+    assert "[перевод] How are you doing?" in text  # from the mocked batch translate_phrases call
+    assert "how ar yoo DOO-ing" in text  # pronunciation is the static seed value, untouched by AI
+    assert len(provider.calls) == 1  # the batch fill - opening a specific phrase makes no call of its own
     assert context.user_data["phrase_popular"]["phrase"] == "How are you doing?"
+
+
+async def test_opening_a_popular_phrase_twice_makes_no_second_ai_call(handler_db, monkeypatch):
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    await phrases_handler.handle_phrases_callback(_query("phr:popularopen:0"), context)
+    assert len(provider.calls) == 1
+
+    await phrases_handler.handle_phrases_callback(_query("phr:popularopen:1"), context)
+    assert len(provider.calls) == 1  # still one - both indices came from the same cached batch

@@ -7,13 +7,25 @@ handlers/phrases.py only orchestrates Telegram I/O.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User, UserLanguage
 from database.repositories import phrases as phrases_repo
+from database.repositories import popular_phrase_translations as popular_translations_repo
 from services import ai_models
+from services.ai_errors import AIError
 from services.ai_service import get_ai_service
+from utils.logging import get_logger
 from utils.phrase_situations import PRESET_SITUATIONS
+from utils.popular_phrases import get_popular_phrases
+
+logger = get_logger(__name__)
+
+# 🔥 Популярные фразы pagination (bugfix stage section 9): 4-8 phrases per
+# page, matching the spec's own example of 5.
+POPULAR_PHRASES_PAGE_SIZE = 5
 
 # Section 10-11: a short, unambiguous English description for each preset
 # code, sent to the AI regardless of interface_language (every AI prompt
@@ -85,3 +97,75 @@ async def save_phrase(
         phrase=result.phrase, translation=result.translation, pronunciation=result.pronunciation,
         register=result.register_type, situation=situation_code or result.situation, explanation=result.explanation,
     )
+
+
+@dataclass(frozen=True)
+class TranslatedPopularPhrase:
+    """One 🔥 Популярные фразы entry, fully ready to render: the static
+    seed phrase + its own Latin pronunciation (utils.popular_phrases -
+    both are already about the phrase itself, never touched by
+    translation), plus its translation for whichever translation_language
+    the viewer currently has - `translation` is "" only if the AI batch
+    call that would have filled it has never succeeded (AI unconfigured
+    or failed both times) - callers show a placeholder in that case."""
+
+    index: int
+    phrase: str
+    pronunciation: str
+    translation: str
+    situation: str
+
+
+async def get_translated_popular_phrases(
+    session: AsyncSession, *, language_code: str, translation_language: str, user_id: int,
+) -> list[TranslatedPopularPhrase]:
+    """Root-cause fix for the 🔥 Популярные фразы pronunciation bug: the
+    old flow called AIService.analyze_text() live, on every card open,
+    whose pronunciation field was (before this same bugfix) generated
+    "using the translation language's own spelling conventions" - i.e.
+    Cyrillic for a Russian interface - which in practice sometimes came
+    back reading like a copy of the translation. Popular-phrase
+    pronunciation now NEVER touches AI at all: it's the static seed data's
+    own already-Latin, already-phrase-specific pronunciation. Only the
+    TRANSLATION is fetched from AI, and only via one small BATCH call per
+    (language_code, translation_language) pair, cached forever afterward
+    (database.repositories.popular_phrase_translations) - so browsing,
+    re-opening, and paging through the list all read from the DB, never
+    calling AI again once a language pair has been translated once.
+    """
+    entries = get_popular_phrases(language_code)
+    if not entries:
+        return []
+
+    cached = await popular_translations_repo.get_map(
+        session, language_code=language_code, translation_language=translation_language
+    )
+    missing = [i for i in range(len(entries)) if i not in cached]
+    if missing:
+        try:
+            translated = await get_ai_service().translate_phrases(
+                [entries[i].phrase for i in missing],
+                language_code=language_code, translation_language=translation_language, user_id=user_id,
+            )
+        except AIError:
+            logger.warning(
+                "Popular-phrase batch translation failed language_code=%s translation_language=%s",
+                language_code, translation_language,
+            )
+            translated = []
+
+        new_entries = dict(zip(missing, translated))  # tolerates a short/empty result gracefully
+        if new_entries:
+            await popular_translations_repo.bulk_save(
+                session, language_code=language_code, translation_language=translation_language,
+                translations=new_entries,
+            )
+            cached.update(new_entries)
+
+    return [
+        TranslatedPopularPhrase(
+            index=i, phrase=entry.phrase, pronunciation=entry.pronunciation,
+            translation=cached.get(i, ""), situation=entry.situation,
+        )
+        for i, entry in enumerate(entries)
+    ]

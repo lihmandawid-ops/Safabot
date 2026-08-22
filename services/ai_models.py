@@ -388,3 +388,15 @@ class NativePhraseResult(BaseModel):
     @classmethod
     def _clean_optional(cls, value: object) -> object:
         return _clean(value) if isinstance(value, str) else value
+
+
+class PhraseTranslationsResult(BaseModel):
+    """🔥 Популярные фразы' translation cache (native-speaker phrasebook
+    stage bugfix): a batch translation of N target-language phrases into
+    translation_language, in the same order - one AI call per (language,
+    translation_language) pair ever, instead of one call per phrase or
+    per page. Order/count are matched up against the input list by the
+    caller (services/phrase_service.py), which tolerates a mismatched
+    count gracefully rather than failing the whole batch."""
+
+    translations: list[str] = Field(default_factory=list)

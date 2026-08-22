@@ -403,5 +403,7 @@
   "phrase_situation.doctor": "🏥 Лікар",
   "phrase_situation.bank": "🏦 Банк",
   "phrase_situation.study": "🎓 Навчання",
-  "phrase_situation.customer_service": "🔧 Робота з клієнтами"
+  "phrase_situation.customer_service": "🔧 Робота з клієнтами",
+  "phrases.popular.next": "➡️ Наступні фрази",
+  "phrases.popular.prev": "⬅️ Попередні"
 }

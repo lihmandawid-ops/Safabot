@@ -403,5 +403,7 @@
   "phrase_situation.doctor": "🏥 רופא",
   "phrase_situation.bank": "🏦 בנק",
   "phrase_situation.study": "🎓 לימודים",
-  "phrase_situation.customer_service": "🔧 שירות לקוחות"
+  "phrase_situation.customer_service": "🔧 שירות לקוחות",
+  "phrases.popular.next": "➡️ ביטויים נוספים",
+  "phrases.popular.prev": "⬅️ קודמים"
 }

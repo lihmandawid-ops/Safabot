@@ -579,6 +579,43 @@ class UserPhrase(Base):
         return f"UserPhrase(id={self.id}, user_id={self.user_id}, phrase={self.phrase!r})"
 
 
+class PopularPhraseTranslation(Base):
+    """Cached translation for one entry of utils.popular_phrases.POPULAR_PHRASES
+    (native-speaker phrasebook stage, 🔥 Популярные фразы bugfix). The
+    phrase text and its Latin pronunciation are static seed data (tied
+    only to the learning language, never to interface_language) and need
+    no AI/DB round-trip at all; only the TRANSLATION varies per viewer's
+    translation_language, so it's the only part cached here - one row per
+    (language_code, translation_language, phrase_index) triple, filled in
+    a single batch AI call the first time that pair is ever requested and
+    reused by every user and every later view after that (never
+    regenerated, never a live call on pagination).
+    """
+
+    __tablename__ = "popular_phrase_translations"
+    __table_args__ = (
+        UniqueConstraint(
+            "language_code", "translation_language", "phrase_index", name="uq_popular_phrase_translation"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    translation_language: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    phrase_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    translation: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"PopularPhraseTranslation(language_code={self.language_code!r}, "
+            f"translation_language={self.translation_language!r}, phrase_index={self.phrase_index})"
+        )
+
+
 class WordGenerationLog(Base):
     """One call to word_generation_service.generate_new_words (bugfix spec:
     "для контроля использования AI и затрат") - logged even when the local

@@ -134,3 +134,85 @@ async def test_save_phrase_is_case_insensitive_dedup(session):
 
     all_phrases = await phrases_repo.list_phrases(session, user_id=user.id, language_code="en")
     assert len(all_phrases) == 1
+
+
+# --- 🔥 Популярные фразы: cached-translation pagination source ---
+
+async def test_get_translated_popular_phrases_never_touches_pronunciation_via_ai(session, monkeypatch):
+    """Root-cause regression: popular-phrase pronunciation must come ONLY
+    from the static Latin seed data - never from a live AI call, which is
+    what caused the original bug (pronunciation looking like a copy of
+    the translation)."""
+    # translate_phrases IS allowed to be called (for the translation only) -
+    # the point of this test is that pronunciation never changes from the
+    # static seed value, regardless of what the AI mock returns.
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"[{p}]" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    from utils.popular_phrases import get_popular_phrases
+
+    seed = get_popular_phrases("en")
+    result = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    assert len(result) == len(seed)
+    for entry, seed_entry in zip(result, seed):
+        assert entry.pronunciation == seed_entry.pronunciation  # untouched, straight from seed data
+        assert entry.phrase == seed_entry.phrase
+        assert entry.translation == f"[{seed_entry.phrase}]"
+
+
+async def test_get_translated_popular_phrases_calls_ai_at_most_once_per_language_pair(session, monkeypatch):
+    calls = []
+
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        calls.append(list(phrases))
+        return [f"tr-{p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    first = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    await session.commit()
+    second = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=2,
+    )
+
+    assert len(calls) == 1  # cached after the first fill - the second call reused the DB
+    assert [e.translation for e in first] == [e.translation for e in second]
+
+
+async def test_get_translated_popular_phrases_uses_a_single_batch_call_not_one_per_phrase(session, monkeypatch):
+    calls = []
+
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        calls.append(list(phrases))
+        return [f"tr-{p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    from utils.popular_phrases import get_popular_phrases
+
+    seed = get_popular_phrases("en")
+    await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    assert len(calls) == 1
+    assert len(calls[0]) == len(seed)  # the WHOLE set in one call, not one call per phrase
+
+
+async def test_get_translated_popular_phrases_degrades_gracefully_when_ai_unconfigured(session):
+    """Default test environment has AI forced unconfigured - the phrase
+    list must still render, with an empty (not crashing) translation."""
+    result = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    assert len(result) > 0
+    assert all(e.translation == "" for e in result)
+    assert all(e.pronunciation for e in result)  # pronunciation is unaffected, always present

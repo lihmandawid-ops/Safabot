@@ -41,10 +41,13 @@ from keyboards.text_analysis import results_keyboard
 from services import phrase_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
+from services.phrase_service import POPULAR_PHRASES_PAGE_SIZE
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.phrase_situations import MAX_CUSTOM_SITUATION_LENGTH, PRESET_SITUATIONS
 from utils.popular_phrases import get_popular_phrases
+
+_NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
 
 MODE = "phrases"
 
@@ -103,17 +106,44 @@ async def _render_saved_list(edit, session, user_id: int, language_code: str) ->
     await edit("\n".join(lines), reply_markup=saved_list_keyboard([p.id for p in saved]))
 
 
-async def _render_popular_list(edit, language_code: str) -> None:
-    entries = get_popular_phrases(language_code)
-    if not entries:
+async def _render_popular_page(edit, session, user, current, page: int) -> None:
+    """🔥 Популярные фразы pagination (bugfix stage sections 3, 8-10): each
+    entry shows its phrase, pronunciation, and translation directly in
+    the list - no tap required just to see a translation - and paging
+    never calls AI, since get_translated_popular_phrases already cached
+    every translation for this (learning, translation) language pair
+    before this is ever called."""
+    all_entries = await phrase_service.get_translated_popular_phrases(
+        session, language_code=current.language_code, translation_language=current.translation_language,
+        user_id=user.id,
+    )
+    if not all_entries:
         await edit(t("phrases.popular.empty", get_current_language()), reply_markup=phrases_menu_keyboard())
         return
-    lines = [t("phrases.popular.header", get_current_language()), ""]
-    numbers = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
-    for i, entry in enumerate(entries):
-        label = numbers[i] if i < len(numbers) else f"{i + 1}."
-        lines.append(f"{label} {entry.phrase}")
-    await edit("\n".join(lines), reply_markup=popular_list_keyboard(len(entries)))
+
+    last_page = (len(all_entries) - 1) // POPULAR_PHRASES_PAGE_SIZE
+    page = max(0, min(page, last_page))
+    start = page * POPULAR_PHRASES_PAGE_SIZE
+    page_entries = all_entries[start : start + POPULAR_PHRASES_PAGE_SIZE]
+
+    lang = LANGUAGE_BY_CODE.get(current.language_code)
+    translation_lang = LANGUAGE_BY_CODE.get(current.translation_language)
+    lines = [t("phrases.popular.header", get_current_language())]
+    for entry in page_entries:
+        label = _NUMBER_EMOJI[entry.index] if entry.index < len(_NUMBER_EMOJI) else f"{entry.index + 1}."
+        lines.append("")
+        lines.append(f"{label} {lang.flag if lang else ''} {entry.phrase}".strip())
+        if entry.pronunciation:
+            lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=entry.pronunciation))
+        else:
+            lines.append(t("card.pronunciation_placeholder", get_current_language()))
+        translation_text = entry.translation or t("phrases.popular.translation_unavailable", get_current_language())
+        lines.append(f"{translation_lang.flag if translation_lang else ''} {translation_text}".strip())
+
+    keyboard = popular_list_keyboard(
+        [entry.index for entry in page_entries], page=page, has_prev=page > 0, has_next=page < last_page,
+    )
+    await edit("\n".join(lines), reply_markup=keyboard)
 
 
 async def _generate_and_show(edit, *, user, current, situation_code: str, situation_text: str, exclude: list[str]) -> None:
@@ -343,10 +373,6 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
                 reply_markup=saved_phrase_card_keyboard(saved.phrase.id),
             )
 
-        elif data == "phr:popular":
-            await query.answer()
-            await _render_popular_list(edit, current.language_code)
-
         elif data.startswith("phr:popularopen:"):
             index = int(data.removeprefix("phr:popularopen:"))
             entries = get_popular_phrases(current.language_code)
@@ -354,30 +380,36 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
                 await query.answer()
                 return
             await query.answer()
-            entry = entries[index]
-            try:
-                analyzed = await get_ai_service().analyze_text(
-                    entry.phrase, language_code=current.language_code, translation_language=current.translation_language,
-                    interface_language=user.interface_language, user_id=user.id,
-                )
-                translation = analyzed.translation
-                pronunciation = analyzed.pronunciation or entry.pronunciation
-            except AIError:
-                translation = t("phrases.popular.translation_unavailable", get_current_language())
-                pronunciation = entry.pronunciation
+            # Cached-only (bugfix stage section 10/15): the translation
+            # cache was already filled by whichever _render_popular_page
+            # call got here first - opening a specific phrase never makes
+            # its own AI call, and pronunciation never has, since it's
+            # always the static seed data's own Latin transcription.
+            translated = await phrase_service.get_translated_popular_phrases(
+                session, language_code=current.language_code, translation_language=current.translation_language,
+                user_id=user.id,
+            )
+            entry = translated[index]
+            translation = entry.translation or t("phrases.popular.translation_unavailable", get_current_language())
 
             context.user_data["phrase_popular"] = {
-                "phrase": entry.phrase, "translation": translation, "pronunciation": pronunciation,
+                "phrase": entry.phrase, "translation": translation, "pronunciation": entry.pronunciation,
                 "situation": entry.situation,
             }
+            back_page = entry.index // POPULAR_PHRASES_PAGE_SIZE
             await edit(
                 _render_card(
                     language_code=current.language_code, phrase_text=entry.phrase,
                     translation_language=current.translation_language, translation_text=translation,
-                    pronunciation=pronunciation,
+                    pronunciation=entry.pronunciation,
                 ),
-                reply_markup=popular_phrase_keyboard(),
+                reply_markup=popular_phrase_keyboard(back_page),
             )
+
+        elif data.startswith("phr:popular:"):
+            page = int(data.removeprefix("phr:popular:"))
+            await query.answer()
+            await _render_popular_page(edit, session, user, current, page)
 
         elif data.startswith("phr:analyze:saved:"):
             phrase_id = int(data.removeprefix("phr:analyze:saved:"))
