@@ -140,7 +140,23 @@ async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetitio
 
 
 async def test_quiz_mode_hands_off_to_existing_quiz_state_machine(handler_db):
+    """quiz-format stage: every quiz question now needs 4 distinct
+    translation options, so this test adds 3 more translated words on top
+    of the shared fixture's single "appointment" - real distractor
+    material a genuine multi-word vocabulary would already have."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.repositories import words as words_repo
     from handlers.review_now import handle_review_now_callback
+    from services import word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        for i in range(3):
+            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"distractor{i}")
+            await words_repo.add_translation(s, word_id=w.id, language_code="ru", translation=f"дистрактор{i}")
+            await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
 
     context = SimpleNamespace(user_data={})
     q = _query("revnow:mode:quiz:4:0")
@@ -149,7 +165,9 @@ async def test_quiz_mode_hands_off_to_existing_quiz_state_machine(handler_db):
     assert "quiz" in context.user_data
     assert "revnow" not in context.user_data
     state = context.user_data["quiz"]
-    assert len(state["questions"]) == 1
+    assert len(state["questions"]) >= 1
+    for question in state["questions"]:
+        assert len(question["options"]) == 4
     q.callback_query.edit_message_text.assert_awaited_once()
 
 

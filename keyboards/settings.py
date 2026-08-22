@@ -276,3 +276,22 @@ def topics_keyboard(selected_topics: list[str]) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(t("learning.topics.generate_now", get_current_language()), callback_data="learn:topicgen")])
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="learn:menu")])
     return InlineKeyboardMarkup(rows)
+
+
+def topic_picker_keyboard() -> InlineKeyboardMarkup:
+    """🎯 Новые слова по теме - instant-generation UX stage (spec sections
+    14-19): tapping ANY topic here immediately triggers AI generation for
+    just that topic - no intermediate "confirm"/"generate" button, unlike
+    topics_keyboard() above (which is the older persistent multi-select
+    still read by the automatic daily-quota generation's topic hint,
+    word_generation_service._topic_hint - handlers/learning.py updates
+    that same selected_topics field as a side effect of a tap here too,
+    so the automatic flow still benefits from the user's latest explicit
+    interest, but this screen itself is single-tap-and-go)."""
+    rows = [
+        [InlineKeyboardButton(t(f"topic.{code}", get_current_language()), callback_data=f"learn:topicgen:{code}")]
+        for code in PRESET_TOPICS
+    ]
+    rows.append([InlineKeyboardButton(t("settings.topics_add_custom", get_current_language()), callback_data="learn:topics:custom")])
+    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="learn:menu")])
+    return InlineKeyboardMarkup(rows)

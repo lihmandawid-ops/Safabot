@@ -1,4 +1,7 @@
-"""🏆 Викторина (settings-improvements stage sections 10-12).
+"""🧠 Викторина (settings-improvements stage sections 10-12; quiz-format
+stage: standardized to exactly ONE format - question, exactly 4 word/
+translation options, one correct - never a self-graded flashcard reveal
+or a difficulty scale).
 
 Entry point is a button on keyboards.learning.after_session_keyboard()
 (quiz:start) - reached only once the user has actually finished their
@@ -21,17 +24,10 @@ from database.repositories import users as users_repo
 from handlers.learning import _compute_intro
 from keyboards.learning import after_session_keyboard
 from keyboards.main_menu import main_menu_keyboard
-from keyboards.quiz import (
-    quiz_choice_keyboard,
-    quiz_continue_keyboard,
-    quiz_reveal_keyboard,
-    quiz_results_keyboard,
-    quiz_selfgrade_keyboard,
-)
+from keyboards.quiz import quiz_choice_keyboard, quiz_continue_keyboard, quiz_results_keyboard
 from services import quiz_service
 from utils.i18n import get_current_language, set_current_language, t
-
-_FLASHCARD_TYPES = ("word_to_translation", "translation_to_word")
+from utils.languages import LANGUAGE_BY_CODE
 
 
 async def _current_user_and_language(session, telegram_id: int):
@@ -52,22 +48,22 @@ def _new_quiz_state(language_code: str, translation_language: str, questions: li
         "correct": 0,
         "wrong": 0,
         "wrong_word_ids": [],
-        "revealed": False,
     }
+
+
+def _flag_for(language_code: str) -> str:
+    lang = LANGUAGE_BY_CODE.get(language_code)
+    return lang.flag if lang else ""
 
 
 async def _render_question(edit, state: dict) -> None:
     q = state["questions"][state["position"]]
     total = len(state["questions"])
+    title = t("quiz.title", get_current_language())
     progress = t("quiz.progress", get_current_language(), current=state["position"] + 1, total=total)
-    prompt = t(f"quiz.prompt.{q['type']}", get_current_language(), value=q["prompt"])
-    text = f"{progress}\n\n{prompt}"
-
-    if q["type"] in _FLASHCARD_TYPES:
-        state["revealed"] = False
-        await edit(text, reply_markup=quiz_reveal_keyboard())
-    else:
-        await edit(text, reply_markup=quiz_choice_keyboard(q["options"]))
+    flag = _flag_for(state["language_code"])
+    text = f"{title}\n{progress}\n\n{flag} {q['word']}"
+    await edit(text, reply_markup=quiz_choice_keyboard(q["options"]))
 
 
 async def _render_results(edit, state: dict) -> None:
@@ -137,37 +133,6 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             context.user_data["quiz"] = state
             await _render_question(edit, state)
 
-        elif data == "quiz:reveal":
-            await query.answer()
-            state = context.user_data.get("quiz")
-            if state is None:
-                await edit(t("quiz.no_words", get_current_language()), reply_markup=after_session_keyboard())
-                return
-            q = state["questions"][state["position"]]
-            state["revealed"] = True
-            progress = t("quiz.progress", get_current_language(), current=state["position"] + 1, total=len(state["questions"]))
-            prompt = t(f"quiz.prompt.{q['type']}", get_current_language(), value=q["prompt"])
-            answer = t("quiz.reveal_answer", get_current_language(), answer=q["correct_answer"])
-            selfgrade_prompt = t("quiz.selfgrade_prompt", get_current_language())
-            parts = [progress, prompt, answer]
-            if q.get("pronunciation"):
-                # Global pronunciation rule section 46: only shown now that
-                # the answer itself has already been revealed above - never
-                # attached to the prompt, where it would give the answer away.
-                parts.append(t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"]))
-            parts.append(selfgrade_prompt)
-            await edit("\n\n".join(parts), reply_markup=quiz_selfgrade_keyboard())
-
-        elif data.startswith("quiz:selfgrade:"):
-            await query.answer()
-            state = context.user_data.get("quiz")
-            if state is None or not state.get("revealed"):
-                await edit(t("quiz.no_words", get_current_language()), reply_markup=after_session_keyboard())
-                return
-            correct = data.removeprefix("quiz:selfgrade:") == "correct"
-            await _grade_current(session, state, correct=correct)
-            await _advance_or_finish(edit, session, state)
-
         elif data.startswith("quiz:answer:"):
             await query.answer()
             state = context.user_data.get("quiz")
@@ -179,11 +144,17 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             chosen = q["options"][index] if 0 <= index < len(q["options"]) else None
             is_correct = chosen == q["correct_answer"]
             await _grade_current(session, state, correct=is_correct)
-            key = "quiz.feedback.correct" if is_correct else "quiz.feedback.wrong"
-            feedback = t(key, get_current_language(), answer=q["correct_answer"])
+            if is_correct:
+                feedback = t("quiz.feedback.correct", get_current_language())
+            else:
+                feedback = t(
+                    "quiz.feedback.wrong", get_current_language(),
+                    word_flag=_flag_for(state["language_code"]), word=q["word"],
+                    translation_flag=_flag_for(state["translation_language"]), translation=q["correct_answer"],
+                )
             if q.get("pronunciation"):
-                # Section 46: only added now that the answer has been
-                # graded/shown, same rule as the flashcard reveal above.
+                # Global pronunciation rule section 46: only added now
+                # that the answer has been graded/shown.
                 feedback += "\n\n" + t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"])
             is_last = state["position"] + 1 >= len(state["questions"])
             await edit(feedback, reply_markup=quiz_continue_keyboard(is_last_question=is_last))

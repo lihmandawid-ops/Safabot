@@ -1,9 +1,9 @@
-"""End-to-end tests for handlers/quiz.py (settings-improvements stage
-sections 10-12): the full flashcard flow (reveal -> self-grade), the
-full multiple-choice/fill-blank flow (pick -> feedback -> next), the
-results screen, and 🔁 Повторить ошибки. Mocks only the Telegram
-objects - real handlers, real session_scope(), real database (same
-pattern as tests/test_learning_handlers.py).
+"""End-to-end tests for handlers/quiz.py (quiz-format stage: standardized
+to exactly ONE format - question, exactly 4 word/translation options, one
+correct - never the old flashcard reveal/self-grade flow or a difficulty
+scale). Mocks only the Telegram objects - real handlers, real
+session_scope(), real database (same pattern as
+tests/test_learning_handlers.py).
 """
 from __future__ import annotations
 
@@ -13,8 +13,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest_asyncio
-
-from database.models import WordStatus
 
 
 @pytest_asyncio.fixture
@@ -44,16 +42,18 @@ async def handler_db(monkeypatch):
         await seed_languages(s)
         user = await users_repo.create_user(
             s, telegram_id=42, username="grace", first_name="Grace",
-            interface_language="ru", timezone="UTC", level="beginner", daily_new_words=4,
+            interface_language="ru", timezone="UTC", level="a1", daily_new_words=4,
             morning_time=time(9, 0), afternoon_time=time(14, 0), evening_time=time(20, 0),
         )
         await user_languages_repo.add_language(
             s, user_id=user.id, language_code="en", translation_language="ru",
-            level="beginner", daily_new_words=4,
+            level="a1", daily_new_words=4,
         )
-        word, _ = await word_service.get_or_create_word(s, language_code="en", word="cat")
-        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="кошка")
-        await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+        # 5 words: enough for a real 4-option multiple-choice quiz.
+        for i in range(5):
+            word, _ = await word_service.get_or_create_word(s, language_code="en", word=f"cat{i}")
+            await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation=f"кошка{i}")
+            await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
 
     yield
 
@@ -71,7 +71,7 @@ def _query(data: str):
 
 async def test_quiz_start_with_no_words_shows_friendly_message(handler_db):
     """Uses a fresh user with zero words - the fixture's default user
-    already has one word, so this creates a second one."""
+    already has 5 words, so this creates a second, empty one."""
     from database.database import session_scope
     from database.repositories import users as users_repo
     from database.repositories import user_languages as user_languages_repo
@@ -80,13 +80,13 @@ async def test_quiz_start_with_no_words_shows_friendly_message(handler_db):
     async with session_scope() as s:
         await users_repo.create_user(
             s, telegram_id=43, username="empty", first_name="Empty",
-            interface_language="ru", timezone="UTC", level="beginner", daily_new_words=4,
+            interface_language="ru", timezone="UTC", level="a1", daily_new_words=4,
             morning_time=time(9, 0), afternoon_time=time(14, 0), evening_time=time(20, 0),
         )
         user = await users_repo.get_by_telegram_id(s, 43)
         await user_languages_repo.add_language(
             s, user_id=user.id, language_code="en", translation_language="ru",
-            level="beginner", daily_new_words=4,
+            level="a1", daily_new_words=4,
         )
 
     from handlers import quiz as quiz_handler
@@ -100,7 +100,7 @@ async def test_quiz_start_with_no_words_shows_friendly_message(handler_db):
     assert "недостаточно слов" in text.lower()
 
 
-async def test_quiz_start_builds_flashcard_question_for_single_word(handler_db):
+async def test_quiz_start_builds_a_question_with_four_options(handler_db):
     from handlers import quiz as quiz_handler
 
     context = SimpleNamespace(user_data={})
@@ -109,78 +109,71 @@ async def test_quiz_start_builds_flashcard_question_for_single_word(handler_db):
 
     assert "quiz" in context.user_data
     state = context.user_data["quiz"]
-    assert len(state["questions"]) == 1
-    assert state["questions"][0]["type"] in ("word_to_translation", "translation_to_word")
+    assert len(state["questions"]) >= 1
+    for question in state["questions"]:
+        assert len(question["options"]) == 4
     q.callback_query.edit_message_text.assert_awaited_once()
 
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    buttons = [b for row in markup.inline_keyboard for b in row]
+    assert len(buttons) == 4
+    assert {b.callback_data for b in buttons} == {"quiz:answer:0", "quiz:answer:1", "quiz:answer:2", "quiz:answer:3"}
 
-async def test_flashcard_hides_pronunciation_before_reveal_shows_it_after(handler_db):
-    """Global pronunciation rule section 46: the quiz must never show a
-    word's pronunciation on its initial prompt (it could give away the
-    answer for the translation_to_word type, where the word itself IS the
-    correct answer) - only once "Ответ:" has already been revealed."""
-    from database.database import session_scope
-    from database.repositories import words as words_repo
+
+async def test_quiz_question_screen_shows_the_word_never_the_flashcard_reveal_button(handler_db):
     from handlers import quiz as quiz_handler
-    from services import word_service
-
-    async with session_scope() as s:
-        word, _ = await word_service.get_or_create_word(s, language_code="en", word="cat")
-        await words_repo.set_pronunciation(s, word, pronunciation="kat", phonetic=None)
 
     context = SimpleNamespace(user_data={})
-    q1 = _query("quiz:start")
-    await quiz_handler.handle_quiz_callback(q1, context)
-    prompt_text = q1.callback_query.edit_message_text.call_args[0][0]
-    assert "kat" not in prompt_text
-    assert context.user_data["quiz"]["questions"][0]["pronunciation"] == "kat"
+    q = _query("quiz:start")
+    await quiz_handler.handle_quiz_callback(q, context)
 
-    q2 = _query("quiz:reveal")
-    await quiz_handler.handle_quiz_callback(q2, context)
-    revealed_text = q2.callback_query.edit_message_text.call_args[0][0]
-    assert "Ответ:" in revealed_text
-    assert "🔊 kat" in revealed_text
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "🧠" in text  # quiz.title
+
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "quiz:reveal" not in callbacks
+    assert not any(cb.startswith("quiz:selfgrade:") for cb in callbacks)
 
 
-async def test_flashcard_reveal_then_correct_selfgrade_shows_results(handler_db):
+async def test_quiz_correct_answer_shows_correct_feedback(handler_db):
     from handlers import quiz as quiz_handler
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+    q0 = state["questions"][0]
+    correct_index = q0["options"].index(q0["correct_answer"])
 
-    q1 = _query("quiz:reveal")
-    await quiz_handler.handle_quiz_callback(q1, context)
-    text = q1.callback_query.edit_message_text.call_args[0][0]
-    assert "Ответ:" in text
-    assert context.user_data["quiz"]["revealed"] is True
-
-    q2 = _query("quiz:selfgrade:correct")
-    await quiz_handler.handle_quiz_callback(q2, context)
-    text2 = q2.callback_query.edit_message_text.call_args[0][0]
-    assert "Викторина завершена" in text2
+    q = _query(f"quiz:answer:{correct_index}")
+    await quiz_handler.handle_quiz_callback(q, context)
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "Правильно" in text
     assert context.user_data["quiz"]["correct"] == 1
     assert context.user_data["quiz"]["wrong"] == 0
 
 
-async def test_flashcard_wrong_selfgrade_updates_repetition_and_results(handler_db):
+async def test_quiz_wrong_answer_shows_wrong_feedback_and_updates_repetition(handler_db):
     from database.database import session_scope
     from database.repositories import user_words as user_words_repo
     from handlers import quiz as quiz_handler
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
-    uw_id = context.user_data["quiz"]["questions"][0]["user_word_id"]
+    state = context.user_data["quiz"]
+    q0 = state["questions"][0]
+    wrong_index = next(i for i, opt in enumerate(q0["options"]) if opt != q0["correct_answer"])
+    uw_id = q0["user_word_id"]
 
     async with session_scope() as s:
         uw = await user_words_repo.get_by_id(s, uw_id)
         old_wrong = uw.wrong_answers
 
-    await quiz_handler.handle_quiz_callback(_query("quiz:reveal"), context)
-    q = _query("quiz:selfgrade:wrong")
+    q = _query(f"quiz:answer:{wrong_index}")
     await quiz_handler.handle_quiz_callback(q, context)
-
     text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "Викторина завершена" in text
+    assert "Неправильно" in text
+    assert q0["correct_answer"] in text
     assert context.user_data["quiz"]["wrong"] == 1
     assert uw_id in context.user_data["quiz"]["wrong_word_ids"]
 
@@ -189,95 +182,40 @@ async def test_flashcard_wrong_selfgrade_updates_repetition_and_results(handler_
     assert uw.wrong_answers == old_wrong + 1  # fed into the real repetition system
 
 
-async def test_multiple_choice_flow_picks_correct_and_shows_feedback(handler_db):
-    """Adds enough words to guarantee an mc_translation/mc_word question
-    is possible, then drives one all the way through pick -> feedback ->
-    next -> results."""
-    from database.database import session_scope
-    from database.repositories import user_words as user_words_repo
-    from database.repositories import users as users_repo
-    from database.repositories import words as words_repo
-    from services import word_service
+async def test_quiz_does_not_show_difficulty_buttons_anywhere(handler_db):
+    """С трудом / Не помню / Помню / Очень легко must never appear in the
+    quiz flow - that scale belongs only to the normal review flow."""
     from handlers import quiz as quiz_handler
-
-    async with session_scope() as s:
-        user = await users_repo.get_by_telegram_id(s, 42)
-        for i in range(5):
-            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"mcword{i}")
-            await words_repo.add_translation(s, word_id=w.id, language_code="ru", translation=f"мцслово{i}")
-            await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
     state = context.user_data["quiz"]
-
-    # force an mc question deterministically for this test's assertions
     q0 = state["questions"][0]
-    if q0["type"] not in ("mc_translation", "mc_word"):
-        q0["type"] = "mc_translation"
-        q0["options"] = [q0["correct_answer"], "x", "y", "z"]
 
-    correct_index = q0["options"].index(q0["correct_answer"])
-    q = _query(f"quiz:answer:{correct_index}")
+    q = _query(f"quiz:answer:{0}")
     await quiz_handler.handle_quiz_callback(q, context)
-    text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "Верно" in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert all(not cb.startswith("review:") for cb in callbacks)
+    assert callbacks == ["quiz:next"]
+
+
+async def test_quiz_next_advances_to_the_next_question(handler_db):
+    from handlers import quiz as quiz_handler
+
+    context = SimpleNamespace(user_data={})
+    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+    if len(state["questions"]) < 2:
+        return  # not enough words in this run to guarantee a second question
+
+    q0 = state["questions"][0]
+    correct_index = q0["options"].index(q0["correct_answer"])
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
 
     q2 = _query("quiz:next")
     await quiz_handler.handle_quiz_callback(q2, context)
-    state_after = context.user_data["quiz"]
-    assert state_after["correct"] == 1
-    assert state_after["position"] == 1
-
-
-async def test_multiple_choice_hides_pronunciation_before_answer_shows_it_after(handler_db):
-    """Section 46 for the multiple-choice/fill-blank types too: options
-    already show the target word as one of the choices (mc_word/fill_in_
-    blank), so its pronunciation must not be attached to the prompt -
-    only shown in the feedback once the pick has been graded."""
-    from database.database import session_scope
-    from database.repositories import user_words as user_words_repo
-    from database.repositories import users as users_repo
-    from database.repositories import words as words_repo
-    from services import word_service
-    from handlers import quiz as quiz_handler
-
-    async with session_scope() as s:
-        user = await users_repo.get_by_telegram_id(s, 42)
-        for i in range(5):
-            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"pword{i}", pronunciation=f"puh-{i}")
-            await words_repo.add_translation(s, word_id=w.id, language_code="ru", translation=f"пслово{i}")
-            await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
-
-    context = SimpleNamespace(user_data={})
-    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
-    state = context.user_data["quiz"]
-
-    # Isolate this test to one of THIS test's own pronunciation-bearing
-    # words (the fixture's own "cat" word may also be in the pool, with
-    # no pronunciation set here) and re-render it fresh at position 0, so
-    # the captured prompt text unambiguously belongs to this question.
-    q0 = next(q for q in state["questions"] if q["word"].startswith("pword"))
-    if q0["type"] not in ("mc_translation", "mc_word"):
-        q0["type"] = "mc_translation"
-        q0["options"] = [q0["correct_answer"], "x", "y", "z"]
-    state["questions"] = [q0]
-    state["position"] = 0
-
-    rendered = AsyncMock()
-
-    async def edit(text, reply_markup=None):
-        await rendered(text, reply_markup=reply_markup)
-
-    await quiz_handler._render_question(edit, state)
-    prompt_text = rendered.call_args[0][0]
-    assert q0["pronunciation"] not in prompt_text
-
-    correct_index = q0["options"].index(q0["correct_answer"])
-    q = _query(f"quiz:answer:{correct_index}")
-    await quiz_handler.handle_quiz_callback(q, context)
-    feedback_text = q.callback_query.edit_message_text.call_args[0][0]
-    assert f"🔊 {q0['pronunciation']}" in feedback_text
+    assert context.user_data["quiz"]["position"] == 1
 
 
 async def test_retry_wrong_with_no_prior_mistakes_shows_message(handler_db):
@@ -295,8 +233,13 @@ async def test_results_screen_learnwords_button_shows_learning_intro(handler_db)
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
-    await quiz_handler.handle_quiz_callback(_query("quiz:reveal"), context)
-    await quiz_handler.handle_quiz_callback(_query("quiz:selfgrade:correct"), context)
+    state = context.user_data["quiz"]
+    for _ in range(len(state["questions"])):
+        pos = state["position"]
+        q0 = state["questions"][pos]
+        correct_index = q0["options"].index(q0["correct_answer"])
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
+        await quiz_handler.handle_quiz_callback(_query("quiz:next"), context)
 
     q = _query("quiz:learnwords")
     await quiz_handler.handle_quiz_callback(q, context)
@@ -310,8 +253,13 @@ async def test_results_screen_mainmenu_button_clears_quiz_state_and_sends_menu(h
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
-    await quiz_handler.handle_quiz_callback(_query("quiz:reveal"), context)
-    await quiz_handler.handle_quiz_callback(_query("quiz:selfgrade:correct"), context)
+    state = context.user_data["quiz"]
+    for _ in range(len(state["questions"])):
+        pos = state["position"]
+        q0 = state["questions"][pos]
+        correct_index = q0["options"].index(q0["correct_answer"])
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
+        await quiz_handler.handle_quiz_callback(_query("quiz:next"), context)
 
     q = _query("quiz:mainmenu")
     await quiz_handler.handle_quiz_callback(q, context)
@@ -326,12 +274,14 @@ async def test_retry_wrong_after_a_mistake_only_uses_missed_words(handler_db):
 
     context = SimpleNamespace(user_data={})
     await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
-    uw_id = context.user_data["quiz"]["questions"][0]["user_word_id"]
+    state = context.user_data["quiz"]
+    q0 = state["questions"][0]
+    wrong_index = next(i for i, opt in enumerate(q0["options"]) if opt != q0["correct_answer"])
+    uw_id = q0["user_word_id"]
 
-    await quiz_handler.handle_quiz_callback(_query("quiz:reveal"), context)
-    await quiz_handler.handle_quiz_callback(_query("quiz:selfgrade:wrong"), context)
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{wrong_index}"), context)
 
     q = _query("quiz:retry_wrong")
     await quiz_handler.handle_quiz_callback(q, context)
-    state = context.user_data["quiz"]
-    assert {qq["user_word_id"] for qq in state["questions"]} == {uw_id}
+    retry_state = context.user_data["quiz"]
+    assert {qq["user_word_id"] for qq in retry_state["questions"]} == {uw_id}

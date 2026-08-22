@@ -1,32 +1,22 @@
-"""Inline keyboards for 🏆 Викторина (settings-improvements stage
-sections 10-12)."""
+"""Inline keyboards for 🧠 Викторина (settings-improvements stage
+sections 10-12; quiz-format stage: standardized to ONE format - a
+question and exactly 4 word/translation options, never a self-graded
+flashcard reveal or difficulty scale)."""
 from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from utils.i18n import get_current_language, t
 
-
-def quiz_reveal_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(t("quiz.button.reveal", get_current_language()), callback_data="quiz:reveal")]]
-    )
-
-
-def quiz_selfgrade_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(t("quiz.button.correct", get_current_language()), callback_data="quiz:selfgrade:correct"),
-                InlineKeyboardButton(t("quiz.button.wrong", get_current_language()), callback_data="quiz:selfgrade:wrong"),
-            ]
-        ]
-    )
+_OPTION_NUMBERS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣")
 
 
 def quiz_choice_keyboard(options: list[str]) -> InlineKeyboardMarkup:
-    buttons = [InlineKeyboardButton(option, callback_data=f"quiz:answer:{i}") for i, option in enumerate(options)]
-    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    buttons = [
+        InlineKeyboardButton(f"{_OPTION_NUMBERS[i]} {option}", callback_data=f"quiz:answer:{i}")
+        for i, option in enumerate(options)
+    ]
+    rows = [[b] for b in buttons]
     return InlineKeyboardMarkup(rows)
 
 

@@ -1,8 +1,10 @@
-"""🏆 Викторина (settings-improvements stage sections 10-12): builds a
-quiz out of the user's own words and, for a wrong answer, feeds it back
-into the SAME spaced-repetition algorithm the normal 📚/🔄 flow uses -
-there is deliberately no second scheduling system and no new AI call
-here, only a different way of presenting words the user already has.
+"""🧠 Викторина (settings-improvements stage sections 10-12; quiz-format
+stage: standardized to exactly ONE format - a foreign word plus exactly 4
+translation options, one correct). Builds a quiz out of the user's own
+words and, for a wrong answer, feeds it back into the SAME spaced-
+repetition algorithm the normal 📚/🔄 flow uses - there is deliberately no
+second scheduling system and no new AI call here, only a different way of
+presenting words the user already has.
 
 Quiz state itself is NOT a database table (unlike LearningSession): it's
 a short-lived, disposable list of pre-generated questions that lives in
@@ -14,7 +16,6 @@ repository for something this transient.
 from __future__ import annotations
 
 import random
-import re
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,15 +28,11 @@ from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import utc_now
 
 DEFAULT_QUIZ_LENGTH = 10
-MIN_WORDS_FOR_MULTIPLE_CHOICE = 4
-_OPTION_COUNT = 4
-
-# Flashcard-style types are self-assessed (word/translation -> reveal ->
-# "did I know it?") and work with as few as 1 word. The other three need
-# distractors from other words, so they're only offered once the user's
-# pool is big enough to build real wrong options from - never fake ones.
-_FLASHCARD_TYPES = ("word_to_translation", "translation_to_word")
-_CHOICE_TYPES = ("mc_translation", "mc_word", "fill_in_blank")
+OPTION_COUNT = 4
+# Building even one question needs the tested word's own translation plus
+# 3 distinct DISTRACTOR translations from other words - never fewer than
+# the full option count, and never padded with fake/duplicate options.
+MIN_WORDS_FOR_QUESTION = OPTION_COUNT
 
 _QUIZZABLE_STATUSES = [WordStatus.NEW, WordStatus.LEARNING, WordStatus.REVIEW, WordStatus.MASTERED]
 
@@ -43,25 +40,19 @@ _QUIZZABLE_STATUSES = [WordStatus.NEW, WordStatus.LEARNING, WordStatus.REVIEW, W
 @dataclass
 class QuizQuestion:
     user_word_id: int
-    type: str
-    prompt: str
     correct_answer: str
     options: list[str] = field(default_factory=list)
     # The target-language word being tested, and its pronunciation - cache
     # -only (global pronunciation rule section 46): quiz questions are
     # built in a batch, and a live AI backfill call per question here
     # would both slow quiz start down and risk showing the answer away
-    # (below) before it's earned. Never shown until after the answer is
-    # graded/revealed, since `word` IS the correct answer for the
-    # translation_to_word/mc_word/fill_in_blank question types.
+    # before it's earned.
     word: str = ""
     pronunciation: str | None = None
 
     def to_dict(self) -> dict:
         return {
             "user_word_id": self.user_word_id,
-            "type": self.type,
-            "prompt": self.prompt,
             "correct_answer": self.correct_answer,
             "options": self.options,
             "word": self.word,
@@ -70,28 +61,19 @@ class QuizQuestion:
 
 
 def _translation_for(user_word: UserWord, translation_language: str) -> str | None:
+    """Only ever a translation into the user's OWN translation_language -
+    never a different language's row used as a silent fallback (quiz-
+    format stage section 4: no ru/en fallback)."""
     matches = [tr.translation for tr in user_word.word.translations if tr.language_code == translation_language]
-    if matches:
-        return matches[0]
-    return user_word.word.translations[0].translation if user_word.word.translations else None
+    return matches[0] if matches else None
 
 
-def _blank_out(example_text: str, word: str) -> str | None:
-    """Replaces the first whole-word, case-insensitive occurrence of
-    `word` in `example_text` with "___". Returns None if the word doesn't
-    literally appear (e.g. the example only uses an inflected form) - a
-    fill-in-blank question with nothing actually blanked would be
-    useless, so callers must skip that type for this word instead."""
-    pattern = re.compile(r"\b" + re.escape(word) + r"\b", re.IGNORECASE)
-    if not pattern.search(example_text):
-        return None
-    return pattern.sub("___", example_text, count=1)
-
-
-def _distractor_translations(target: UserWord, pool: list[UserWord], translation_language: str, n: int) -> list[str]:
+def _distractor_translations(
+    target: UserWord, pool: list[UserWord], translation_language: str, n: int, *, exclude: str
+) -> list[str]:
     others = [uw for uw in pool if uw.id != target.id]
     random.shuffle(others)
-    seen: set[str] = set()
+    seen: set[str] = {exclude}
     out: list[str] = []
     for uw in others:
         tr = _translation_for(uw, translation_language)
@@ -103,72 +85,25 @@ def _distractor_translations(target: UserWord, pool: list[UserWord], translation
     return out
 
 
-def _distractor_words(target: UserWord, pool: list[UserWord], n: int) -> list[str]:
-    others = [uw for uw in pool if uw.id != target.id]
-    random.shuffle(others)
-    seen: set[str] = set()
-    out: list[str] = []
-    for uw in others:
-        w = uw.word.word
-        if w not in seen:
-            seen.add(w)
-            out.append(w)
-        if len(out) >= n:
-            break
-    return out
-
-
-def _available_types(user_word: UserWord, pool_size: int, has_fill_blank_example: bool) -> list[str]:
-    types = list(_FLASHCARD_TYPES)
-    if pool_size >= MIN_WORDS_FOR_MULTIPLE_CHOICE:
-        types.append("mc_translation")
-        types.append("mc_word")
-        if has_fill_blank_example:
-            types.append("fill_in_blank")
-    return types
-
-
 def _build_question(
-    user_word: UserWord, translation: str, qtype: str, pool: list[UserWord], translation_language: str
-) -> QuizQuestion:
+    user_word: UserWord, translation: str, pool: list[UserWord], translation_language: str
+) -> QuizQuestion | None:
+    """Foreign word shown, 4 translation options (one correct) - the ONLY
+    quiz format (quiz-format stage sections 1-4). Returns None if the pool
+    can't yield 3 distinct distractor translations - never pads with fake
+    or duplicate options."""
     word_text = user_word.word.word
-    pronunciation = pronunciation_service.format_pronunciation(user_word.word)
+    distractors = _distractor_translations(
+        user_word, pool, translation_language, OPTION_COUNT - 1, exclude=translation
+    )
+    if len(distractors) < OPTION_COUNT - 1:
+        return None
 
-    if qtype == "word_to_translation":
-        return QuizQuestion(
-            user_word.id, qtype, prompt=word_text, correct_answer=translation, word=word_text, pronunciation=pronunciation
-        )
-    if qtype == "translation_to_word":
-        return QuizQuestion(
-            user_word.id, qtype, prompt=translation, correct_answer=word_text, word=word_text, pronunciation=pronunciation
-        )
-
-    if qtype == "mc_translation":
-        distractors = _distractor_translations(user_word, pool, translation_language, _OPTION_COUNT - 1)
-        options = distractors + [translation]
-        random.shuffle(options)
-        return QuizQuestion(
-            user_word.id, qtype, prompt=word_text, correct_answer=translation, options=options,
-            word=word_text, pronunciation=pronunciation,
-        )
-
-    if qtype == "mc_word":
-        distractors = _distractor_words(user_word, pool, _OPTION_COUNT - 1)
-        options = distractors + [word_text]
-        random.shuffle(options)
-        return QuizQuestion(
-            user_word.id, qtype, prompt=translation, correct_answer=word_text, options=options,
-            word=word_text, pronunciation=pronunciation,
-        )
-
-    # fill_in_blank
-    blanked = _blank_out(user_word.word.examples[0].example_text, word_text)
-    distractors = _distractor_words(user_word, pool, _OPTION_COUNT - 1)
-    options = distractors + [word_text]
+    options = distractors + [translation]
     random.shuffle(options)
+    pronunciation = pronunciation_service.format_pronunciation(user_word.word)
     return QuizQuestion(
-        user_word.id, qtype, prompt=blanked, correct_answer=word_text, options=options,
-        word=word_text, pronunciation=pronunciation,
+        user_word.id, correct_answer=translation, options=options, word=word_text, pronunciation=pronunciation
     )
 
 
@@ -182,31 +117,40 @@ async def build_quiz(
     only_word_ids: list[int] | None = None,
 ) -> list[dict]:
     """Picks up to `count` of the user's own words (excluding
-    PAUSED/DELETED - spec: "using only the user's own words") and gives
-    each one a randomly chosen question type. `only_word_ids` restricts
-    the pool to those ids - used by 🔁 Повторить ошибки to build a
-    quiz out of just the words missed last time."""
+    PAUSED/DELETED - spec: "using only the user's own words") and builds
+    one standard-format question per word. `only_word_ids` restricts the
+    pool to those ids - used by 🔁 Повторить ошибки to build a quiz out of
+    just the words missed last time. A word that can't form 4 distinct
+    options (not enough other translated words in the pool) is silently
+    skipped - never padded with fake distractors."""
+    # `pool` is the FULL quizzable vocabulary - always the distractor
+    # source, even for a `only_word_ids`-restricted retry-mistakes quiz
+    # (spec section 8: the "🔁 Повторить ошибки" feature must keep
+    # working even when only 1-3 words were missed, which alone could
+    # never yield 3 distinct distractors on their own).
     pool = await user_words_repo.get_user_words(
         session, user_id=user_id, language_code=language_code, statuses=_QUIZZABLE_STATUSES
     )
     pool = [uw for uw in pool if uw.word.translations]
-    if only_word_ids is not None:
-        wanted = set(only_word_ids)
-        pool = [uw for uw in pool if uw.id in wanted]
-    if not pool:
+    if len(pool) < MIN_WORDS_FOR_QUESTION:
         return []
 
-    random.shuffle(pool)
-    selected = pool[: max(count, 0)] if only_word_ids is None else pool
+    if only_word_ids is not None:
+        wanted = set(only_word_ids)
+        to_ask = [uw for uw in pool if uw.id in wanted]
+    else:
+        shuffled = list(pool)
+        random.shuffle(shuffled)
+        to_ask = shuffled[: max(count, 0)]
 
     questions: list[QuizQuestion] = []
-    for user_word in selected:
+    for user_word in to_ask:
         translation = _translation_for(user_word, translation_language)
         if translation is None:
             continue
-        has_example = bool(user_word.word.examples) and _blank_out(user_word.word.examples[0].example_text, user_word.word.word) is not None
-        qtype = random.choice(_available_types(user_word, len(pool), has_example))
-        questions.append(_build_question(user_word, translation, qtype, pool, translation_language))
+        question = _build_question(user_word, translation, pool, translation_language)
+        if question is not None:
+            questions.append(question)
 
     return [q.to_dict() for q in questions]
 

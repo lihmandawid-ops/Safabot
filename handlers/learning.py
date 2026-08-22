@@ -36,12 +36,13 @@ from keyboards.learning import (
 )
 from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
-from keyboards.settings import topics_keyboard
+from keyboards.settings import topic_picker_keyboard
 from keyboards.words import filter_keyboard
 from services import learning_service, pronunciation_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
+from utils.topics import MAX_CUSTOM_TOPIC_LENGTH
 
 MODE = "learning"
 
@@ -146,11 +147,45 @@ async def _compute_intro(session, user, current, *, include_new_words: bool) -> 
         return t(key, get_current_language()), (after_session_keyboard() if include_new_words else None)
 
     if include_new_words:
-        text = t("learning.ready", get_current_language(), count=total)
+        # bugfix stage: "learn"/new words must never say "повторить"
+        # (repeat) - that word is only true for old/due words. A pure new-
+        # words batch says "выучить" (learn); a pure due-reviews batch
+        # says "повторить"; only a genuinely mixed batch keeps the
+        # neutral "заниматься" (study) wording that was already correct
+        # for both.
+        if new_words and not due:
+            key = "learning.ready_new_only"
+        elif due and not new_words:
+            key = "learning.ready_review_only"
+        else:
+            key = "learning.ready"
+        text = t(key, get_current_language(), count=total)
         if shortfall:
             text += "\n\n" + t("learning.generation_unavailable", get_current_language())
         return text, start_keyboard()
     return t("learning.ready_review", get_current_language(), count=total), start_review_keyboard()
+
+
+async def _generate_and_report(
+    edit, session, *, user, current, topics: list[str] | None = None, trigger: str
+) -> None:
+    """🆕 Новые слова / 🎯 Новые слова по теме (level-and-difficulty stage
+    sections 40-62; instant-generation UX stage sections 14-20): always
+    AI-first (word_generation_service.generate_words_ai_first, never the
+    local-pool-first generate_new_words). Generated words are only ever
+    added with status NEW, the same "add to the queue" outcome any other
+    new word gets - never marked MASTERED/learned automatically, so the
+    existing reveal -> rate confirmation flow is what actually teaches
+    them (spec section 20)."""
+    result = await word_generation_service.generate_words_ai_first(
+        session, user=user, user_language=current, amount=current.daily_new_words, topics=topics, trigger=trigger,
+    )
+    text = (
+        t("learning.generation_failed", get_current_language())
+        if not result
+        else t("learning.extra_added", get_current_language(), count=len(result))
+    )
+    await edit(text, reply_markup=after_session_keyboard())
 
 
 async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, include_new_words: bool) -> None:
@@ -220,39 +255,31 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "learn:newwords":
             await query.answer()
-            result = await word_generation_service.generate_words_ai_first(
-                session, user=user, user_language=current, amount=current.daily_new_words,
-                trigger="explicit_new_words",
-            )
-            text = (
-                t("learning.generation_failed", get_current_language())
-                if not result
-                else t("learning.extra_added", get_current_language(), count=len(result))
-            )
-            await edit(text, reply_markup=after_session_keyboard())
+            await _generate_and_report(edit, session, user=user, current=current, trigger="explicit_new_words")
 
         elif data == "learn:topics":
             await query.answer()
-            await edit(
-                t("settings.topics_title", get_current_language()),
-                reply_markup=topics_keyboard(current.selected_topics),
-            )
+            await edit(t("learning.topics.header", get_current_language()), reply_markup=topic_picker_keyboard())
 
-        elif data == "learn:topicgen":
+        elif data == "learn:topics:custom":
             await query.answer()
-            if not current.selected_topics:
-                await edit(t("learning.menu.header", get_current_language()), reply_markup=learn_menu_keyboard())
-                return
-            result = await word_generation_service.generate_words_ai_first(
-                session, user=user, user_language=current, amount=current.daily_new_words,
-                topics=current.selected_topics, trigger="explicit_new_words_topic",
+            context.user_data["mode"] = MODE
+            context.user_data["learning_submode"] = "custom_topic"
+            await edit(t("settings.topics_custom_prompt", get_current_language()))
+
+        elif data.startswith("learn:topicgen:"):
+            # instant-generation UX stage (spec sections 14-19): a single
+            # tap on a preset topic both updates the profile's saved
+            # selected_topics (so the OLD automatic daily-quota flow's
+            # topic hint - word_generation_service._topic_hint - also
+            # benefits from this pick) AND immediately generates - no
+            # separate "confirm"/"generate" step.
+            code = data.removeprefix("learn:topicgen:")
+            await query.answer()
+            await user_languages_repo.set_topics(session, current, topics=[code])
+            await _generate_and_report(
+                edit, session, user=user, current=current, topics=[code], trigger="explicit_new_words_topic",
             )
-            text = (
-                t("learning.generation_failed", get_current_language())
-                if not result
-                else t("learning.extra_added", get_current_language(), count=len(result))
-            )
-            await edit(text, reply_markup=after_session_keyboard())
 
         elif data == "learn:extra":
             await query.answer()
@@ -392,6 +419,34 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
                 )
             else:
                 await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
+
+
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    """✏️ Своя тема (instant-generation UX stage sections 16, 19): the
+    ONLY free-text follow-up MODE currently routes to - typing a topic
+    immediately generates, no separate "confirm" step, same as tapping a
+    preset topic."""
+    if context.user_data.get("learning_submode") != "custom_topic":
+        await update.message.reply_text(t("menu.unknown_command", get_current_language()))
+        return
+    context.user_data.pop("mode", None)
+    context.user_data.pop("learning_submode", None)
+
+    topic = text.strip()[:MAX_CUSTOM_TOPIC_LENGTH]
+    if not topic:
+        return
+
+    async with session_scope() as session:
+        user, current = await _current_user_and_language(session, update.effective_user.id)
+        if user is None or current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+
+        async def edit(text_: str, reply_markup=None) -> None:
+            await update.message.reply_text(text_, reply_markup=reply_markup)
+
+        await user_languages_repo.set_topics(session, current, topics=[topic])
+        await _generate_and_report(edit, session, user=user, current=current, topics=[topic], trigger="explicit_new_words_topic")
 
 
 learning_callback_handler = CallbackQueryHandler(handle_learning_callback, pattern="^(learn|review):")

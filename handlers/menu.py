@@ -130,6 +130,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if mode == phrases_handler.MODE:
         await phrases_handler.handle_text_input(update, context, text)
         return
+    if mode == learning_handler.MODE:
+        await learning_handler.handle_text_input(update, context, text)
+        return
 
     await update.message.reply_text(t("menu.unknown_command", language))
 

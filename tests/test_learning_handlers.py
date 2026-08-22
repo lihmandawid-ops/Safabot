@@ -400,6 +400,9 @@ async def test_newwords_with_working_ai_adds_words_never_touching_local_pool(han
 
 
 async def test_topics_button_shows_topic_picker(handler_db):
+    """Instant-generation UX stage sections 14-19: every preset topic
+    button must call straight into learn:topicgen:<code> - no toggle
+    (✅-prefix) state, no separate "confirm" button anywhere on screen."""
     from handlers import learning as learning_handler
 
     context = SimpleNamespace(user_data={})
@@ -408,32 +411,21 @@ async def test_topics_button_shows_topic_picker(handler_db):
 
     q.callback_query.edit_message_text.assert_awaited_once()
     markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
-    assert markup is not None
-
-
-async def test_topicgen_with_no_topics_selected_returns_to_menu(handler_db):
-    from handlers import learning as learning_handler
-
-    context = SimpleNamespace(user_data={})
-    q = _query("learn:topicgen")
-    await learning_handler.handle_learning_callback(q, context)
-
-    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert "learn:newwords" in callbacks  # back on the submenu, not a crash
+    assert any(cb.startswith("learn:topicgen:") for cb in callbacks)
+    assert "learn:topics:custom" in callbacks
+    assert not any(cb.startswith("set:topics:toggle:") for cb in callbacks)
 
 
-async def test_topicgen_uses_selected_topics_for_ai_first_generation(handler_db, monkeypatch):
+async def test_tapping_a_preset_topic_immediately_generates_words(handler_db, monkeypatch):
+    """Section 15: tapping a topic must go straight to AI generation and
+    show the words - no "Получить слова"/"Подтвердить" step in between."""
     from database.database import session_scope
     from database.repositories import user_languages as user_languages_repo
     from database.repositories import users as users_repo
     from handlers import learning as learning_handler
     from services import ai_models, word_generation_service
-
-    async with session_scope() as s:
-        user = await users_repo.get_by_telegram_id(s, 42)
-        current = await user_languages_repo.get_current_language(s, user.id)
-        await user_languages_repo.set_topics(s, current, topics=["cooking"])
+    from utils.topics import PRESET_TOPICS
 
     captured = {}
 
@@ -446,10 +438,172 @@ async def test_topicgen_uses_selected_topics_for_ai_first_generation(handler_db,
 
     monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
 
+    code = PRESET_TOPICS[0]
     context = SimpleNamespace(user_data={})
-    q = _query("learn:topicgen")
+    q = _query(f"learn:topicgen:{code}")
     await learning_handler.handle_learning_callback(q, context)
 
-    assert captured["category"] == "cooking"
+    assert captured["category"] == code
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "1" in text
+    # exactly one edit_message_text call - no intermediate confirmation screen
+    assert q.callback_query.edit_message_text.call_count == 1
+
+    # the tap also updates the profile's saved selected_topics, so the OLD
+    # automatic daily-quota flow's topic hint benefits from it too.
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+    assert current.selected_topics == [code]
+
+
+async def test_tapping_a_preset_topic_with_failing_ai_shows_the_exact_failure_message(handler_db):
+    from handlers import learning as learning_handler
+    from utils.topics import PRESET_TOPICS
+
+    code = PRESET_TOPICS[0]
+    context = SimpleNamespace(user_data={})
+    q = _query(f"learn:topicgen:{code}")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert text == "Сейчас не удалось подобрать новые слова. Попробуйте ещё раз."
+
+
+async def test_custom_topic_prompts_for_free_text(handler_db):
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:topics:custom")
+    await learning_handler.handle_learning_callback(q, context)
+
+    assert context.user_data["mode"] == learning_handler.MODE
+    assert context.user_data["learning_submode"] == "custom_topic"
+    q.callback_query.edit_message_text.assert_awaited_once()
+
+
+async def test_custom_topic_free_text_immediately_generates_words(handler_db, monkeypatch):
+    """Section 16/19: typing a custom topic must go straight to AI
+    generation - no intermediate menu, no second confirmation tap."""
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    captured = {}
+
+    class _FakeAI:
+        async def generate_words(self, *, category=None, **kwargs):
+            captured["category"] = category
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="autoword", translations=[ai_models.TranslationResult(translation="авто-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:topics:custom"), context)
+
+    message = AsyncMock()
+    update = NS(effective_user=NS(id=42), message=message)
+    await learning_handler.handle_text_input(update, context, "Слова для работы в автомастерской")
+
+    assert captured["category"] == "Слова для работы в автомастерской"
+    message.reply_text.assert_awaited_once()
+    text = message.reply_text.call_args[0][0]
+    assert "1" in text
+    assert "mode" not in context.user_data
+    assert "learning_submode" not in context.user_data
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+    assert current.selected_topics == ["Слова для работы в автомастерской"]
+
+
+# --- 🆕 Новые слова wording: "выучить" (learn) never "повторить" (repeat)
+# (instant-generation UX stage sections 12-13, 22, 24: new_words_message_
+# uses_learn_not_repeat). ---
+
+async def test_new_words_message_uses_learn_not_repeat(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import learning_service
+
+    async def _no_due(*args, **kwargs):
+        return []
+
+    async def _some_new(*args, **kwargs):
+        from services.learning_service import NewWordsResult
+        return NewWordsResult(words=["placeholder"], shortfall=False)
+
+    monkeypatch.setattr(learning_service, "get_due_reviews", _no_due)
+    monkeypatch.setattr(learning_service, "get_new_words_for_today", _some_new)
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        text, _ = await learning_handler._compute_intro(s, user, current, include_new_words=True)
+
+    assert "выучить" in text
+    assert "повторить" not in text
+
+
+async def test_review_only_message_uses_repeat_not_learn(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import learning_service
+
+    async def _some_due(*args, **kwargs):
+        return ["placeholder"]
+
+    async def _no_new(*args, **kwargs):
+        from services.learning_service import NewWordsResult
+        return NewWordsResult(words=[], shortfall=False)
+
+    monkeypatch.setattr(learning_service, "get_due_reviews", _some_due)
+    monkeypatch.setattr(learning_service, "get_new_words_for_today", _no_new)
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        text, _ = await learning_handler._compute_intro(s, user, current, include_new_words=True)
+
+    assert "повторить" in text
+    assert "выучить" not in text
+
+
+async def test_mixed_new_and_due_message_says_neither_learn_nor_repeat_exclusively(handler_db, monkeypatch):
+    """A batch mixing old and new words must never claim it's purely one
+    or the other."""
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import learning_service
+
+    async def _some_due(*args, **kwargs):
+        return ["placeholder"]
+
+    async def _some_new(*args, **kwargs):
+        from services.learning_service import NewWordsResult
+        return NewWordsResult(words=["placeholder"], shortfall=False)
+
+    monkeypatch.setattr(learning_service, "get_due_reviews", _some_due)
+    monkeypatch.setattr(learning_service, "get_new_words_for_today", _some_new)
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        text, _ = await learning_handler._compute_intro(s, user, current, include_new_words=True)
+
+    assert "повторить" not in text
+    assert "выучить" not in text
