@@ -40,6 +40,7 @@ def _isolate_ai_config(monkeypatch):
     """
     monkeypatch.setenv("AI_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
     monkeypatch.setenv("OCR_API_KEY", "")
     monkeypatch.setenv("STT_API_KEY", "")
     import config

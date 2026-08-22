@@ -519,6 +519,167 @@ def test_get_ai_service_respects_gemini_enabled_flag(monkeypatch):
         _reset_ai_factories()
 
 
+# --- Factory wiring: Vercel AI Gateway (get_ai_service()'s N-provider chain) ---
+
+def test_get_ai_service_uses_gateway_only_when_nothing_else_configured(monkeypatch):
+    from services.ai_service import LiveAIService, get_ai_service
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        assert isinstance(service, LiveAIService)
+        assert isinstance(service._provider, HttpAIProvider)
+        assert not isinstance(service._provider, FallbackAIProvider)
+        assert service._provider_label == "vercel-gateway"
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        _reset_ai_factories()
+
+
+def test_get_ai_service_uses_gateway_model_and_base_url_from_settings(monkeypatch):
+    from services.ai_service import get_ai_service
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    monkeypatch.setenv("AI_GATEWAY_MODEL", "google/gemini-3.1-pro-preview")
+    monkeypatch.setenv("AI_GATEWAY_BASE_URL", "https://my-gateway.example/v1")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        assert service._provider._model == "google/gemini-3.1-pro-preview"
+        assert service._provider._base_url == "https://my-gateway.example/v1"
+        assert service._model == "google/gemini-3.1-pro-preview"
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        monkeypatch.setenv("AI_GATEWAY_MODEL", "")
+        monkeypatch.setenv("AI_GATEWAY_BASE_URL", "")
+        _reset_ai_factories()
+
+
+def test_get_ai_service_gateway_is_primary_over_deepseek(monkeypatch):
+    """Vercel AI Gateway outranks the original DeepSeek/AI_API_KEY slot -
+    this is the exact scenario the user asked for: reach Gemini through
+    the Gateway (working around a regionally-blocked direct connection),
+    with DeepSeek as the final fallback if the Gateway itself fails."""
+    from services.ai_service import LiveAIService, get_ai_service
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        assert isinstance(service, LiveAIService)
+        assert isinstance(service._provider, FallbackAIProvider)
+        assert isinstance(service._provider._primary, HttpAIProvider)
+        assert service._provider._primary._base_url == "https://ai-gateway.vercel.sh/v1"
+        assert isinstance(service._provider._secondary, HttpAIProvider)
+        assert service._provider_label == "vercel-gateway+deepseek"
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        monkeypatch.setenv("AI_API_KEY", "")
+        _reset_ai_factories()
+
+
+def test_get_ai_service_full_three_tier_chain_gateway_gemini_deepseek(monkeypatch):
+    from services.ai_service import get_ai_service
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
+    monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        outer = service._provider
+        assert isinstance(outer, FallbackAIProvider)
+        assert isinstance(outer._primary, HttpAIProvider)  # gateway
+        assert isinstance(outer._secondary, FallbackAIProvider)
+        assert isinstance(outer._secondary._primary, GeminiTextProvider)
+        assert isinstance(outer._secondary._secondary, HttpAIProvider)  # deepseek
+        assert service._provider_label == "vercel-gateway+gemini+deepseek"
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        monkeypatch.setenv("GEMINI_API_KEY", "")
+        monkeypatch.setenv("AI_API_KEY", "")
+        _reset_ai_factories()
+
+
+def test_get_ai_service_respects_ai_gateway_enabled_flag(monkeypatch):
+    from services.ai_service import get_ai_service
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "false")
+    monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        assert service._provider_label == "deepseek"  # gateway disabled, deepseek-only
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")
+        monkeypatch.setenv("AI_API_KEY", "")
+        _reset_ai_factories()
+
+
+# --- services.ai_diagnostics.test_ai_gateway_connection() ---
+
+async def test_ai_gateway_connection_missing_api_key_is_reported(monkeypatch):
+    from services.ai_diagnostics import test_ai_gateway_connection
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+    config.get_settings.cache_clear()
+
+    result = await test_ai_gateway_connection()
+
+    assert result.ok is False
+    assert result.reason == "missing_api_key"
+
+
+async def test_ai_gateway_connection_success_reports_ok(monkeypatch):
+    from services.ai_diagnostics import test_ai_gateway_connection
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    config.get_settings.cache_clear()
+    try:
+        provider = MockAIProvider(response='{"status": "ok"}')
+        result = await test_ai_gateway_connection(provider=provider)
+        assert result.ok is True
+        assert provider.calls == 1
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        config.get_settings.cache_clear()
+
+
+async def test_ai_gateway_connection_unauthorized_is_reported(monkeypatch):
+    from services.ai_diagnostics import test_ai_gateway_connection
+
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
+    config.get_settings.cache_clear()
+    try:
+        provider = MockAIProvider(raises=AIAuthenticationError("bad key"))
+        result = await test_ai_gateway_connection(provider=provider)
+        assert result.ok is False
+        assert result.reason == "unauthorized"
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        config.get_settings.cache_clear()
+
+
+async def test_ai_gateway_connection_api_key_never_appears_in_result(monkeypatch):
+    from services.ai_diagnostics import test_ai_gateway_connection
+
+    real_looking_key = "gw-test-0000000000000000000000000000"
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", real_looking_key)
+    config.get_settings.cache_clear()
+    try:
+        provider = MockAIProvider(raises=AIAuthenticationError("bad key"))
+        result = await test_ai_gateway_connection(provider=provider)
+        assert real_looking_key not in (result.reason or "")
+        assert real_looking_key not in (result.detail or "")
+    finally:
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
+        config.get_settings.cache_clear()
+
+
 # --- Factory wiring: get_ocr_service() / get_stt_service() (Gemini-only, no DeepSeek fallback) ---
 
 def test_get_ocr_service_prefers_gemini_when_configured(monkeypatch):

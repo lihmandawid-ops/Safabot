@@ -444,19 +444,23 @@ Safabot использует AI как необязательный интелл
 незнакомых слов, автогенерация, `💡 Как использовать?`, `📝 Разбор
 текста` и `✏️ Грамматика`.
 
-**Провайдер по умолчанию — Google Gemini** (PRIMARY), с **DeepSeek**
-(`deepseek-chat`, API OpenAI-совместимый, `AI_BASE_URL=https://api.deepseek.com`)
-как FALLBACK для текстовых задач, если Gemini временно недоступен. Ключи
-уже настроены в `.env` на этом деплое — ничего дополнительно указывать не
-нужно; ниже описано, как это устроено и как проверить, что подключение
-реально работает.
+**Провайдер по умолчанию — цепочка из трёх, каждый шаг опционален:**
+**Vercel AI Gateway** (PRIMARY, если настроен — маршрутизирует к Gemini
+через инфраструктуру Vercel, что обходит региональные ограничения прямого
+доступа к Gemini API) → **прямой Google Gemini** → **DeepSeek**
+(`deepseek-chat`, API OpenAI-совместимый,
+`AI_BASE_URL=https://api.deepseek.com`) как финальный FALLBACK для
+текстовых задач. Любое звено можно не настраивать вовсе — цепочка просто
+короче, поведение при единственном настроенном звене идентично тому, что
+было до этой интеграции. Ниже описано, как это устроено и как проверить,
+что подключение реально работает.
 
 ### Архитектура
 
 ```
 handlers/*.py, DictionaryService, WordGenerationService, PhraseService
         │        (никогда не строят HTTP-запрос сами, никогда не
-        │         обращаются к Gemini/DeepSeek напрямую)
+        │         обращаются к Gateway/Gemini/DeepSeek напрямую)
         ▼
 services/ai_service.py — AIService (интерфейс)
         │  lookup_word / generate_words / explain_word /
@@ -468,25 +472,33 @@ services/ai_service.py — AIService (интерфейс)
 services/ai_provider.py — AIProvider (интерфейс)
         │  единственный метод: complete(system, user) -> raw text
         ▼
-FallbackAIProvider (когда настроены оба ключа)
+FallbackAIProvider (вложенные, по одному на каждую настроенную пару)
         │
-        ├─ 1) GeminiTextProvider (services/gemini_provider.py) — PRIMARY
-        │       Gemini `generateContent` REST API
+        ├─ 1) HttpAIProvider → Vercel AI Gateway — PRIMARY, если задан
+        │       AI_GATEWAY_API_KEY (тот же OpenAI-совместимый транспорт,
+        │       что и у DeepSeek, только другой base_url/ключ/модель)
         │
-        └─ 2) HttpAIProvider (services/ai_provider.py) — FALLBACK,
-                только при ошибке Gemini (timeout/сеть/rate limit/quota/
-                недоступность/невалидный ответ) — OpenAI-совместимый
-                Chat Completions API (DeepSeek по умолчанию)
+        ├─ 2) GeminiTextProvider (services/gemini_provider.py) — прямой
+        │       Gemini `generateContent` REST API, если задан
+        │       GEMINI_API_KEY
+        │
+        └─ 3) HttpAIProvider (services/ai_provider.py) — DeepSeek,
+                финальный fallback, если задан AI_API_KEY
+
+Каждое звено пробуется по порядку, переход на следующее — при ЛЮБОЙ
+AIError (timeout/сеть/rate limit/quota/недоступность/невалидный ответ).
+Следующий вызов снова начинает с самого верха цепочки.
 ```
 
 Для 📷 фото и 🎤 голоса — отдельные интерфейсы (`services/ocr_service.py`,
 `services/stt_service.py`), которые Gemini занимает так же: если
 `GEMINI_API_KEY` настроен, `GeminiOCRProvider`/`GeminiSTTProvider`
 (тот же `services/gemini_provider.py`) читают изображение/аудио напрямую
-в одном вызове — DeepSeek туда никогда не подставляется (его чат-API не
-заявляет поддержку изображений/аудио), а прежний `OCR_API_KEY`/
-`STT_API_KEY`-путь остаётся рабочим для тех, у кого `GEMINI_API_KEY` не
-задан — поведение идентично тому, что было до этой интеграции.
+в одном вызове — DeepSeek и Vercel AI Gateway туда никогда не
+подставляются (не заявляют/не проверена поддержка изображений/аудио для
+этого сценария), а прежний `OCR_API_KEY`/`STT_API_KEY`-путь остаётся
+рабочим для тех, у кого `GEMINI_API_KEY` не задан — поведение идентично
+тому, что было до этой интеграции.
 
 - **Handlers никогда не вызывают AI напрямую** — только через
   `services.ai_service.get_ai_service()` /
@@ -497,14 +509,16 @@ FallbackAIProvider (когда настроены оба ключа)
   `PhraseService` тоже вызывают только его.
 - **AIProvider — заменяемый транспорт.** `HttpAIProvider` работает с любым
   OpenAI-совместимым API — сама OpenAI, Azure OpenAI, OpenRouter,
-  self-hosted шлюз, DeepSeek — через `AI_BASE_URL`. `GeminiTextProvider`
-  реализует тот же интерфейс против Gemini. `FallbackAIProvider`
-  (`services/ai_provider.py`) composes two `AIProvider`s: пробует
-  `primary` (Gemini), при **любой** `AIError` логирует и переходит на
-  `secondary` (DeepSeek) — но каждый **следующий** вызов снова начинает с
-  `primary`, так что восстановившийся Gemini подхватывается сам собой,
-  без "залипания" на fallback. Ни `AIService`, ни вызывающий код это не
-  видят — как и добавление провайдера для другого протокола: реализовать
+  self-hosted шлюз, DeepSeek, **Vercel AI Gateway** — через `base_url`.
+  `GeminiTextProvider` реализует тот же интерфейс против Gemini напрямую.
+  `FallbackAIProvider` (`services/ai_provider.py`) composes два
+  `AIProvider`; `get_ai_service()` вкладывает их друг в друга под
+  количество реально настроенных звеньев (0–3): пробует `primary`, при
+  **любой** `AIError` логирует и переходит на `secondary` — но каждый
+  **следующий** вызов снова начинает с самого верха цепочки, так что
+  восстановившийся провайдер подхватывается сам собой, без "залипания"
+  на fallback. Ни `AIService`, ни вызывающий код это не видят — как и
+  добавление провайдера для другого протокола: реализовать
   `AIProvider.complete()`, ничего больше трогать не нужно.
 - **Структурированный вывод.** Всё, что должно попасть в базу
   (`GeneratedWord`, `TextAnalysisResult`, ...), — Pydantic-модели в
@@ -519,7 +533,11 @@ FallbackAIProvider (когда настроены оба ключа)
 
 | Переменная | Обязательна | Назначение |
 |---|---|---|
-| `GEMINI_API_KEY` | нет | PRIMARY-провайдер. Пусто = используется только `AI_API_KEY` (DeepSeek) как единственный текстовый провайдер, либо только локальная база, если и он пуст. **Никогда не коммитить.** |
+| `AI_GATEWAY_API_KEY` | нет | HIGHEST-priority провайдер — Vercel AI Gateway (маршрутизирует к Gemini и другим моделям из инфраструктуры Vercel, обходя региональные ограничения прямого доступа). Пусто = пропускается, цепочка идёт к `GEMINI_API_KEY`. Получить ключ: vercel.com/ai-gateway — без деплоя кода. **Никогда не коммитить.** |
+| `AI_GATEWAY_MODEL` | нет (умолч. `google/gemini-2.5-flash`) | Модель в каталоге Gateway (`creator/model`). Полный список: `curl https://ai-gateway.vercel.sh/v1/models` (без авторизации). |
+| `AI_GATEWAY_BASE_URL` | нет (умолч. `https://ai-gateway.vercel.sh/v1`) | Только для нестандартного эндпоинта Gateway. |
+| `AI_GATEWAY_ENABLED` | нет (умолч. `true`) | Явный выключатель поверх `AI_GATEWAY_API_KEY`. |
+| `GEMINI_API_KEY` | нет | Прямой Gemini, второе звено цепочки. Пусто = используется только `AI_API_KEY` (DeepSeek) как единственный текстовый провайдер, либо только локальная база, если и он пуст. **Никогда не коммитить.** |
 | `GEMINI_MODEL` | нет (умолч. `gemini-flash-latest`) | Модель Gemini. `-latest`-алиас — всегда актуальная модель линейки; можно закрепить конкретную версию (например `gemini-2.5-flash`). |
 | `GEMINI_TEXT_MODEL` / `GEMINI_MULTIMODAL_MODEL` | нет | Необязательные переопределения `GEMINI_MODEL` отдельно для текста и для фото/аудио — оставьте пустыми, чтобы использовать одну модель для всего. |
 | `GEMINI_BASE_URL` | нет | Только для нестандартного эндпоинта Gemini. |
@@ -548,19 +566,22 @@ FallbackAIProvider (когда настроены оба ключа)
 
 **Как проверить подключение:**
 
-- `services/ai_diagnostics.test_gemini_connection()` и
-  `test_deepseek_connection()` каждая делает один минимальный запрос к
-  своему провайдеру и возвращает `ConnectionTestResult(ok, reason,
-  detail)` — никогда не бросает исключение и никогда не печатает сам
-  ключ. Обе вызываются автоматически при каждом старте бота (`bot.py`'s
-  `on_startup`, не блокируют запуск даже при сбое) и пишут в лог ровно
-  `Gemini connection: OK` / `DeepSeek connection: OK` при успехе, либо
-  `Gemini connection check failed (reason=...)` / `DeepSeek connection
+- `services/ai_diagnostics.test_ai_gateway_connection()`,
+  `test_gemini_connection()` и `test_deepseek_connection()` — каждая
+  делает один минимальный запрос к своему провайдеру и возвращает
+  `ConnectionTestResult(ok, reason, detail)` — никогда не бросает
+  исключение и никогда не печатает сам ключ. Все три вызываются
+  автоматически при каждом старте бота (`bot.py`'s `on_startup`, не
+  блокируют запуск даже при сбое) и пишут в лог ровно `Vercel AI Gateway
+  connection: OK` / `Gemini connection: OK` / `DeepSeek connection: OK`
+  при успехе, либо `Vercel AI Gateway connection check failed
+  (reason=...)` / `Gemini connection check failed (reason=...)` /
+  `DeepSeek connection
   check failed (reason=...)` с точной причиной при неудаче
   (`missing_api_key` / `disabled` / `unauthorized` / `rate_limited` /
   `timeout` / `network_error` / `invalid_response`).
-- Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_gemini_connection; print(asyncio.run(test_gemini_connection()))"`
-  (аналогично с `test_deepseek_connection`).
+- Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_ai_gateway_connection; print(asyncio.run(test_ai_gateway_connection()))"`
+  (аналогично с `test_gemini_connection`/`test_deepseek_connection`).
 - **`reason=invalid_response` от Gemini на рабочем ключе?** Часто это не
   проблема ключа, а `"User location is not supported for the API use"` —
   Gemini Developer API недоступен из региона сервера. Проверить напрямую:
@@ -571,9 +592,15 @@ FallbackAIProvider (когда настроены оба ключа)
     -d '{"contents":[{"parts":[{"text":"ping"}]}]}'
   ```
   Если в ответе именно эта ошибка — бот при этом продолжает работать на
-  DeepSeek (fallback сработал автоматически); чтобы вернуть Gemini,
-  задайте `GEMINI_PROXY_URL` (форвард-прокси в поддерживаемом регионе,
-  см. таблицу переменных выше).
+  DeepSeek (fallback сработал автоматически, ничего не сломано). Чтобы
+  всё же получить доступ к Gemini из заблокированного региона — два
+  варианта:
+  1. **`AI_GATEWAY_API_KEY`** (рекомендуется) — Vercel AI Gateway,
+     готовый managed-продукт, ключ без деплоя кода (vercel.com/ai-gateway,
+     см. таблицу переменных выше). Именно так это подключено на этом
+     деплое.
+  2. **`GEMINI_PROXY_URL`** — свой форвард-прокси в поддерживаемом
+     регионе, если нужен прямой доступ к Gemini API, а не через Gateway.
 - В 📖 Словарь введите слово, которого точно нет в seed-наборе
   (`database/seed_words.py`) — например `serendipity`. Если AI настроен
   правильно, придёт карточка с переводом; при следующем вводе того же

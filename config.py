@@ -84,6 +84,10 @@ class Settings:
     gemini_base_url: str | None
     gemini_enabled: bool
     gemini_proxy_url: str | None
+    ai_gateway_api_key: str | None
+    ai_gateway_model: str
+    ai_gateway_base_url: str
+    ai_gateway_enabled: bool
     max_generation_attempts: int
     max_extra_words_per_day: int
     max_text_length: int
@@ -169,6 +173,22 @@ def get_settings() -> Settings:
         # Telegram/OCR-legacy traffic, which never sees this setting.
         # Standard proxy URL form: http://user:pass@host:port.
         gemini_proxy_url=os.getenv("GEMINI_PROXY_URL") or None,
+        # Vercel AI Gateway (https://vercel.com/docs/ai-gateway): an
+        # OpenAI-Chat-Completions-compatible endpoint that routes to
+        # Gemini (and other providers) from Vercel's own infrastructure -
+        # useful when the server's own region is blocked from calling
+        # Gemini directly ("User location is not supported for the API
+        # use"). Reuses services.ai_provider.HttpAIProvider unchanged
+        # (same transport already used for DeepSeek) - no new provider
+        # class needed. When configured, this becomes the HIGHEST-priority
+        # text provider, ahead of direct Gemini and DeepSeek.
+        ai_gateway_api_key=os.getenv("AI_GATEWAY_API_KEY") or None,
+        # google/<model> naming (Vercel's own catalog convention) - the
+        # full current list is public, unauthenticated:
+        # curl https://ai-gateway.vercel.sh/v1/models
+        ai_gateway_model=os.getenv("AI_GATEWAY_MODEL", "google/gemini-2.5-flash"),
+        ai_gateway_base_url=os.getenv("AI_GATEWAY_BASE_URL", "https://ai-gateway.vercel.sh/v1"),
+        ai_gateway_enabled=_get_bool("AI_GATEWAY_ENABLED", True),
         max_generation_attempts=_get_int("MAX_GENERATION_ATTEMPTS", 3),
         # Bugfix stage: "➕ Ещё новые слова" draws from a separate daily
         # pool than daily_new_words, precisely so an eager user can ask for

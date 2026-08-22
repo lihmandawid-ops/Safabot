@@ -717,54 +717,81 @@ def get_ai_service() -> AIService:
     changing AI-related environment variables mid-process (tests only;
     the real bot reads .env once at startup).
 
-    Gemini = PRIMARY, DeepSeek (AI_API_KEY et al.) = FALLBACK for
-    text-only tasks, when both are configured (FallbackAIProvider). Either
-    one alone still works exactly as before this integration - Gemini-only
-    if only GEMINI_API_KEY is set, DeepSeek-only if only AI_API_KEY is
-    set (identical to every prior release), or NotConfiguredAIService if
-    neither is - AI-backed features always degrade to the local database,
-    never block the bot from starting."""
+    Builds a priority-ordered fallback chain out of whichever text
+    providers are actually configured, highest priority first:
+
+      1. Vercel AI Gateway (AI_GATEWAY_API_KEY) - an OpenAI-Chat-
+         Completions-compatible endpoint that routes to Gemini (and
+         others) from Vercel's own infrastructure. Useful when the
+         server's own region can't reach Gemini directly.
+      2. Direct Gemini (GEMINI_API_KEY)
+      3. DeepSeek/AI_API_KEY - the original, pre-Gemini-integration
+         provider slot, still the final fallback
+
+    Each is independently optional - any single one alone works exactly
+    as it always has (e.g. DeepSeek-only is identical to every release
+    before Gemini existed), any combination chains via nested
+    FallbackAIProvider (tries the next one down on ANY AIError, always
+    starting from the top again on the NEXT call - never sticky), and
+    none configured returns NotConfiguredAIService - AI-backed features
+    always degrade to the local database, never block the bot from
+    starting."""
     from config import get_settings
     from services.gemini_provider import GeminiTextProvider
 
     settings = get_settings()
 
-    gemini_provider: AIProvider | None = None
+    candidates: list[tuple[str, AIProvider, str]] = []  # (label, provider, model_label)
+
+    if settings.ai_gateway_enabled and settings.ai_gateway_api_key:
+        candidates.append((
+            "vercel-gateway",
+            HttpAIProvider(
+                api_key=settings.ai_gateway_api_key,
+                model=settings.ai_gateway_model,
+                base_url=settings.ai_gateway_base_url,
+                timeout=settings.ai_timeout_seconds,
+            ),
+            settings.ai_gateway_model,
+        ))
+
     if settings.gemini_enabled and settings.gemini_api_key:
-        gemini_provider = GeminiTextProvider(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_text_model or settings.gemini_model,
-            base_url=settings.gemini_base_url,
-            timeout=settings.ai_timeout_seconds,
-            proxy=settings.gemini_proxy_url,
-        )
+        candidates.append((
+            "gemini",
+            GeminiTextProvider(
+                api_key=settings.gemini_api_key,
+                model=settings.gemini_text_model or settings.gemini_model,
+                base_url=settings.gemini_base_url,
+                timeout=settings.ai_timeout_seconds,
+                proxy=settings.gemini_proxy_url,
+            ),
+            settings.gemini_text_model or settings.gemini_model,
+        ))
 
-    deepseek_provider: AIProvider | None = None
     if settings.ai_enabled and settings.ai_api_key:
-        deepseek_provider = HttpAIProvider(
-            api_key=settings.ai_api_key,
-            model=settings.ai_model,
-            base_url=settings.ai_base_url,
-            timeout=settings.ai_timeout_seconds,
-        )
+        candidates.append((
+            settings.ai_provider,
+            HttpAIProvider(
+                api_key=settings.ai_api_key,
+                model=settings.ai_model,
+                base_url=settings.ai_base_url,
+                timeout=settings.ai_timeout_seconds,
+            ),
+            settings.ai_model,
+        ))
 
-    if gemini_provider is not None and deepseek_provider is not None:
-        provider: AIProvider = FallbackAIProvider(
-            primary=gemini_provider, secondary=deepseek_provider,
-            primary_label="gemini", secondary_label=settings.ai_provider,
-        )
-        provider_label = f"gemini+{settings.ai_provider}"
-        model_label = settings.gemini_text_model or settings.gemini_model
-    elif gemini_provider is not None:
-        provider = gemini_provider
-        provider_label = "gemini"
-        model_label = settings.gemini_text_model or settings.gemini_model
-    elif deepseek_provider is not None:
-        provider = deepseek_provider
-        provider_label = settings.ai_provider
-        model_label = settings.ai_model
-    else:
+    if not candidates:
         return NotConfiguredAIService()
+
+    # Fold right-to-left into nested FallbackAIProviders: the last
+    # candidate is the innermost/final fallback, each earlier one wraps
+    # it as a new primary - so trying `provider` tries candidates in
+    # their original (highest-priority-first) order.
+    provider_label, provider, _ = candidates[-1]
+    for label, p, _ in reversed(candidates[:-1]):
+        provider = FallbackAIProvider(primary=p, secondary=provider, primary_label=label, secondary_label=provider_label)
+        provider_label = f"{label}+{provider_label}"
+    model_label = candidates[0][2]  # the highest-priority candidate's own model, for logging
 
     return LiveAIService(
         provider=provider,
