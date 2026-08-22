@@ -4,24 +4,20 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from services.learning_service import ON_DEMAND_REVIEW_OPTIONS
 from utils.i18n import get_current_language, t
 
 
-def count_picker_keyboard(*, mastered: bool) -> InlineKeyboardMarkup:
-    flag = "1" if mastered else "0"
-    rows = [
+def review_pool_keyboard() -> InlineKeyboardMarkup:
+    """🔄 Повторить (bugfix stage sections 38-42): exactly two options,
+    nothing else - no count question, Safabot picks how many words on its
+    own (AUTO_REVIEW_COUNT in handlers/review_now.py)."""
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(str(n), callback_data=f"revnow:count:{n}:{flag}")
-            for n in ON_DEMAND_REVIEW_OPTIONS
+            [InlineKeyboardButton(t("revnow.button.review_new", get_current_language()), callback_data="revnow:menu")],
+            [InlineKeyboardButton(t("revnow.button.review_mastered", get_current_language()), callback_data="revnow:menu:mastered")],
+            [InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="revnow:cancel")],
         ]
-    ]
-    if not mastered:
-        rows.append(
-            [InlineKeyboardButton(t("revnow.button.mastered", get_current_language()), callback_data="revnow:menu:mastered")]
-        )
-    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="revnow:cancel")])
-    return InlineKeyboardMarkup(rows)
+    )
 
 
 def mode_picker_keyboard(*, count: int, mastered: bool) -> InlineKeyboardMarkup:

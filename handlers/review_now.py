@@ -1,9 +1,11 @@
 """🔁 Повторить - ON-DEMAND REVIEW (repetition-system stage sections 1-7,
-16-17): replaces the old due-gated "🔄 Повторить" entry point
-(handlers/review.py used to call handlers.learning.show_review_intro,
-which only showed anything when words were actually due). Tapping the
-button now always shows the count picker immediately - selection,
-scoring and the mode hand-off all reuse existing machinery:
+16-17; bugfix stage sections 38-42): replaces the old due-gated "🔄
+Повторить" entry point (handlers/review.py used to call handlers.
+learning.show_review_intro, which only showed anything when words were
+actually due). Tapping the button shows exactly two choices - 🆕 Повторить
+новые слова / ✅ Повторить выученные слова - and NEVER asks "how many
+words?"; Safabot always picks a small batch itself (AUTO_REVIEW_COUNT).
+Selection, scoring and the mode hand-off all reuse existing machinery:
 
 - word selection: services.learning_service.get_words_for_on_demand_review
   (itself a thin wrapper over the same due/upcoming/new-fallback query
@@ -21,14 +23,8 @@ scoring and the mode hand-off all reuse existing machinery:
   by services/notification_service.py) re-reads the exact word_ids that
   notification was logged with (NotificationLog.word_ids) instead of
   re-running selection, so the words the user reviews are exactly the
-  ones they were shown - then joins the same _launch() used by the count/
-  mode pickers above.
-
-Word selection is re-run (not cached in user_data) between the count-pick
-and mode-pick callbacks: get_words_for_old_review is a deterministic
-ORDER BY query, so re-issuing it with the same (count, mastered) a few
-seconds later returns the same set - simpler than trying to pickle a list
-of ORM objects across callback taps.
+  ones they were shown - then joins the same _launch() used by the pool/
+  mode taps above.
 """
 from __future__ import annotations
 
@@ -47,16 +43,21 @@ from handlers import quiz as quiz_handler
 from keyboards.main_menu import main_menu_keyboard
 from keyboards.review_now import (
     completion_keyboard,
-    count_picker_keyboard,
     empty_keyboard,
     flashcard_keyboard,
     mode_picker_keyboard,
+    review_pool_keyboard,
 )
 from services import learning_service, quiz_service, review_now_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.time import local_today, utc_now
 
 _REVIEWABLE_STATUSES = (WordStatus.LEARNING, WordStatus.REVIEW)
+# bugfix stage sections 38-42: 🔄 Повторить must never ask "how many
+# words?" - Safabot picks a small, sensible batch on its own instead.
+# Matches the existing ON_DEMAND_REVIEW_OPTIONS' middle value, so this is
+# still a familiar batch size, just no longer user-chosen.
+AUTO_REVIEW_COUNT = 8
 
 
 async def _current_user_and_language(session, telegram_id: int):
@@ -79,8 +80,8 @@ async def show_review_now_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(t("card.no_language", get_current_language()))
             return
         await update.message.reply_text(
-            t("revnow.count_prompt", get_current_language()),
-            reply_markup=count_picker_keyboard(mastered=False),
+            t("revnow.pool_prompt", get_current_language()),
+            reply_markup=review_pool_keyboard(),
         )
 
 
@@ -164,24 +165,25 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
             return
 
         if data in ("revnow:menu", "revnow:menu:mastered"):
+            # bugfix stage sections 38-42: no count question - tapping
+            # either top-level pool choice goes straight to selection +
+            # launch (or the flashcard/quiz mode prompt, if the user has
+            # no saved preference), using Safabot's own AUTO_REVIEW_COUNT.
             await query.answer()
             context.user_data.pop("revnow", None)
             context.user_data.pop("quiz", None)
             mastered = data == "revnow:menu:mastered"
-            key = "revnow.count_prompt_mastered" if mastered else "revnow.count_prompt"
-            await edit(t(key, get_current_language()), reply_markup=count_picker_keyboard(mastered=mastered))
-
-        elif data.startswith("revnow:count:"):
-            await query.answer()
-            count, mastered = _parse_count_flag(data.removeprefix("revnow:count:"))
             words = await learning_service.get_words_for_on_demand_review(
-                session, user=user, user_language=current, limit=count, include_mastered=mastered,
+                session, user=user, user_language=current, limit=AUTO_REVIEW_COUNT, include_mastered=mastered,
             )
             if not words:
                 await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
                 return
             if user.review_mode is None:
-                await edit(t("revnow.mode_prompt", get_current_language()), reply_markup=mode_picker_keyboard(count=count, mastered=mastered))
+                await edit(
+                    t("revnow.mode_prompt", get_current_language()),
+                    reply_markup=mode_picker_keyboard(count=AUTO_REVIEW_COUNT, mastered=mastered),
+                )
                 return
             await _launch(session, edit, context, user, current, words, mode=user.review_mode)
 

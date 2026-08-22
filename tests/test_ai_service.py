@@ -120,6 +120,57 @@ async def test_missing_required_field_is_invalid_response():
         await svc.lookup_word("go", language_code="en", translation_language="ru", user_id=1)
 
 
+# --- 6b. bidirectional-dictionary direction validation (spec sections 8, 27-29) ---
+
+CORRECTLY_DIRECTED_JSON = (
+    '{"query_language": "ru", "word": "go", "translations": [{"translation": "идти"}]}'
+)
+WRONG_LANGUAGE_JSON = (
+    '{"query_language": "de", "word": "go", "translations": [{"translation": "идти"}]}'
+)
+ECHOED_QUERY_JSON = (
+    # query_language says the raw input ("идти", native/ru) but "word" is
+    # left untranslated - the AI failed to actually translate.
+    '{"query_language": "ru", "word": "идти", "translations": [{"translation": "идти"}]}'
+)
+NO_QUERY_LANGUAGE_JSON = GOOD_WORD_JSON  # older shape - field simply absent
+
+
+async def test_lookup_word_accepts_a_correctly_directed_response_without_retrying():
+    svc, provider = _service([CORRECTLY_DIRECTED_JSON], max_retries=2)
+    result = await svc.lookup_word("идти", language_code="en", translation_language="ru", user_id=1)
+    assert result.word == "go"
+    assert provider.calls == 1
+
+
+async def test_lookup_word_tolerates_a_missing_query_language():
+    svc, provider = _service([NO_QUERY_LANGUAGE_JSON], max_retries=2)
+    result = await svc.lookup_word("go", language_code="en", translation_language="ru", user_id=1)
+    assert result.word == "go"
+    assert provider.calls == 1
+
+
+async def test_lookup_word_rejects_and_retries_on_a_third_hallucinated_language():
+    svc, provider = _service([WRONG_LANGUAGE_JSON, CORRECTLY_DIRECTED_JSON], max_retries=2)
+    result = await svc.lookup_word("идти", language_code="en", translation_language="ru", user_id=1)
+    assert result.word == "go"
+    assert provider.calls == 2
+
+
+async def test_lookup_word_rejects_and_retries_on_an_untranslated_echo():
+    svc, provider = _service([ECHOED_QUERY_JSON, CORRECTLY_DIRECTED_JSON], max_retries=2)
+    result = await svc.lookup_word("идти", language_code="en", translation_language="ru", user_id=1)
+    assert result.word == "go"
+    assert provider.calls == 2
+
+
+async def test_lookup_word_direction_retry_is_bounded():
+    svc, provider = _service([WRONG_LANGUAGE_JSON, WRONG_LANGUAGE_JSON], max_retries=1)
+    with pytest.raises(AIInvalidResponseError):
+        await svc.lookup_word("идти", language_code="en", translation_language="ru", user_id=1)
+    assert provider.calls == 2
+
+
 # --- 7/8. timeout / unavailable ---
 
 async def test_timeout_is_retried_then_raises():
@@ -239,7 +290,7 @@ GOOD_VERB_CONJUGATION_JSON = (
 
 async def test_generate_verb_conjugation_returns_validated_result():
     svc, provider = _service([GOOD_VERB_CONJUGATION_JSON])
-    result = await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+    result = await svc.generate_verb_conjugation("go", language_code="en", translation_language="ru", user_id=1)
     assert isinstance(result, ai_models.VerbConjugationResult)
     assert result.word == "go"
     assert result.forms["present"][0].form == "I go"
@@ -258,7 +309,7 @@ async def test_generate_verb_conjugation_tolerates_a_plain_string_forms_shape():
         '{"word": "go", "language": "en", "forms": {"present": ["I go", "You go"]}}'
     )
     svc, _ = _service([raw])
-    result = await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+    result = await svc.generate_verb_conjugation("go", language_code="en", translation_language="ru", user_id=1)
     assert result.forms["present"][0].form == "I go"
     assert result.forms["present"][0].pronunciation is None
 
@@ -273,14 +324,14 @@ async def test_generate_verb_conjugation_never_forces_english_tense_names():
         '"Präteritum": ["ich ging", "du gingst", "er/sie/es ging", "wir gingen", "ihr gingt", "sie gingen"]}}'
     )
     svc, _ = _service([german_json])
-    result = await svc.generate_verb_conjugation("gehen", language_code="de", user_id=1)
+    result = await svc.generate_verb_conjugation("gehen", language_code="de", translation_language="ru", user_id=1)
     assert set(result.forms) == {"Präsens", "Präteritum"}
 
 
 async def test_generate_verb_conjugation_rejects_empty_forms():
     svc, _ = _service(['{"word": "go", "language": "en", "forms": {}}'], max_retries=0)
     with pytest.raises(AIInvalidResponseError):
-        await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+        await svc.generate_verb_conjugation("go", language_code="en", translation_language="ru", user_id=1)
 
 
 # --- 14. generate_native_phrase (💬 Полезные фразы) ---
@@ -361,7 +412,7 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
     with pytest.raises(AIConfigurationError):
         await svc.extract_learning_words("hi", language_code="en", user_id=1)
     with pytest.raises(AIConfigurationError):
-        await svc.generate_verb_conjugation("go", language_code="en", user_id=1)
+        await svc.generate_verb_conjugation("go", language_code="en", translation_language="ru", user_id=1)
     with pytest.raises(AIConfigurationError):
         await svc.generate_native_phrase(
             language_code="en", translation_language="ru", level="beginner", situation="work", user_id=1,

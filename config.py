@@ -52,8 +52,6 @@ class PlanLimits:
     pro_daily_new_words_max: int = 8
     pro_max_languages: int = 8
     free_ai_enabled: bool = False
-    free_ocr_enabled: bool = False
-    free_voice_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,18 +98,6 @@ class Settings:
     level_up_min_accuracy: float
     max_extra_words_per_day: int
     max_text_length: int
-    max_image_size_bytes: int
-    max_audio_size_bytes: int
-    ocr_api_key: str | None
-    ocr_enabled: bool
-    ocr_provider: str
-    ocr_model: str
-    ocr_base_url: str | None
-    stt_api_key: str | None
-    stt_enabled: bool
-    stt_provider: str
-    stt_model: str
-    stt_base_url: str | None
     plan_limits: PlanLimits = field(default_factory=PlanLimits)
 
 
@@ -211,29 +197,7 @@ def get_settings() -> Settings:
         # more today without silently raising everyone's default pace -
         # and so DeepSeek usage from repeated presses stays bounded.
         max_extra_words_per_day=_get_int("MAX_EXTRA_WORDS_PER_DAY", 20),
-        # Cost control (section 22): caps on what gets sent to AI/media
-        # providers, regardless of what a user pastes/uploads.
+        # Cost control (section 22): a cap on what gets sent to AI
+        # providers, regardless of what a user pastes.
         max_text_length=_get_int("MAX_TEXT_LENGTH", 2000),
-        max_image_size_bytes=_get_int("MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024),
-        max_audio_size_bytes=_get_int("MAX_AUDIO_SIZE_BYTES", 20 * 1024 * 1024),
-        # OCR (services/ocr_service.py, bugfix spec section 17): DeepSeek's
-        # chat model is not documented as vision-capable, so 📷 Разбор фото
-        # never assumes it is - OCR_API_KEY/OCR_BASE_URL point at a
-        # separate, independently-configurable vision endpoint. Same
-        # never-block-startup rule as AI: missing config just means
-        # get_ocr_service() hands back the "not configured" implementation.
-        ocr_api_key=os.getenv("OCR_API_KEY") or None,
-        ocr_enabled=_get_bool("OCR_ENABLED", True),
-        ocr_provider=os.getenv("OCR_PROVIDER", "none"),
-        ocr_model=os.getenv("OCR_MODEL", "gpt-4o-mini"),
-        ocr_base_url=os.getenv("OCR_BASE_URL") or None,
-        # Speech-to-text (services/stt_service.py, bugfix spec section 18):
-        # same reasoning - DeepSeek does not do audio transcription, so
-        # STT_API_KEY/STT_BASE_URL point at a separate Whisper-style
-        # endpoint, independently configurable and optional.
-        stt_api_key=os.getenv("STT_API_KEY") or None,
-        stt_enabled=_get_bool("STT_ENABLED", True),
-        stt_provider=os.getenv("STT_PROVIDER", "none"),
-        stt_model=os.getenv("STT_MODEL", "whisper-1"),
-        stt_base_url=os.getenv("STT_BASE_URL") or None,
     )

@@ -28,8 +28,9 @@ class _FakeConjugationService:
         self.raises = raises
         self.calls = 0
 
-    async def generate_verb_conjugation(self, word, *, language_code, user_id):
+    async def generate_verb_conjugation(self, word, *, language_code, translation_language, user_id):
         self.calls += 1
+        self.last_translation_language = translation_language
         if self.raises is not None:
             raise self.raises
         from services import ai_models
@@ -38,6 +39,9 @@ class _FakeConjugationService:
 
 
 async def test_get_or_generate_returns_cached_conjugation_without_calling_ai(session, monkeypatch):
+    """A legacy flat {tense: [...]} cache (predates person_label/
+    translation, so it's language-independent) is served as-is regardless
+    of translation_language."""
     from services import verb_forms_service
 
     word, _ = await word_service.get_or_create_word(
@@ -51,8 +55,15 @@ async def test_get_or_generate_returns_cached_conjugation_without_calling_ai(ses
 
     monkeypatch.setattr("services.verb_forms_service.get_ai_service", _boom)
 
-    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
     assert result == {"present": ["I go"]}
+
+
+def _with_defaults(forms: dict[str, list]) -> dict[str, list]:
+    return {
+        tense: [{"person_label": None, "translation": None, **item} for item in items]
+        for tense, items in forms.items()
+    }
 
 
 async def test_get_or_generate_calls_ai_and_caches_for_a_verb(session, monkeypatch):
@@ -64,15 +75,43 @@ async def test_get_or_generate_calls_ai_and_caches_for_a_verb(session, monkeypat
     fake = _FakeConjugationService()
     monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
 
-    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
-    assert result == fake.forms
-    assert word.verb_conjugation == fake.forms
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
+    assert result == _with_defaults(fake.forms)
+    assert word.verb_conjugation == {"ru": _with_defaults(fake.forms)}
+    assert fake.calls == 1
+    assert fake.last_translation_language == "ru"
+
+    # Second call (same translation_language) must hit the now-populated
+    # cache, not the AI again.
+    result2 = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
+    assert result2 == _with_defaults(fake.forms)
     assert fake.calls == 1
 
-    # Second call must hit the now-populated cache, not the AI again.
-    result2 = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
-    assert result2 == fake.forms
+
+async def test_get_or_generate_regenerates_for_a_second_translation_language(session, monkeypatch):
+    """Two learners with different native languages must each get their
+    own person_label/translation text - the cache is scoped per
+    translation_language, so a second language triggers exactly one more
+    AI call, not zero (spec: never show a Russian label to a Hebrew
+    native speaker) and not a lost first-language entry either."""
+    from services import verb_forms_service
+
+    word, _ = await word_service.get_or_create_word(session, language_code="en", word="go", is_verb=True, part_of_speech="verb")
+    await session.commit()
+
+    fake = _FakeConjugationService()
+    monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
+
+    await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
     assert fake.calls == 1
+
+    await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="he", user_id=1)
+    assert fake.calls == 2
+    assert set(word.verb_conjugation) == {"ru", "he"}
+
+    # The first language's entry is still cached, untouched.
+    await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
+    assert fake.calls == 2
 
 
 async def test_get_or_generate_caches_per_form_pronunciation(session, monkeypatch):
@@ -86,10 +125,12 @@ async def test_get_or_generate_caches_per_form_pronunciation(session, monkeypatc
     fake = _FakeConjugationService()
     monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
 
-    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
-    assert result["present"][0] == {"form": "I go", "pronunciation": "gohh"}
-    assert result["past"][0] == {"form": "I went", "pronunciation": "wehnt"}
-    assert word.verb_conjugation["present"][0]["pronunciation"] == "gohh"
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
+    assert result["present"][0]["form"] == "I go"
+    assert result["present"][0]["pronunciation"] == "gohh"
+    assert result["past"][0]["form"] == "I went"
+    assert result["past"][0]["pronunciation"] == "wehnt"
+    assert word.verb_conjugation["ru"]["present"][0]["pronunciation"] == "gohh"
 
 
 async def test_get_or_generate_returns_none_for_a_non_verb_without_calling_ai(session, monkeypatch):
@@ -103,7 +144,7 @@ async def test_get_or_generate_returns_none_for_a_non_verb_without_calling_ai(se
 
     monkeypatch.setattr("services.verb_forms_service.get_ai_service", _boom)
 
-    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
     assert result is None
 
 
@@ -116,7 +157,7 @@ async def test_get_or_generate_returns_none_gracefully_on_ai_failure(session, mo
     fake = _FakeConjugationService(raises=AIUnavailableError("down"))
     monkeypatch.setattr("services.verb_forms_service.get_ai_service", lambda: fake)
 
-    result = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=1)
+    result = await verb_forms_service.get_or_generate_conjugation(session, word, translation_language="ru", user_id=1)
     assert result is None
     assert word.verb_conjugation is None
 

@@ -122,14 +122,27 @@ _MAX_CONJUGATION_MESSAGE_CHARS = 3500
 def _render_conjugated_form(item) -> str:
     """Word.verb_conjugation is a schema-less JSON column, so an entry
     cached before the global pronunciation rule (section 49) is still a
-    plain form string, while a freshly generated one is a {"form":
-    "pronunciation"} dict - handled per-item (not by branching on the
-    whole table's shape) so even a table with a mix of old and new
-    entries renders correctly."""
+    plain form string, while a freshly generated one is a dict - handled
+    per-item (not by branching on the whole table's shape) so even a table
+    with a mix of old and new entries renders correctly.
+
+    person_label/translation (bidirectional-dictionary stage sections
+    14-18) are shown as a "Label: form (pronunciation) — translation" line
+    when present, so the table matches the spec's worked example (a
+    native-language person column mapped to the learning-language form and
+    its own translation) - both optional, so an older cached entry with
+    neither still renders exactly as it did before this field existed."""
     if isinstance(item, dict):
         form = item.get("form", "")
         pronunciation = item.get("pronunciation")
-        return f"{form} ({pronunciation})" if pronunciation else form
+        line = f"{form} ({pronunciation})" if pronunciation else form
+        label = item.get("person_label")
+        if label:
+            line = f"{label}: {line}"
+        translation = item.get("translation")
+        if translation:
+            line = f"{line} — {translation}"
+        return line
     return item
 
 

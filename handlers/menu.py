@@ -28,7 +28,6 @@ from database.repositories import users as users_repo
 from handlers import dictionary as dictionary_handler
 from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
-from handlers import media as media_handler
 from handlers import phrases as phrases_handler
 from handlers import review as review_handler
 from handlers import settings as settings_handler
@@ -93,16 +92,6 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if action == main_menu.PHRASES:
         context.user_data.pop("mode", None)
         await phrases_handler.show_phrases_menu(update, context)
-        return
-
-    if action == main_menu.PARSE_PHOTO:
-        context.user_data.pop("mode", None)
-        await media_handler.prompt_for_photo(update, context)
-        return
-
-    if action == main_menu.PARSE_VOICE:
-        context.user_data.pop("mode", None)
-        await media_handler.prompt_for_voice(update, context)
         return
 
     feature_key = _COMING_SOON.get(action) if action else None

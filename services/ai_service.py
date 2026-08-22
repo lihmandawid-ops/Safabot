@@ -41,6 +41,7 @@ from services.ai_errors import (
 from services.ai_provider import AIProvider, FallbackAIProvider, HttpAIProvider
 from utils.logging import get_logger
 from utils.phrase_situations import PRESET_SITUATIONS
+from utils.text import normalize_word
 
 logger = get_logger(__name__)
 
@@ -103,14 +104,17 @@ class AIService(ABC):
 
     @abstractmethod
     async def generate_verb_conjugation(
-        self, word: str, *, language_code: str, user_id: int,
+        self, word: str, *, language_code: str, translation_language: str, user_id: int,
     ) -> ai_models.VerbConjugationResult:
-        """🔤 Все формы (repetition-system stage sections 18-25): a full
-        conjugation table using whatever tense/mood structure is natural
-        for `language_code`'s own grammar - never English's four tenses
-        forced onto another language. Callers (services/verb_forms_service.py)
-        cache the result on Word.verb_conjugation so this is called at
-        most once per verb."""
+        """🔤 Все формы (repetition-system stage sections 18-25; bidirectional-
+        dictionary stage sections 14-18): a full conjugation table using
+        whatever tense/mood structure is natural for `language_code`'s own
+        grammar - never English's four tenses forced onto another language.
+        Each form also carries a grammatical-person label and its own
+        translation, both written in `translation_language` (never
+        interface_language). Callers (services/verb_forms_service.py) cache
+        the result on Word.verb_conjugation, scoped per translation_language
+        since the label/translation text is native-language-dependent."""
 
     @abstractmethod
     async def generate_native_phrase(
@@ -175,7 +179,7 @@ class NotConfiguredAIService(AIService):
     async def extract_learning_words(self, text, *, language_code, user_id):
         raise AIConfigurationError()
 
-    async def generate_verb_conjugation(self, word, *, language_code, user_id):
+    async def generate_verb_conjugation(self, word, *, language_code, translation_language, user_id):
         raise AIConfigurationError()
 
     async def generate_native_phrase(self, *, language_code, translation_language, level, situation, industry=None, topics=None, exclude_phrases=None, user_id):
@@ -229,33 +233,45 @@ class _RateLimiter:
 # a services/ai_models.py model, and nothing else. ---
 
 _LOOKUP_WORD_SYSTEM = (
-    "You are a dictionary assistant for a language-learning app. Given a single word or short "
-    "phrase, respond with ONLY a JSON object (no extra text) with this shape: "
-    '{"word": str, "translations": [{"translation": str, "usage_note": str|null}], '
-    '"part_of_speech": str|null, "phonetic": str|null, "pronunciation": str|null, '
-    '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
+    "You are a dictionary assistant for a language-learning app - a genuinely BIDIRECTIONAL "
+    "dictionary between the learner's learning_language (the target language code given below) "
+    "and their native_language (the translation language code given below; the app's interface "
+    "language is a SEPARATE, unrelated setting and must never influence anything you output). "
+    "Given a single word or short phrase, respond with ONLY a JSON object (no extra text) with "
+    'this shape: {"query_language": str, "word": str, "translations": [{"translation": str, '
+    '"usage_note": str|null}], "part_of_speech": str|null, "phonetic": str|null, "pronunciation": '
+    'str|null, "definition": str|null, "examples": [{"text": str, "translation": str|null}], '
     '"difficulty": str|null, "category": str|null, "verb_forms": object|null}. '
-    "The input word or phrase may be written in EITHER the target language or the translation "
-    "language - the user does not indicate which. Detect which language it's actually in "
-    'yourself: if it is already in the target language, "word" is that same word (normalized to '
-    "its dictionary/base form) and \"translations\" hold its meaning in the translation language. "
-    'If it is written in the translation language instead, "word" MUST be the equivalent word in '
-    'the target language (never the input as-is), and "translations" hold the original input '
-    "(or its natural equivalents) back in the translation language - i.e. always return a "
-    "target-language headword with translation-language translations, regardless of which "
-    "language the input was actually typed in. "
-    '"pronunciation" must be a phonetic transcription of the target-language "word" that a reader '
-    "of the translation language can sound out using that language's own spelling conventions "
-    "(not IPA, not a transcription system for a third language) - e.g. for an English word shown "
-    "to a Russian speaker, write it out approximately in Cyrillic the way a Russian speaker would "
-    "read it aloud. Always attempt a pronunciation rather than leaving it null unless the script "
-    "makes this genuinely impossible - this field is shown to the learner directly, so it must "
-    "almost never be null. "
+    "The input word or phrase may be written in EITHER learning_language or native_language - the "
+    "user does not indicate which. Detect which one it's actually in yourself and report your "
+    'decision as "query_language" (the ISO 639-1 code of learning_language or native_language, '
+    "exactly one of the two, never a third language): if the input is already in learning_language, "
+    '"word" is that same word (normalized to its dictionary/base form) and "translations" hold its '
+    "meaning in native_language. If the input is written in native_language instead, \"word\" MUST "
+    "be the equivalent word in learning_language (never the input left as-is or merely transliterated "
+    '- it must be a real translation), and "translations" hold the original input (or its natural '
+    "equivalents) back in native_language - i.e. always return a learning_language headword with "
+    "native_language translations, regardless of which language the input was actually typed in. "
+    '"translations", "usage_note", "definition", and every example "translation" MUST ALL be written '
+    "in native_language - never in English or Russian unless that IS native_language; never leave the "
+    "learner an explanation in the wrong language. If the word has multiple common, genuinely "
+    'distinct senses (e.g. "bank" = financial institution vs. river bank), return one entry per '
+    'sense in "translations" rather than picking only one; keep it to the few most useful senses '
+    "for a learner, never an exhaustive dictionary entry. When the word is used differently across "
+    'common contexts, use "usage_note" on the relevant translation entries to explain each context '
+    "briefly, in native_language. "
+    '"pronunciation" must be a phonetic transcription of the learning_language "word" that a reader '
+    "of native_language can sound out using that language's own spelling conventions (not IPA, not "
+    "a transcription system for a third language) - e.g. for an English word shown to a Russian "
+    "speaker, write it out approximately in Cyrillic the way a Russian speaker would read it aloud. "
+    "Always attempt a pronunciation rather than leaving it null unless the script makes this "
+    "genuinely impossible - this field is shown to the learner directly, so it must almost never be "
+    "null. "
     '"phonetic" is a SEPARATE, standard IPA transcription of the same word (e.g. "/ɡoʊ/") - always '
     "attempt it too when you can produce a real IPA transcription; leave it null only if you are "
     "not confident in the exact IPA symbols, never fill it with the same content as \"pronunciation\". "
     "verb_forms MUST be set whenever part_of_speech is \"verb\" - include every commonly-taught "
-    "inflected form for that specific target language (do not force English's forms onto other "
+    "inflected form for that specific learning_language (do not force English's forms onto other "
     "languages, and do not invent a form you are not confident about, but do not omit the field "
     "entirely for a verb either)."
 )
@@ -318,23 +334,34 @@ _EXTRACT_WORDS_SYSTEM = (
 _VERB_CONJUGATION_SYSTEM = (
     "You produce a full conjugation table for a single verb, for a language-learning app. "
     'Respond with ONLY a JSON object: {"word": str, "language": str, "forms": object}. '
-    '"forms" maps a tense/mood name to a list of {"form": str, "pronunciation": str|null} '
-    "objects - one per grammatical person that language actually distinguishes. The tense/mood "
-    "names you choose, and how many of them you return, MUST reflect how THIS language's own "
-    "grammar actually organizes its verb system - do not force English's four tenses (present/"
-    "past/future/perfect) onto a language that categorizes verbs differently (for example, use "
-    "German's own Präsens/Präteritum/Perfekt/Futur, or Russian's aspect-based present/past/"
-    "future, or whatever a native grammar reference for that language would use). Each list "
-    "must contain one form per grammatical person that language actually distinguishes (do not "
-    "pad to exactly six English-style persons for a language that has fewer or more) - include "
+    '"forms" maps a tense/mood name to a list of {"form": str, "pronunciation": str|null, '
+    '"person_label": str|null, "translation": str|null} objects - one per grammatical person '
+    "that language actually distinguishes. The tense/mood names you choose, and how many of "
+    "them you return, MUST reflect how THIS language's own grammar actually organizes its verb "
+    "system - do not force English's four tenses (present/past/future/perfect) onto a language "
+    "that categorizes verbs differently (for example, use German's own Präsens/Präteritum/"
+    "Perfekt/Futur, or Russian's aspect-based present/past/future, or whatever a native grammar "
+    "reference for that language would use). Each list must contain one row per grammatical "
+    "person that language actually distinguishes (do not pad to exactly six English-style "
+    "persons for a language that has fewer or more, and do not force a gender split where the "
+    "language's own teaching materials would combine two genders on one row instead) - include "
     "the subject pronoun in each form exactly the way that language normally states it (e.g. "
     '"I am", not just "am"; omit the pronoun only if the language\'s own conjugated verb form '
-    "already fully identifies the person, e.g. many null-subject languages). Each form's own "
-    '"pronunciation" is a readable phonetic transcription (not IPA) of just THAT conjugated '
-    "form specifically - not the infinitive's pronunciation reused for every row, since "
-    "conjugated forms often sound different from each other - written so a learner can sound "
-    "it out directly. Always attempt one per form, leave it null only when the script makes "
-    "this genuinely impossible."
+    "already fully identifies the person, e.g. many null-subject languages). "
+    '"person_label" is that row\'s grammatical person written out IN THE NATIVE/TRANSLATION '
+    'LANGUAGE given below (e.g. "Я"/"Ты"/"Он"/"Она"/"Мы"/"Вы"/"Они" for a Russian native '
+    "language, grouped and gendered however is natural for that person's real grammar - never "
+    "the same fixed six-row scheme for every learning language. "
+    '"translation" is that ONE specific conjugated form\'s own meaning, translated into the '
+    "native/translation language - never left the same for every row, since different persons "
+    "of the same verb translate differently. Both person_label and translation must ALWAYS be "
+    "written in the native/translation language, never in the learning language, and never left "
+    "in English or Russian unless that IS the native/translation language. "
+    "Each form's own \"pronunciation\" is a readable phonetic transcription (not IPA) of just "
+    "THAT conjugated form specifically - not the infinitive's pronunciation reused for every "
+    "row, since conjugated forms often sound different from each other - written so a learner "
+    "can sound it out directly. Always attempt one per form, leave it null only when the script "
+    "makes this genuinely impossible."
 )
 
 
@@ -559,7 +586,28 @@ class LiveAIService(AIService):
             f"Translate into language code: {translation_language}\n"
             f"Learner level: {user_level or 'unknown'}\n"
         )
-        return await self._complete("lookup_word", user_id, _LOOKUP_WORD_SYSTEM, user, _parse_word_response)
+        known_languages = {language_code.strip().lower(), translation_language.strip().lower()}
+
+        def _parse(raw: str) -> ai_models.WordAIResult:
+            result = _parse_word_response(raw)
+            # Bidirectional-dictionary stage (spec sections 8, 27-29): the AI
+            # must decide the translation direction itself and self-report
+            # it as query_language. None is tolerated (an older response
+            # shape that never populated this field) - only a populated,
+            # wrong value is treated as invalid. A third/hallucinated
+            # language, or a native-language query the AI just echoed back
+            # unchanged instead of actually translating, both feed the same
+            # bounded retry _complete already runs for a malformed body -
+            # never shown to the learner as-is (spec: "никогда не давать
+            # пользователю неверный перевод").
+            if result.query_language is not None and result.query_language not in known_languages:
+                raise AIInvalidResponseError("AI reported an unexpected query_language")
+            if result.query_language == translation_language.strip().lower():
+                if normalize_word(result.word) == normalize_word(word):
+                    raise AIInvalidResponseError("AI did not translate the native-language query")
+            return result
+
+        return await self._complete("lookup_word", user_id, _LOOKUP_WORD_SYSTEM, user, _parse)
 
     async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, user_id):
         known = ", ".join((known_words or [])[:200])
@@ -614,8 +662,12 @@ class LiveAIService(AIService):
         user = f"Text (language code {language_code}):\n{text}\n"
         return await self._complete("extract_learning_words", user_id, _EXTRACT_WORDS_SYSTEM, user, _parse_word_list_response)
 
-    async def generate_verb_conjugation(self, word, *, language_code, user_id):
-        user = f"Verb: {word!r}\nLanguage code (ISO 639-1): {language_code}\n"
+    async def generate_verb_conjugation(self, word, *, language_code, translation_language, user_id):
+        user = (
+            f"Verb: {word!r}\n"
+            f"Language code (ISO 639-1): {language_code}\n"
+            f"Native/translation language code for person_label and translation: {translation_language}\n"
+        )
         return await self._complete(
             "generate_verb_conjugation", user_id, _VERB_CONJUGATION_SYSTEM, user, _parse_verb_conjugation_response
         )

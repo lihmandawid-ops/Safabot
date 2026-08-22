@@ -156,6 +156,39 @@ def test_render_conjugation_messages_shows_per_form_pronunciation():
     assert "You go (" not in messages[0]
 
 
+def test_render_conjugation_messages_shows_native_language_person_label_and_translation():
+    """Bidirectional-dictionary stage sections 14-18: each row shows its
+    native-language person label and that specific form's own translation
+    - matching the spec's worked example table ("Я: am (быть) — я есть"
+    style row), not just the bare learning-language form."""
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="be")
+    conjugation = {
+        "Present": [
+            {"form": "I am", "pronunciation": "ay am", "person_label": "Я", "translation": "я есть"},
+            {"form": "You are", "pronunciation": "yoo ar", "person_label": "Ты", "translation": "ты есть"},
+        ],
+    }
+    messages = render_conjugation_messages(word, conjugation)
+    assert "Я: I am (ay am) — я есть" in messages[0]
+    assert "Ты: You are (yoo ar) — ты есть" in messages[0]
+
+
+def test_render_conjugation_messages_omits_label_and_translation_when_absent():
+    """An older cached entry (or a form the AI didn't tag) has neither
+    field - must render exactly like before this field existed, no
+    "None:" or stray dash."""
+    from utils.word_display import render_conjugation_messages
+
+    word = SimpleNamespace(language_code="en", word="go")
+    conjugation = {"present": [{"form": "I go", "pronunciation": "ay goh"}]}
+    messages = render_conjugation_messages(word, conjugation)
+    assert messages[0].count("I go (ay goh)") == 1
+    assert "None" not in messages[0]
+    assert "—" not in messages[0]
+
+
 def test_render_conjugation_messages_handles_old_cached_flat_string_shape():
     """Word.verb_conjugation is schema-less JSON - an entry cached before
     section 49 shipped is still a plain list[str] per tense and must keep

@@ -79,10 +79,11 @@ def _message():
     return SimpleNamespace(message=m, effective_user=SimpleNamespace(id=42))
 
 
-async def test_tapping_review_shows_count_picker_immediately(handler_db):
-    """The word above is not due for 5 more days - the old due-gated flow
-    would have said "nothing to review"; on-demand review must show the
-    count picker regardless (spec section 1/7)."""
+async def test_tapping_review_shows_pool_choice_never_a_count_question(handler_db):
+    """bugfix stage sections 38-42: 🔄 Повторить must show exactly the two
+    pool choices and NEVER ask "how many words?" - the word above isn't
+    due for 5 more days, and on-demand review must still offer something
+    regardless (spec section 1/7)."""
     from handlers.review_now import show_review_now_menu
 
     update = _message()
@@ -90,16 +91,18 @@ async def test_tapping_review_shows_count_picker_immediately(handler_db):
 
     update.message.reply_text.assert_awaited_once()
     args, kwargs = update.message.reply_text.call_args
-    assert "Сколько слов" in args[0]
+    assert "Сколько слов" not in args[0]
     markup = kwargs["reply_markup"]
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert callbacks == ["revnow:menu", "revnow:menu:mastered", "revnow:cancel"]
     labels = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert "4" in labels and "8" in labels and "12" in labels
+    assert not any(label.isdigit() for label in labels)  # no bare count buttons (4/8/12/...)
 
 
-async def test_count_pick_with_no_saved_mode_shows_mode_picker(handler_db):
+async def test_review_new_words_pool_with_no_saved_mode_shows_mode_picker(handler_db):
     from handlers.review_now import handle_review_now_callback
 
-    q = _query("revnow:count:4:0")
+    q = _query("revnow:menu")
     await handle_review_now_callback(q, SimpleNamespace(user_data={}))
 
     text = q.callback_query.edit_message_text.call_args[0][0]
@@ -181,7 +184,7 @@ async def test_paused_word_is_excluded_from_on_demand_review(handler_db):
         for uw in user_words:
             uw.status = WordStatus.PAUSED
 
-    q = _query("revnow:count:4:0")
+    q = _query("revnow:menu")
     await handle_review_now_callback(q, SimpleNamespace(user_data={}))
 
     text = q.callback_query.edit_message_text.call_args[0][0]
@@ -198,12 +201,12 @@ async def test_mastered_word_excluded_by_default_but_included_via_mastered_menu(
         for uw in user_words:
             uw.status = WordStatus.MASTERED
 
-    q = _query("revnow:count:4:0")
+    q = _query("revnow:menu")
     await handle_review_now_callback(q, SimpleNamespace(user_data={}))
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "Пока нет слов" in text
 
-    q2 = _query("revnow:count:4:1")
+    q2 = _query("revnow:menu:mastered")
     await handle_review_now_callback(q2, SimpleNamespace(user_data={}))
     text2 = q2.callback_query.edit_message_text.call_args[0][0]
     assert "Как повторять" in text2

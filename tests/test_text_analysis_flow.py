@@ -183,8 +183,7 @@ async def test_select_specific_words_then_add_selected(handler_db, monkeypatch):
 async def test_analyze_text_uses_translation_language_not_interface_language(handler_db, monkeypatch):
     """Regression: same fix as handlers/dictionary.py's explain_word - the
     prose language must follow this learning pair's own
-    translation_language, not the global menu language. Also covers 📷
-    OCR / 🎤 voice, which both reuse this same handle_text_input path."""
+    translation_language, not the global menu language."""
     from database.database import session_scope
     from database.repositories import user_languages as user_languages_repo
     from database.repositories import users as users_repo

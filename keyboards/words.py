@@ -11,12 +11,20 @@ from utils.pagination import NEXT_LABEL, PREVIOUS_LABEL
 
 
 def filter_keyboard() -> InlineKeyboardMarkup:
+    """📚 Мои слова (bugfix stage: "Мои слова" restructure) - EXACTLY 5
+    sections, numbered, nothing else: 1) all words, 2) words currently in
+    the repetition system (LEARNING+REVIEW - the "words:filter:review"
+    code was never renamed, only its label/position here), 3) mastered
+    words, 4) search-your-own-words, 5) AI-backed add. The old "Новые"/
+    "Приостановлено" top-level filters are gone from THIS screen only -
+    words.py's underlying "new"/"paused" filter codes and callback
+    branches are untouched (a paused word is still reachable and
+    manageable from within "Все", and from its own card's actions), so no
+    capability is actually lost, just no longer a top-level button here."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("words.filter.all", get_current_language()), callback_data="words:filter:all")],
-            [InlineKeyboardButton(t("words.filter.new", get_current_language()), callback_data="words:filter:new")],
             [InlineKeyboardButton(t("words.filter.review", get_current_language()), callback_data="words:filter:review")],
-            [InlineKeyboardButton(t("words.filter.paused", get_current_language()), callback_data="words:filter:paused")],
             [InlineKeyboardButton(t("words.filter.mastered", get_current_language()), callback_data="words:filter:mastered")],
             [InlineKeyboardButton(t("words.search_button", get_current_language()), callback_data="words:search")],
             [InlineKeyboardButton(t("words.add_button", get_current_language()), callback_data="words:add")],

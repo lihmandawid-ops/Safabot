@@ -1,7 +1,6 @@
 """Tests for the Gemini integration stage: services/gemini_provider.py
-(GeminiTextProvider/GeminiOCRProvider/GeminiSTTProvider), services.
-ai_provider.FallbackAIProvider (Gemini primary, DeepSeek fallback for
-text-only tasks), the get_ai_service()/get_ocr_service()/get_stt_service()
+(GeminiTextProvider), services.ai_provider.FallbackAIProvider (Gemini
+primary, DeepSeek fallback for text-only tasks), the get_ai_service()
 factory wiring, and services.ai_diagnostics.test_gemini_connection().
 
 Never touches the real network - either the autouse GEMINI_API_KEY=""/
@@ -28,19 +27,7 @@ from services.ai_errors import (
     AIUnavailableError,
 )
 from services.ai_provider import AIProvider, FallbackAIProvider, HttpAIProvider
-from services.gemini_provider import GeminiOCRProvider, GeminiSTTProvider, GeminiTextProvider
-from services.media_errors import (
-    OCRAuthenticationError,
-    OCRError,
-    OCRInvalidResponseError,
-    OCRTimeoutError,
-    OCRUnavailableError,
-    STTAuthenticationError,
-    STTError,
-    STTInvalidResponseError,
-    STTTimeoutError,
-    STTUnavailableError,
-)
+from services.gemini_provider import GeminiTextProvider
 
 
 class _FakeResponse:
@@ -225,112 +212,6 @@ async def test_gemini_api_key_is_never_logged(monkeypatch, caplog):
     assert "gm-super-secret-value" not in caplog.text
 
 
-# --- GeminiOCRProvider / GeminiSTTProvider ---
-
-async def test_gemini_ocr_provider_returns_extracted_text(monkeypatch):
-    captured = {}
-
-    async def fake_post(self, url, *, headers, json):
-        captured["json"] = json
-        return _FakeResponse(200, _ok_body("Hello world"))
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiOCRProvider(api_key="k", model="m")
-    text = await provider.extract_text(b"fake-jpeg-bytes", mime_type="image/jpeg")
-
-    assert text == "Hello world"
-    parts = captured["json"]["contents"][0]["parts"]
-    assert parts[1]["inlineData"]["mimeType"] == "image/jpeg"
-    assert "generationConfig" in captured["json"]
-    assert "responseMimeType" not in captured["json"]["generationConfig"]
-
-
-async def test_gemini_ocr_provider_tolerates_empty_extraction(monkeypatch):
-    """No text in the image is a VALID answer for OCR - never an error,
-    unlike an empty answer from the text provider."""
-    async def fake_post(self, url, *, headers, json):
-        return _FakeResponse(200, _ok_body(""))
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiOCRProvider(api_key="k", model="m")
-    text = await provider.extract_text(b"fake", mime_type="image/jpeg")
-    assert text == ""
-
-
-@pytest.mark.parametrize(
-    "status_code,expected_error",
-    [(401, OCRAuthenticationError), (500, OCRUnavailableError), (400, OCRInvalidResponseError)],
-)
-async def test_gemini_ocr_provider_maps_status_codes(monkeypatch, status_code, expected_error):
-    async def fake_post(self, url, *, headers, json):
-        return _FakeResponse(status_code, {"error": "nope"})
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiOCRProvider(api_key="k", model="m")
-    with pytest.raises(expected_error):
-        await provider.extract_text(b"fake", mime_type="image/jpeg")
-
-
-async def test_gemini_ocr_provider_timeout(monkeypatch):
-    async def fake_post(self, url, *, headers, json):
-        raise httpx.TimeoutException("slow")
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiOCRProvider(api_key="k", model="m")
-    with pytest.raises(OCRTimeoutError):
-        await provider.extract_text(b"fake", mime_type="image/jpeg")
-
-
-async def test_gemini_stt_provider_returns_transcribed_text(monkeypatch):
-    captured = {}
-
-    async def fake_post(self, url, *, headers, json):
-        captured["json"] = json
-        return _FakeResponse(200, _ok_body("hello there"))
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiSTTProvider(api_key="k", model="m")
-    text = await provider.transcribe(b"fake-ogg-bytes", mime_type="audio/ogg", filename="voice.ogg")
-
-    assert text == "hello there"
-    parts = captured["json"]["contents"][0]["parts"]
-    assert parts[1]["inlineData"]["mimeType"] == "audio/ogg"
-
-
-async def test_gemini_stt_provider_tolerates_empty_transcription(monkeypatch):
-    async def fake_post(self, url, *, headers, json):
-        return _FakeResponse(200, _ok_body(""))
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiSTTProvider(api_key="k", model="m")
-    text = await provider.transcribe(b"fake", mime_type="audio/ogg", filename="voice.ogg")
-    assert text == ""
-
-
-@pytest.mark.parametrize(
-    "status_code,expected_error",
-    [(401, STTAuthenticationError), (500, STTUnavailableError), (400, STTInvalidResponseError)],
-)
-async def test_gemini_stt_provider_maps_status_codes(monkeypatch, status_code, expected_error):
-    async def fake_post(self, url, *, headers, json):
-        return _FakeResponse(status_code, {"error": "nope"})
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiSTTProvider(api_key="k", model="m")
-    with pytest.raises(expected_error):
-        await provider.transcribe(b"fake", mime_type="audio/ogg", filename="voice.ogg")
-
-
-async def test_gemini_stt_provider_timeout(monkeypatch):
-    async def fake_post(self, url, *, headers, json):
-        raise httpx.TimeoutException("slow")
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    provider = GeminiSTTProvider(api_key="k", model="m")
-    with pytest.raises(STTTimeoutError):
-        await provider.transcribe(b"fake", mime_type="audio/ogg", filename="voice.ogg")
-
-
 # --- FallbackAIProvider ---
 
 async def test_fallback_uses_primary_when_it_succeeds():
@@ -419,13 +300,9 @@ async def test_fallback_never_leaks_provider_labels_or_keys_into_result():
 
 def _reset_ai_factories():
     from services.ai_service import get_ai_service
-    from services.ocr_service import get_ocr_service
-    from services.stt_service import get_stt_service
 
     config.get_settings.cache_clear()
     get_ai_service.cache_clear()
-    get_ocr_service.cache_clear()
-    get_stt_service.cache_clear()
 
 
 def test_get_ai_service_uses_gemini_only_when_deepseek_not_configured(monkeypatch):
@@ -678,92 +555,6 @@ async def test_ai_gateway_connection_api_key_never_appears_in_result(monkeypatch
     finally:
         monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
         config.get_settings.cache_clear()
-
-
-# --- Factory wiring: get_ocr_service() / get_stt_service() (Gemini-only, no DeepSeek fallback) ---
-
-def test_get_ocr_service_prefers_gemini_when_configured(monkeypatch):
-    from services.ocr_service import LiveOCRService, get_ocr_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
-    monkeypatch.setenv("OCR_API_KEY", "should-not-be-used")
-    _reset_ai_factories()
-    try:
-        service = get_ocr_service()
-        assert isinstance(service, LiveOCRService)
-        assert isinstance(service._provider, GeminiOCRProvider)
-        assert service._provider_label == "gemini"
-    finally:
-        monkeypatch.setenv("GEMINI_API_KEY", "")
-        monkeypatch.setenv("OCR_API_KEY", "")
-        _reset_ai_factories()
-
-
-def test_get_ocr_service_falls_back_to_http_ocr_provider_without_gemini(monkeypatch):
-    from services.ocr_provider import HttpOCRProvider
-    from services.ocr_service import LiveOCRService, get_ocr_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "")
-    monkeypatch.setenv("OCR_API_KEY", "test-vision-key")
-    _reset_ai_factories()
-    try:
-        service = get_ocr_service()
-        assert isinstance(service, LiveOCRService)
-        assert isinstance(service._provider, HttpOCRProvider)
-    finally:
-        monkeypatch.setenv("OCR_API_KEY", "")
-        _reset_ai_factories()
-
-
-def test_get_ocr_service_not_configured_when_neither_gemini_nor_ocr_key_set(monkeypatch):
-    from services.ocr_service import NotConfiguredOCRService, get_ocr_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "")
-    monkeypatch.setenv("OCR_API_KEY", "")
-    _reset_ai_factories()
-    assert isinstance(get_ocr_service(), NotConfiguredOCRService)
-
-
-def test_get_stt_service_prefers_gemini_when_configured(monkeypatch):
-    from services.stt_service import LiveSpeechToTextService, get_stt_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
-    monkeypatch.setenv("STT_API_KEY", "should-not-be-used")
-    _reset_ai_factories()
-    try:
-        service = get_stt_service()
-        assert isinstance(service, LiveSpeechToTextService)
-        assert isinstance(service._provider, GeminiSTTProvider)
-        assert service._provider_label == "gemini"
-    finally:
-        monkeypatch.setenv("GEMINI_API_KEY", "")
-        monkeypatch.setenv("STT_API_KEY", "")
-        _reset_ai_factories()
-
-
-def test_get_stt_service_falls_back_to_http_stt_provider_without_gemini(monkeypatch):
-    from services.stt_provider import HttpSpeechToTextProvider
-    from services.stt_service import LiveSpeechToTextService, get_stt_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "")
-    monkeypatch.setenv("STT_API_KEY", "test-whisper-key")
-    _reset_ai_factories()
-    try:
-        service = get_stt_service()
-        assert isinstance(service, LiveSpeechToTextService)
-        assert isinstance(service._provider, HttpSpeechToTextProvider)
-    finally:
-        monkeypatch.setenv("STT_API_KEY", "")
-        _reset_ai_factories()
-
-
-def test_get_stt_service_not_configured_when_neither_gemini_nor_stt_key_set(monkeypatch):
-    from services.stt_service import NotConfiguredSpeechToTextService, get_stt_service
-
-    monkeypatch.setenv("GEMINI_API_KEY", "")
-    monkeypatch.setenv("STT_API_KEY", "")
-    _reset_ai_factories()
-    assert isinstance(get_stt_service(), NotConfiguredSpeechToTextService)
 
 
 # --- Language coverage through a real GeminiTextProvider (spec section 25) ---

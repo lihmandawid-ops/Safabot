@@ -286,7 +286,9 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
                 await query.message.reply_text(t("card.no_forms", get_current_language()), reply_markup=forms_close_keyboard())
                 return
 
-            conjugation = await verb_forms_service.get_or_generate_conjugation(session, word, user_id=user.id)
+            conjugation = await verb_forms_service.get_or_generate_conjugation(
+                session, word, translation_language=current.translation_language, user_id=user.id
+            )
             if conjugation:
                 for chunk in render_conjugation_messages(word, conjugation):
                     await query.message.reply_text(chunk, reply_markup=forms_close_keyboard())

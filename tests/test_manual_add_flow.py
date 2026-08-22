@@ -413,3 +413,33 @@ async def test_explain_word_button_truncates_a_long_ai_explanation(handler_db, m
     await dictionary_handler.handle_dictionary_callback(q, context)
     text = q.callback_query.message.reply_text.call_args[0][0]
     assert len(text) <= 200
+
+
+# --- 📚 Мои слова restructure (bugfix stage sections 31-37): exactly 5
+# sections, numbered, "Новые"/"Приостановлено" no longer top-level. ---
+
+async def test_my_words_menu_shows_exactly_five_sections(handler_db):
+    from handlers import words as words_handler
+
+    update = _message("dummy")
+    await words_handler.show_words_menu(update, SimpleNamespace(user_data={}))
+
+    update.message.reply_text.assert_awaited_once()
+    args, kwargs = update.message.reply_text.call_args
+    markup = kwargs["reply_markup"]
+    buttons = [b for row in markup.inline_keyboard for b in row]
+    assert len(buttons) == 5
+    assert [b.callback_data for b in buttons] == [
+        "words:filter:all", "words:filter:review", "words:filter:mastered", "words:search", "words:add",
+    ]
+
+
+async def test_my_words_menu_no_longer_offers_new_or_paused_as_top_level_filters(handler_db):
+    from handlers import words as words_handler
+
+    update = _message("dummy")
+    await words_handler.show_words_menu(update, SimpleNamespace(user_data={}))
+    kwargs = update.message.reply_text.call_args[1]
+    callbacks = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert "words:filter:new" not in callbacks
+    assert "words:filter:paused" not in callbacks

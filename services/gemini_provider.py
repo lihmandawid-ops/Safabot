@@ -1,22 +1,10 @@
 """Google Gemini integration (spec: "Gemini = PRIMARY AI").
 
-Implements the THREE EXISTING provider seams unchanged - services.
-ai_provider.AIProvider (text), services.ocr_provider.OCRProvider (image),
-services.stt_provider.SpeechToTextProvider (audio) - against Gemini's
-`generateContent` REST endpoint, so nothing above the provider layer
-(AIService/OCRService/SpeechToTextService, and everything built on top of
-them) needs to know Gemini exists. Callers never talk to this module
-directly; only the get_ai_service()/get_ocr_service()/get_stt_service()
-factories construct these classes.
-
-One Gemini model is genuinely multimodal (text, image, and audio all go
-through the same `generateContent` call shape - inline base64 `parts`),
-so all three provider classes share one small transport helper,
-`_generate_content()`, and only differ in the parts they send and which
-domain's typed exception hierarchy they translate failures into
-(services.ai_errors.AIError vs services.media_errors.OCRError/STTError -
-never conflated, same rule services/ocr_provider.py and services/
-stt_provider.py already follow for their own HTTP providers).
+Implements the EXISTING provider seam unchanged - services.ai_provider.
+AIProvider (text) - against Gemini's `generateContent` REST endpoint, so
+nothing above the provider layer (AIService, and everything built on top
+of it) needs to know Gemini exists. Callers never talk to this module
+directly; only the get_ai_service() factory constructs this class.
 
 Never logs the API key: it is sent only via the `x-goog-api-key` header
 (Google's own recommended alternative to the `?key=` query parameter,
@@ -25,8 +13,6 @@ see https://ai.google.dev/gemini-api - never a header, never any log line
 this module writes).
 """
 from __future__ import annotations
-
-import base64
 
 import httpx
 
@@ -38,35 +24,11 @@ from services.ai_errors import (
     AIUnavailableError,
 )
 from services.ai_provider import AIProvider
-from services.media_errors import (
-    OCRAuthenticationError,
-    OCRInvalidResponseError,
-    OCRTimeoutError,
-    OCRUnavailableError,
-    STTAuthenticationError,
-    STTInvalidResponseError,
-    STTTimeoutError,
-    STTUnavailableError,
-)
-from services.ocr_provider import OCRProvider
-from services.stt_provider import SpeechToTextProvider
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-
-_GEMINI_OCR_PROMPT = (
-    "Extract all readable text from this image, exactly as it appears, preserving line breaks. "
-    "Respond with ONLY the extracted text - no commentary, no markdown, no surrounding quotes. "
-    "If there is no readable text in the image, respond with an empty string."
-)
-
-_GEMINI_STT_PROMPT = (
-    "Transcribe the speech in this audio exactly as spoken, in its original language. Respond "
-    "with ONLY the transcribed text - no commentary, no markdown, no surrounding quotes, no "
-    "translation. If there is no speech in the audio, respond with an empty string."
-)
 
 
 class _GeminiTransportError(Exception):
@@ -159,24 +121,6 @@ _AI_ERROR_MAP = {
     "unavailable": AIUnavailableError,
     "invalid": AIInvalidResponseError,
 }
-_OCR_ERROR_MAP = {
-    "timeout": OCRTimeoutError,
-    "network": OCRUnavailableError,
-    "auth": OCRAuthenticationError,
-    "rate_limited": OCRUnavailableError,  # media_errors has no dedicated rate-limit class
-    "unavailable": OCRUnavailableError,
-    "invalid": OCRInvalidResponseError,
-}
-_STT_ERROR_MAP = {
-    "timeout": STTTimeoutError,
-    "network": STTUnavailableError,
-    "auth": STTAuthenticationError,
-    "rate_limited": STTUnavailableError,  # media_errors has no dedicated rate-limit class
-    "unavailable": STTUnavailableError,
-    "invalid": STTInvalidResponseError,
-}
-
-
 class GeminiTextProvider(AIProvider):
     """Primary AIProvider implementation. Same system+user -> raw-JSON-text
     contract as services.ai_provider.HttpAIProvider, so every existing
@@ -206,59 +150,3 @@ class GeminiTextProvider(AIProvider):
         if not text.strip():
             raise AIInvalidResponseError("Gemini returned an empty response")
         return text
-
-
-class GeminiOCRProvider(OCRProvider):
-    """📷 Разбор фото (spec section 14): Gemini reads the image directly in
-    the same call, no separate OCR-specific endpoint needed - unlike
-    HttpOCRProvider, which talks to a dedicated vision-chat endpoint."""
-
-    def __init__(
-        self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 30.0,
-        proxy: str | None = None,
-    ) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._base_url = base_url
-        self._timeout = timeout
-        self._proxy = proxy
-
-    async def extract_text(self, image_bytes: bytes, *, mime_type: str) -> str:
-        try:
-            text = await _generate_content(
-                api_key=self._api_key, model=self._model, base_url=self._base_url, timeout=self._timeout,
-                parts=[{"text": _GEMINI_OCR_PROMPT}, _inline_data_part(image_bytes, mime_type=mime_type)],
-                proxy=self._proxy,
-            )
-        except _GeminiTransportError as exc:
-            raise _OCR_ERROR_MAP[exc.kind](exc.detail) from exc
-        return text.strip()
-
-
-class GeminiSTTProvider(SpeechToTextProvider):
-    """🎤 Разбор голоса (spec section 16): Gemini transcribes the audio
-    directly in the same call - no separate Whisper-style endpoint needed,
-    unlike HttpSpeechToTextProvider. `filename` is part of the interface
-    for parity with that provider but unused here: Gemini only needs the
-    audio bytes and their mime type, never a multipart file upload."""
-
-    def __init__(
-        self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 60.0,
-        proxy: str | None = None,
-    ) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._base_url = base_url
-        self._timeout = timeout
-        self._proxy = proxy
-
-    async def transcribe(self, audio_bytes: bytes, *, mime_type: str, filename: str) -> str:
-        try:
-            text = await _generate_content(
-                api_key=self._api_key, model=self._model, base_url=self._base_url, timeout=self._timeout,
-                parts=[{"text": _GEMINI_STT_PROMPT}, _inline_data_part(audio_bytes, mime_type=mime_type)],
-                proxy=self._proxy,
-            )
-        except _GeminiTransportError as exc:
-            raise _STT_ERROR_MAP[exc.kind](exc.detail) from exc
-        return text.strip()

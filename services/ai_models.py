@@ -152,7 +152,24 @@ class GeneratedWord(BaseModel):
 class WordAIResult(GeneratedWord):
     """Alias name for the single-word dictionary-lookup case (spec section
     6 lists it separately from GeneratedWord) - identical shape, since a
-    looked-up word and a generated word are persisted the same way."""
+    looked-up word and a generated word are persisted the same way.
+
+    `query_language` (bidirectional-dictionary stage sections 8, 27-29):
+    the ISO 639-1 code the AI itself decided the user's raw input was
+    written in - either the learning language or the native/translation
+    language, never a third one. This is the ONLY reliable, structural
+    way services.dictionary_service can catch "AI mixed up the
+    translation direction" and retry, rather than trying to language-
+    detect free text itself. None is tolerated (an older prompt/response
+    shape) - callers simply skip the direction check in that case rather
+    than failing a previously-working response shape."""
+
+    query_language: str | None = None
+
+    @field_validator("query_language", mode="before")
+    @classmethod
+    def _clean_query_language(cls, value: object) -> object:
+        return _clean(value.lower()) if isinstance(value, str) else value
 
 
 class GenerateWordsResult(BaseModel):
@@ -277,10 +294,23 @@ class ConjugatedForm(BaseModel):
     """One conjugated form plus its own pronunciation (global pronunciation
     rule, section 49: "ideally per individual conjugated form" - each verb
     form is its own distinct pronunciation, not a single pronunciation for
-    the infinitive reused across the whole table)."""
+    the infinitive reused across the whole table).
+
+    `person_label` and `translation` (bidirectional-dictionary stage
+    sections 14-18): the grammatical-person label ("Я"/"Ты"/"Он"/..., or
+    however this specific language naturally groups its persons - e.g.
+    Hebrew commonly pairs masculine/feminine on one row) and this form's
+    own translation, BOTH written in native_language by the AI itself -
+    deliberately free text rather than a fixed enum of person tags, same
+    philosophy as `forms`' own free-form tense/mood keys, since forcing
+    one universal person scheme onto every language is exactly what the
+    spec forbids. Both optional so an older cached table (pre-dating this
+    field) keeps rendering exactly as it did before."""
 
     form: str
     pronunciation: str | None = None
+    person_label: str | None = None
+    translation: str | None = None
 
     @field_validator("form")
     @classmethod
@@ -290,7 +320,7 @@ class ConjugatedForm(BaseModel):
             raise ValueError("must not be blank")
         return value
 
-    @field_validator("pronunciation", mode="before")
+    @field_validator("pronunciation", "person_label", "translation", mode="before")
     @classmethod
     def _clean_pronunciation(cls, value: object) -> object:
         return _clean(value) if isinstance(value, str) else value
@@ -337,7 +367,12 @@ class VerbConjugationResult(BaseModel):
                 elif isinstance(item, dict):
                     text = str(item.get("form", "")).strip()
                     if text:
-                        forms.append({"form": text, "pronunciation": item.get("pronunciation")})
+                        forms.append({
+                            "form": text,
+                            "pronunciation": item.get("pronunciation"),
+                            "person_label": item.get("person_label"),
+                            "translation": item.get("translation"),
+                        })
             if forms:
                 cleaned[tense] = forms
         if not cleaned:
