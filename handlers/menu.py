@@ -34,7 +34,7 @@ from handlers import settings as settings_handler
 from handlers import text_analysis as text_analysis_handler
 from handlers import words as words_handler
 from keyboards import main_menu
-from keyboards.main_menu import resolve_menu_action
+from keyboards.main_menu import main_menu_keyboard, resolve_menu_action
 from utils.i18n import set_current_language, t
 
 _COMING_SOON: dict[str, str] = {
@@ -123,7 +123,15 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await learning_handler.handle_text_input(update, context, text)
         return
 
-    await update.message.reply_text(t("menu.unknown_command", language))
+    # Bugfix: a reply keyboard is sticky on the client - if a button's
+    # label text ever changes (e.g. an emoji rename), an old chat that
+    # hasn't been sent a fresh keyboard since still shows the STALE
+    # label, so tapping it sends text that no longer matches anything in
+    # resolve_menu_action() and lands here. Resending the keyboard makes
+    # that self-heal on the very next tap instead of leaving the user
+    # stuck retapping a dead button - a harmless no-op when the text
+    # really was just an unrecognized free-text message.
+    await update.message.reply_text(t("menu.unknown_command", language), reply_markup=main_menu_keyboard(language))
 
 
 main_menu_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, route_main_menu)

@@ -239,6 +239,23 @@ async def test_route_main_menu_unknown_command_replies_in_english(handler_db):
     assert text == "I don't understand that command. Use the menu below."
 
 
+async def test_route_main_menu_unknown_command_resends_a_fresh_keyboard(handler_db):
+    """Bugfix: a reply keyboard is sticky client-side - if a button's
+    label ever changes (e.g. an emoji rename), a chat that hasn't been
+    sent a fresh keyboard since still shows the STALE label, and tapping
+    it lands here (its text no longer matches resolve_menu_action()). The
+    fallback must resend a current keyboard so the very next tap works,
+    rather than leaving the user stuck retapping a dead button forever."""
+    from handlers.menu import route_main_menu
+
+    update = _text_update("some gibberish text that matches nothing")
+    context = SimpleNamespace(user_data={})
+    await route_main_menu(update, context)
+
+    kwargs = update.message.reply_text.call_args[1]
+    assert kwargs["reply_markup"] is not None
+
+
 async def test_route_main_menu_coming_soon_uses_interface_language(handler_db):
     from handlers.menu import route_main_menu
 
