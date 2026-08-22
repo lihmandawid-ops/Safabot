@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 Навчання",
   "phrase_situation.customer_service": "🔧 Робота з клієнтами",
   "phrases.popular.next": "➡️ Наступні фрази",
-  "phrases.popular.prev": "⬅️ Попередні"
+  "phrases.popular.prev": "⬅️ Попередні",
+  "phrases.popular.generate_more": "✨ Згенерувати ще",
+  "phrases.popular.generating": "⏳ Підбираю нові популярні фрази...",
+  "phrases.popular.generating_wait": "⏳ Вже підбираю фрази, зачекайте трохи",
+  "phrases.popular.generate_failed": "Не вдалося створити нові фрази. Спробуйте ще раз.",
+  "phrases.popular.no_new_phrases": "Не вдалося знайти нові фрази. Спробуйте ще раз."
 }

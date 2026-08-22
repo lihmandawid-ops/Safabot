@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 Studium",
   "phrase_situation.customer_service": "🔧 Kundenservice",
   "phrases.popular.next": "➡️ Weitere Sätze",
-  "phrases.popular.prev": "⬅️ Zurück"
+  "phrases.popular.prev": "⬅️ Zurück",
+  "phrases.popular.generate_more": "✨ Mehr generieren",
+  "phrases.popular.generating": "⏳ Suche neue beliebte Sätze...",
+  "phrases.popular.generating_wait": "⏳ Generiere bereits, bitte warten",
+  "phrases.popular.generate_failed": "Neue Sätze konnten nicht erstellt werden. Bitte versuche es erneut.",
+  "phrases.popular.no_new_phrases": "Es wurden keine neuen Sätze gefunden. Bitte versuche es erneut."
 }

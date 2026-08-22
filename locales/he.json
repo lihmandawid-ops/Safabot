@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 לימודים",
   "phrase_situation.customer_service": "🔧 שירות לקוחות",
   "phrases.popular.next": "➡️ ביטויים נוספים",
-  "phrases.popular.prev": "⬅️ קודמים"
+  "phrases.popular.prev": "⬅️ קודמים",
+  "phrases.popular.generate_more": "✨ ליצור עוד",
+  "phrases.popular.generating": "⏳ מחפש ביטויים פופולריים חדשים...",
+  "phrases.popular.generating_wait": "⏳ כבר יוצר ביטויים, נא להמתין",
+  "phrases.popular.generate_failed": "לא הצלחנו ליצור ביטויים חדשים. נסו שוב.",
+  "phrases.popular.no_new_phrases": "לא נמצאו ביטויים חדשים. נסו שוב."
 }

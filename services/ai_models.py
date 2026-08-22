@@ -19,10 +19,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from database.models import PartOfSpeech, WordCategory
 from utils.levels import LEVEL_CODES
+from utils.phrase_situations import PRESET_SITUATIONS
 
 _VALID_PARTS_OF_SPEECH = {p.value for p in PartOfSpeech}
 _VALID_CATEGORIES = {c.value for c in WordCategory}
 _VALID_DIFFICULTIES = set(LEVEL_CODES)
+_VALID_PHRASE_CATEGORIES = set(PRESET_SITUATIONS)
 
 
 def _clean(value: str | None) -> str | None:
@@ -400,3 +402,45 @@ class PhraseTranslationsResult(BaseModel):
     count gracefully rather than failing the whole batch."""
 
     translations: list[str] = Field(default_factory=list)
+
+
+class GeneratedPopularPhrase(BaseModel):
+    """One phrase out of a ✨ Сгенерировать ещё batch (native-speaker
+    phrasebook stage) - same native-speaker/Latin-pronunciation rules as
+    NativePhraseResult, but produced N-at-a-time instead of one at a
+    time, and destined for the shared 🔥 Популярные фразы pool (database.
+    models.PopularPhrase) rather than one user's own saved list."""
+
+    phrase: str
+    translation: str
+    pronunciation: str | None = None
+    category: str | None = None
+
+    @field_validator("phrase", "translation")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("pronunciation", mode="before")
+    @classmethod
+    def _clean_pronunciation(cls, value: object) -> object:
+        return _clean(value) if isinstance(value, str) else value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _clean_category(cls, value: object) -> object:
+        return _clean(value.lower()) if isinstance(value, str) else value
+
+    @field_validator("category")
+    @classmethod
+    def _valid_category(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value if value in _VALID_PHRASE_CATEGORIES else None
+
+
+class PopularPhraseBatchResult(BaseModel):
+    phrases: list[GeneratedPopularPhrase] = Field(default_factory=list)

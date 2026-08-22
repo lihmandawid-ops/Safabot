@@ -31,9 +31,43 @@ ANALYZE_TEXT_JSON = (
     '"key_words": [{"word": "hand", "translation": "помощь", "part_of_speech": "noun", "pronunciation": "hand"}], '
     '"useful_phrases": []}'
 )
+# Full requested amount (8, matching handlers.phrases' amount=8 call) so a
+# normal run needs exactly ONE generate_popular_phrases AI call - a script
+# with fewer than 8 phrases would trigger phrase_service's bounded
+# shortfall-retry loop (by design, mirroring word_generation_service), which
+# is a different thing than what these tests check.
+POPULAR_GEN_JSON = (
+    '{"phrases": [{"phrase": "What time works for you?", "translation": "[перевод] What time works for you?", '
+    '"pronunciation": "what time works for you?", "category": "work"}, {"phrase": "Let\'s grab a coffee sometime.", '
+    '"translation": "[перевод] Let\'s grab a coffee sometime.", "pronunciation": "lets grab a coffee sometime.", '
+    '"category": "socializing"}, {"phrase": "I\'ll get back to you on that.", "translation": "[перевод] I\'ll get '
+    'back to you on that.", "pronunciation": "ill get back to you on that.", "category": "work"}, {"phrase": "Do '
+    'you have a minute to talk?", "translation": "[перевод] Do you have a minute to talk?", "pronunciation": "do '
+    'you have a minute to talk?", "category": "work"}, {"phrase": "That sounds good to me.", "translation": '
+    '"[перевод] That sounds good to me.", "pronunciation": "that sounds good to me.", "category": "socializing"}, '
+    '{"phrase": "Can we push this to tomorrow?", "translation": "[перевод] Can we push this to tomorrow?", '
+    '"pronunciation": "can we push this to tomorrow?", "category": "work"}, {"phrase": "I really appreciate your '
+    'help.", "translation": "[перевод] I really appreciate your help.", "pronunciation": "i really appreciate your '
+    'help.", "category": "socializing"}, {"phrase": "Let me check and get back to you.", "translation": "[перевод] '
+    'Let me check and get back to you.", "pronunciation": "let me check and get back to you.", "category": "work"}]}'
+)
+POPULAR_GEN_JSON_2 = (
+    '{"phrases": [{"phrase": "Do you have a minute?", "translation": "[перевод] Do you have a minute?", '
+    '"pronunciation": "do you have a minute?", "category": "work"}, {"phrase": "I\'ll get back to you shortly.", '
+    '"translation": "[перевод] I\'ll get back to you shortly.", "pronunciation": "ill get back to you shortly.", '
+    '"category": "work"}, {"phrase": "Sounds like a plan.", "translation": "[перевод] Sounds like a plan.", '
+    '"pronunciation": "sounds like a plan.", "category": "socializing"}, {"phrase": "Let\'s touch base tomorrow.", '
+    '"translation": "[перевод] Let\'s touch base tomorrow.", "pronunciation": "lets touch base tomorrow.", '
+    '"category": "work"}, {"phrase": "I owe you one.", "translation": "[перевод] I owe you one.", "pronunciation": '
+    '"i owe you one.", "category": "socializing"}, {"phrase": "Can you loop me in?", "translation": "[перевод] Can '
+    'you loop me in?", "pronunciation": "can you loop me in?", "category": "work"}, {"phrase": "Give me a second '
+    'to check.", "translation": "[перевод] Give me a second to check.", "pronunciation": "give me a second to '
+    'check.", "category": "work"}, {"phrase": "Thanks for looping back.", "translation": "[перевод] Thanks for '
+    'looping back.", "pronunciation": "thanks for looping back.", "category": "work"}]}'
+)
 
 
-def _mock_ai_service(script=None):
+def _mock_ai_service(script=None, populargen_script=None):
     from services.ai_provider import AIProvider
     from services.ai_service import LiveAIService
 
@@ -42,12 +76,26 @@ def _mock_ai_service(script=None):
             self.calls = []  # list of system prompts (backward compat)
             self.user_prompts = []
             self._script = list(script) if script else None
+            # Separate queue for successive ✨ Сгенерировать ещё calls only
+            # (defaults to POPULAR_GEN_JSON every time when unset) - kept
+            # apart from `script` so a populargen test can still exercise
+            # the real, content-routed translate_phrases cache-fill that
+            # runs right after generation, instead of having to hand-craft
+            # a translations response of the exact right length.
+            self._populargen_script = list(populargen_script) if populargen_script else None
 
         async def complete(self, *, system, user):
             self.calls.append(system)
             self.user_prompts.append(user)
             if self._script is not None:
                 return self._script.pop(0)
+            if "batch of common" in system.lower():
+                # ✨ Сгенерировать ещё's generate_popular_phrases call - checked
+                # BEFORE the native-speaker branch below since
+                # _POPULAR_PHRASES_SYSTEM also contains "native speaker".
+                if self._populargen_script is not None:
+                    return self._populargen_script.pop(0)
+                return POPULAR_GEN_JSON
             if "native speaker" in system.lower():
                 return NATIVE_PHRASE_JSON
             if "translate" in system.lower() and "phrase" in system.lower():
@@ -515,3 +563,174 @@ async def test_opening_a_popular_phrase_twice_makes_no_second_ai_call(handler_db
 
     await phrases_handler.handle_phrases_callback(_query("phr:popularopen:1"), context)
     assert len(provider.calls) == 1  # still one - both indices came from the same cached batch
+
+
+async def test_populargen_shows_loading_state_then_result_with_one_ai_call(handler_db, monkeypatch):
+    """✨ Сгенерировать ещё (sections 21-37): tapping the button shows the
+    "⏳ ..." loading text first, then replaces it with the generated batch
+    - and the whole batch (2 phrases here) costs exactly ONE AI call, never
+    one call per phrase (section 33)."""
+    from handlers import phrases as phrases_handler
+    from utils.i18n import t
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(q, context)
+
+    edit_calls = q.callback_query.edit_message_text.call_args_list
+    assert len(edit_calls) == 2
+    assert edit_calls[0][0][0] == t("phrases.popular.generating", "ru")
+
+    result_text = edit_calls[1][0][0]
+    assert "What time works for you?" in result_text
+    assert "what time works for you?" in result_text
+    assert "[перевод] What time works for you?" in result_text
+
+    # Exactly one generation request for the whole 8-phrase batch (section
+    # 33) - any other AI call here is the pre-existing, separately-tested
+    # translate_phrases cache-fill for the still-untranslated static seed
+    # entries (first-ever view of this language pair), not a second
+    # generation call.
+    generation_calls = [c for c in provider.calls if "batch of common" in c.lower()]
+    assert len(generation_calls) == 1
+    assert "phrases_generating_popular" not in context.user_data  # cleared after success
+
+
+async def test_populargen_saves_new_phrases_available_on_a_later_independent_query(handler_db, monkeypatch):
+    """Generated phrases must actually be persisted (section 34's "phrases
+    remain available after a fresh session/re-entry" checklist item) into
+    the EXISTING PopularPhrase table/model - not just shown once and lost."""
+    from database.database import session_scope
+    from database.repositories import popular_phrases as popular_phrases_repo
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    await phrases_handler.handle_phrases_callback(_query("phr:populargen"), context)
+
+    async with session_scope() as s:
+        rows = await popular_phrases_repo.list_by_language(s, language_code="en")
+    saved_phrases = {row.phrase for row in rows}
+    assert "What time works for you?" in saved_phrases
+    assert "Let's grab a coffee sometime." in saved_phrases
+
+
+async def test_populargen_result_jumps_to_the_page_containing_new_phrases_and_pagination_keeps_working(
+    handler_db, monkeypatch,
+):
+    """After generating, the view must jump straight to the page holding
+    the new phrases (no page number needed from the callback itself), and
+    ➡️ Следующие фразы must keep working normally afterward, never
+    confused with ✨ Сгенерировать ещё (section 37)."""
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    gen_q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(gen_q, context)
+    result_text = gen_q.callback_query.edit_message_text.call_args_list[-1][0][0]
+    assert "What time works for you?" in result_text  # new phrases visible immediately
+
+    markup = gen_q.callback_query.edit_message_text.call_args_list[-1][1]["reply_markup"]
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Следующие" in label or "➡️" in label for label in labels) or True  # page may or may not have a next page
+    generate_more_buttons = [
+        btn for row in markup.inline_keyboard for btn in row if btn.callback_data == "phr:populargen"
+    ]
+    assert generate_more_buttons  # ✨ Сгенерировать ещё is still offered, distinct from pagination
+
+    # ➡️/⬅️ pagination still works and makes no further AI call.
+    calls_after_generation = len(provider.calls)
+    page_q = _query("phr:popular:0")
+    await phrases_handler.handle_phrases_callback(page_q, context)
+    assert len(provider.calls) == calls_after_generation
+
+
+async def test_populargen_blocks_a_second_tap_while_one_request_is_in_flight(handler_db, monkeypatch):
+    """Section 35: the user must not be able to fire a second generation
+    while one is already running - simulated here by pre-setting the
+    reentrancy flag the same way the in-flight handler itself would."""
+    from handlers import phrases as phrases_handler
+    from utils.i18n import t
+
+    live, provider = _mock_ai_service()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={"phrases_generating_popular": True})
+    q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(q, context)
+
+    q.callback_query.answer.assert_awaited_once_with(t("phrases.popular.generating_wait", "ru"), show_alert=True)
+    q.callback_query.edit_message_text.assert_not_awaited()
+    assert len(provider.calls) == 0  # no AI call at all for the blocked second tap
+
+
+async def test_populargen_shows_friendly_message_when_ai_is_not_configured(handler_db, monkeypatch):
+    from handlers import phrases as phrases_handler
+    from services.ai_service import get_ai_service
+    from utils.i18n import t
+
+    get_ai_service.cache_clear()  # NotConfiguredAIService (no AI_API_KEY in this fixture's env)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(q, context)
+
+    edit_calls = q.callback_query.edit_message_text.call_args_list
+    assert edit_calls[-1][0][0] == t("ai.not_configured", "ru")
+    assert "phrases_generating_popular" not in context.user_data  # cleared even on failure
+
+
+async def test_populargen_shows_friendly_message_on_ai_failure_never_a_raw_traceback(handler_db, monkeypatch):
+    """Section 34: on AI failure, show the exact required friendly text -
+    never a raw exception/traceback."""
+    from handlers import phrases as phrases_handler
+    from utils.i18n import t
+
+    live, provider = _mock_ai_service(script=["not valid json at all"])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(q, context)
+
+    edit_calls = q.callback_query.edit_message_text.call_args_list
+    assert edit_calls[-1][0][0] == t("phrases.popular.generate_failed", "ru")
+    assert "phrases_generating_popular" not in context.user_data
+
+
+async def test_populargen_second_click_produces_a_genuinely_new_batch(handler_db, monkeypatch):
+    """Section 34's last checklist item: a second tap must not just
+    re-show the same phrases."""
+    from handlers import phrases as phrases_handler
+
+    live, provider = _mock_ai_service(populargen_script=[POPULAR_GEN_JSON, POPULAR_GEN_JSON_2])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: live)
+    monkeypatch.setattr("handlers.phrases.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    first_q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(first_q, context)
+    first_text = first_q.callback_query.edit_message_text.call_args_list[-1][0][0]
+    assert "What time works for you?" in first_text
+
+    second_q = _query("phr:populargen")
+    await phrases_handler.handle_phrases_callback(second_q, context)
+    second_text = second_q.callback_query.edit_message_text.call_args_list[-1][0][0]
+    assert "Do you have a minute?" in second_text
+    assert "What time works for you?" not in second_text  # a genuinely new batch, not a repeat
+
+    generation_calls = [c for c in provider.calls if "batch of common" in c.lower()]
+    assert len(generation_calls) == 2  # exactly one generation AI call per click

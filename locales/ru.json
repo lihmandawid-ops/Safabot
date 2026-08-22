@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 Учёба",
   "phrase_situation.customer_service": "🔧 Работа с клиентами",
   "phrases.popular.next": "➡️ Следующие фразы",
-  "phrases.popular.prev": "⬅️ Предыдущие"
+  "phrases.popular.prev": "⬅️ Предыдущие",
+  "phrases.popular.generate_more": "✨ Сгенерировать ещё",
+  "phrases.popular.generating": "⏳ Подбираю новые популярные фразы...",
+  "phrases.popular.generating_wait": "⏳ Уже подбираю фразы, подождите немного",
+  "phrases.popular.generate_failed": "Не удалось создать новые фразы. Попробуйте ещё раз.",
+  "phrases.popular.no_new_phrases": "Не удалось найти новые фразы. Попробуйте ещё раз."
 }

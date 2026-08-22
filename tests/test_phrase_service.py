@@ -267,3 +267,137 @@ async def test_popular_phrase_translation_follows_interface_language_not_a_fixed
     assert ru_view[0].translation != uk_view[0].translation  # different translation per interface language
     assert ru_view[0].translation.startswith("[ru]")
     assert uk_view[0].translation.startswith("[uk]")
+
+
+# --- ✨ Сгенерировать ещё: services.phrase_service.generate_more_popular_phrases ---
+
+def _fake_batch_generator(phrases_by_call):
+    """phrases_by_call: list of lists of (phrase, translation, pronunciation,
+    category) tuples, one list per expected AI call - lets a test script
+    a duplicate on the first call and a fresh phrase on the retry."""
+    calls = []
+
+    async def _fake_generate(*, language_code, translation_language, level, amount, category=None, industry=None, topics=None, known_phrases=None, user_id):
+        calls.append({
+            "language_code": language_code, "translation_language": translation_language, "level": level,
+            "amount": amount, "category": category, "industry": industry, "topics": topics,
+            "known_phrases": list(known_phrases or []),
+        })
+        batch = phrases_by_call[len(calls) - 1] if len(calls) - 1 < len(phrases_by_call) else []
+        return ai_models.PopularPhraseBatchResult(
+            phrases=[
+                ai_models.GeneratedPopularPhrase(phrase=p, translation=tr, pronunciation=pron, category=cat)
+                for p, tr, pron, cat in batch
+            ]
+        )
+
+    fake_ai = type("FakeAI", (), {"generate_popular_phrases": staticmethod(_fake_generate)})()
+    return fake_ai, calls
+
+
+async def test_generate_more_popular_phrases_saves_and_returns_new_entries(session, monkeypatch):
+    user, ul = await _create_user_and_language(session)
+    await session.commit()
+
+    fake_ai, calls = _fake_batch_generator([
+        [("Could you give me a hand?", "Не могли бы вы мне помочь?", "kud yu giv mi a hand?", "work")],
+    ])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    result = await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=1)
+    assert len(result) == 1
+    assert result[0].phrase == "Could you give me a hand?"
+    assert result[0].translation == "Не могли бы вы мне помочь?"
+    assert result[0].pronunciation == "kud yu giv mi a hand?"
+    assert result[0].situation == "work"
+    assert len(calls) == 1  # one AI call for the whole batch (section 33)
+
+    from database.repositories import popular_phrases as popular_phrases_repo
+
+    saved = await popular_phrases_repo.list_by_language(session, language_code="en")
+    assert [row.phrase for row in saved] == ["Could you give me a hand?"]
+
+
+async def test_generate_more_popular_phrases_is_available_on_a_later_independent_query(session, monkeypatch):
+    """§36 item 9: after generating, a phrase must be available on a
+    fresh read, not just held in memory from the generating call."""
+    user, ul = await _create_user_and_language(session)
+    await session.commit()
+
+    fake_ai, _ = _fake_batch_generator([[("Good morning.", "Доброе утро.", "gud MOR-ning", "daily_life")]])
+
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"[{translation_language}] {p}" for p in phrases]
+
+    fake_ai.translate_phrases = _fake_translate  # plain instance attribute - no self-binding to worry about
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=1)
+    await session.commit()
+
+    later_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=user.id,
+    )
+    assert any(e.phrase == "Good morning." for e in later_view)
+    # already-cached translation from the generation call - no extra AI call needed for it
+    generated_entry = next(e for e in later_view if e.phrase == "Good morning.")
+    assert generated_entry.translation == "Доброе утро."
+
+
+async def test_generate_more_popular_phrases_skips_duplicates_of_the_static_seed_set(session, monkeypatch):
+    """§26: a "new" phrase that turns out to already exist (here, in the
+    static seed set itself) must never be saved as a second row."""
+    from utils.popular_phrases import get_popular_phrases
+
+    user, ul = await _create_user_and_language(session)
+    await session.commit()
+
+    existing_phrase = get_popular_phrases("en")[0].phrase
+    fake_ai, calls = _fake_batch_generator([
+        [(existing_phrase, "duplicate - must be skipped", "x", None)],
+        [("A genuinely new phrase.", "Действительно новая фраза.", "a jen-yoo-in-li nyoo frayz", None)],
+    ])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    result = await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=1)
+    assert len(result) == 1
+    assert result[0].phrase == "A genuinely new phrase."
+    assert len(calls) == 2  # the duplicate triggered exactly one bounded retry
+    assert existing_phrase in calls[1]["known_phrases"]  # excluded from the retry prompt too
+
+
+async def test_generate_more_popular_phrases_gives_up_after_max_attempts_of_only_duplicates(session, monkeypatch):
+    from utils.popular_phrases import get_popular_phrases
+
+    user, ul = await _create_user_and_language(session)
+    await session.commit()
+
+    existing_phrase = get_popular_phrases("en")[0].phrase
+    always_duplicate = [[(existing_phrase, "still a duplicate", "x", None)]] * 5
+    fake_ai, calls = _fake_batch_generator(always_duplicate)
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    import config
+
+    settings = config.get_settings()
+    result = await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=3)
+    assert result == []  # never got a non-duplicate - a valid, non-crashing outcome
+    assert len(calls) == settings.max_generation_attempts  # bounded, never an infinite loop
+
+
+async def test_generate_more_popular_phrases_passes_personalization(session, monkeypatch):
+    user, ul = await _create_user_and_language(
+        session, level="advanced", learning_goal="work", work_industry="construction",
+        selected_topics=["business"],
+    )
+    await session.commit()
+
+    fake_ai, calls = _fake_batch_generator([
+        [("Can you send me the measurements?", "Можешь прислать мне замеры?", "kan yu send mi", "work")],
+    ])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=1)
+    assert calls[0]["level"] == "advanced"
+    assert calls[0]["industry"] == "construction"
+    assert calls[0]["topics"] == ["business"]

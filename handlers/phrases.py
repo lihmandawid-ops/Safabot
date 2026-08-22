@@ -411,6 +411,40 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.answer()
             await _render_popular_page(edit, session, user, current, page)
 
+        elif data == "phr:populargen":
+            # ✨ Сгенерировать ещё (sections 21-37): a completely separate
+            # action from ➡️ Следующие фразы above - this is the ONLY
+            # popular-phrases button that calls AI. The reentrancy flag
+            # blocks a second tap while one request is already in flight
+            # (section 35), and is always cleared in `finally` so a
+            # success, an AIError, or an unexpected exception all leave it
+            # clear for the next tap.
+            if context.user_data.get("phrases_generating_popular"):
+                await query.answer(t("phrases.popular.generating_wait", get_current_language()), show_alert=True)
+                return
+            await query.answer()
+            context.user_data["phrases_generating_popular"] = True
+            await edit(t("phrases.popular.generating", get_current_language()))
+            try:
+                new_entries = await phrase_service.generate_more_popular_phrases(
+                    session, user=user, user_language=current, amount=8,
+                )
+            except AIConfigurationError:
+                await edit(t("ai.not_configured", get_current_language()), reply_markup=phrases_menu_keyboard())
+                return
+            except AIError:
+                await edit(t("phrases.popular.generate_failed", get_current_language()), reply_markup=phrases_menu_keyboard())
+                return
+            finally:
+                context.user_data.pop("phrases_generating_popular", None)
+
+            if not new_entries:
+                await edit(t("phrases.popular.no_new_phrases", get_current_language()), reply_markup=phrases_menu_keyboard())
+                return
+
+            target_page = new_entries[0].index // POPULAR_PHRASES_PAGE_SIZE
+            await _render_popular_page(edit, session, user, current, target_page)
+
         elif data.startswith("phr:analyze:saved:"):
             phrase_id = int(data.removeprefix("phr:analyze:saved:"))
             await query.answer()

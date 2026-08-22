@@ -579,17 +579,61 @@ class UserPhrase(Base):
         return f"UserPhrase(id={self.id}, user_id={self.user_id}, phrase={self.phrase!r})"
 
 
+class PopularPhrase(Base):
+    """An AI-generated 🔥 Популярные фразы entry (✨ Сгенерировать ещё,
+    native-speaker phrasebook stage) - the phrase itself and its own
+    Latin-only pronunciation, both tied to `language_code` only, never to
+    any viewer's interface/translation language (same separation
+    utils.popular_phrases.POPULAR_PHRASES's static seed set already
+    follows). Kept as its own table, separate from that static Python
+    data, since the seed set is code (reviewed, stable, ships with the
+    app) while these rows are runtime, per-language, ever-growing AI
+    output - conflating the two would mean a code deploy could silently
+    reorder or duplicate what's actually a growing database.
+
+    phrase_service.get_translated_popular_phrases() presents both sources
+    as ONE combined, stably-ordered list (every static entry first, in
+    their fixed tuple order, then every PopularPhrase row in ascending id
+    order) - see PopularPhraseTranslation below for why that combined
+    ordering has to stay stable forever.
+    """
+
+    __tablename__ = "popular_phrases"
+    __table_args__ = (
+        UniqueConstraint("language_code", "normalized_phrase", name="uq_popular_phrase"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    phrase: Mapped[str] = mapped_column(String(500), nullable=False)
+    normalized_phrase: Mapped[str] = mapped_column(String(500), nullable=False)
+    pronunciation: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"PopularPhrase(id={self.id}, language_code={self.language_code!r}, phrase={self.phrase!r})"
+
+
 class PopularPhraseTranslation(Base):
-    """Cached translation for one entry of utils.popular_phrases.POPULAR_PHRASES
-    (native-speaker phrasebook stage, 🔥 Популярные фразы bugfix). The
-    phrase text and its Latin pronunciation are static seed data (tied
-    only to the learning language, never to interface_language) and need
-    no AI/DB round-trip at all; only the TRANSLATION varies per viewer's
-    translation_language, so it's the only part cached here - one row per
-    (language_code, translation_language, phrase_index) triple, filled in
-    a single batch AI call the first time that pair is ever requested and
-    reused by every user and every later view after that (never
-    regenerated, never a live call on pagination).
+    """Cached translation for one entry of the COMBINED popular-phrase list
+    (native-speaker phrasebook stage, 🔥 Популярные фразы bugfix + ✨
+    Сгенерировать ещё) - utils.popular_phrases.POPULAR_PHRASES' static
+    seed entries followed by PopularPhrase's AI-generated rows, in that
+    stable combined order (see PopularPhrase's docstring). Each entry's
+    phrase text and Latin pronunciation need no AI/DB round-trip; only
+    the TRANSLATION varies per viewer's translation_language, so it's the
+    only part cached here - one row per (language_code,
+    translation_language, phrase_index) triple, filled in a single batch
+    AI call the first time that pair is ever requested and reused by
+    every user and every later view after that (never regenerated, never
+    a live call on pagination). A freshly generated phrase's translation
+    (already returned by the same AI call that created it) is written
+    here directly too, so the very user who generated it never triggers
+    a second translation call for their own translation_language.
     """
 
     __tablename__ = "popular_phrase_translations"

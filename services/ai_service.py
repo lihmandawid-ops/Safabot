@@ -40,6 +40,7 @@ from services.ai_errors import (
 )
 from services.ai_provider import AIProvider, HttpAIProvider
 from utils.logging import get_logger
+from utils.phrase_situations import PRESET_SITUATIONS
 
 logger = get_logger(__name__)
 
@@ -130,6 +131,20 @@ class AIService(ABC):
         per (language_code, translation_language) pair, ever, caching the
         result so no later view or page ever needs a live call again."""
 
+    @abstractmethod
+    async def generate_popular_phrases(
+        self, *, language_code: str, translation_language: str, level: str, amount: int = 8,
+        category: str | None = None, industry: str | None = None, topics: list[str] | None = None,
+        known_phrases: list[str] | None = None, user_id: int,
+    ) -> ai_models.PopularPhraseBatchResult:
+        """✨ Сгенерировать ещё (native-speaker phrasebook stage): a fresh
+        batch of `amount` natural, native-speaker phrases for
+        language_code in ONE call - never one request per phrase.
+        `known_phrases` is what services/phrase_service.py asks the AI to
+        avoid repeating; the real duplicate guarantee is still the DB
+        check in database.repositories.popular_phrases, since this list
+        is only ever a bounded sample, never the whole table."""
+
 
 class NotConfiguredAIService(AIService):
     """Used whenever AI isn't usable: AI_ENABLED=false, or no AI_API_KEY
@@ -163,6 +178,9 @@ class NotConfiguredAIService(AIService):
         raise AIConfigurationError()
 
     async def translate_phrases(self, phrases, *, language_code, translation_language, user_id):
+        raise AIConfigurationError()
+
+    async def generate_popular_phrases(self, *, language_code, translation_language, level, amount=8, category=None, industry=None, topics=None, known_phrases=None, user_id):
         raise AIConfigurationError()
 
 
@@ -363,6 +381,35 @@ _TRANSLATE_PHRASES_SYSTEM = (
     "exactly one output translation at the same position."
 )
 
+_POPULAR_PHRASES_SYSTEM = (
+    "You are a native speaker of the target language creating a batch of common, useful, "
+    "everyday phrases for a language-learning app. Respond with ONLY a JSON object: "
+    '{"phrases": [{"phrase": str, "translation": str, "pronunciation": str|null, '
+    '"category": str|null}, ...]}. Generate the EXACT requested amount of DISTINCT phrases '
+    "(fewer only if you genuinely cannot find that many that satisfy every rule below). "
+    "\n\n"
+    "CRITICAL - same native-speaker rule as everywhere else in this app: each phrase must be "
+    "something a real native speaker would actually say - never a literal, word-for-word "
+    "translation of a fixed sentence in another language. Prioritize naturalness and how "
+    "commonly the phrase is actually used in real everyday life over textbook-style phrasing. "
+    "\n\n"
+    "Never repeat any phrase already in the learner's existing list, given below - if a natural "
+    "option would overlap with one of those, generate a genuinely different phrase instead of a "
+    "trivial reword of an existing one (e.g. not just swapping 'Hello' for 'Hi' if 'Hello' is "
+    "already there). "
+    "\n\n"
+    "Adapt complexity to the learner's level: a beginner/elementary learner gets short, simple "
+    "everyday phrases; an intermediate learner gets natural conversational phrases; an "
+    "upper-intermediate or advanced learner can get more idiomatic or field-specific phrases "
+    "when relevant. "
+    "\n\n"
+    '"pronunciation" MUST be written using LATIN LETTERS ONLY - a simple, readable '
+    "transliteration of the PHRASE ITSELF (never of the translation, never IPA, never a "
+    "non-Latin script) - always attempt one. "
+    f'"category" is one short tag best describing the phrase\'s everyday context - use one of: '
+    f"{', '.join(PRESET_SITUATIONS)} - or null if none fit well."
+)
+
 
 def _strip_markdown_fence(raw: str) -> str:
     """Some models occasionally wrap JSON-mode output in a ```json ... ```
@@ -460,6 +507,22 @@ def _parse_translate_phrases_response(raw: str) -> ai_models.PhraseTranslationsR
         return ai_models.PhraseTranslationsResult.model_validate(payload)
     except ValidationError as exc:
         raise AIInvalidResponseError("AI response did not match the expected phrase-translations schema") from exc
+
+
+def _parse_popular_phrases_response(raw: str) -> ai_models.PopularPhraseBatchResult:
+    payload = _parse_json(raw)
+    if not isinstance(payload, dict) or not isinstance(payload.get("phrases"), list):
+        raise AIInvalidResponseError('AI response is missing a "phrases" list')
+
+    phrases: list[ai_models.GeneratedPopularPhrase] = []
+    for item in payload["phrases"]:
+        try:
+            phrases.append(ai_models.GeneratedPopularPhrase.model_validate(item))
+        except ValidationError:
+            # One malformed entry must not cost the rest of an otherwise
+            # valid batch, same as _parse_generate_words_response above.
+            continue
+    return ai_models.PopularPhraseBatchResult(phrases=phrases)
 
 
 class LiveAIService(AIService):
@@ -580,6 +643,23 @@ class LiveAIService(AIService):
             "translate_phrases", user_id, _TRANSLATE_PHRASES_SYSTEM, user, _parse_translate_phrases_response
         )
         return result.translations
+
+    async def generate_popular_phrases(self, *, language_code, translation_language, level, amount=8, category=None, industry=None, topics=None, known_phrases=None, user_id):
+        known = ", ".join((known_phrases or [])[:50])
+        category_line = f"Bias generated phrases toward this category if it fits naturally: {category}\n" if category else ""
+        topics_line = f"Learner's topics of interest: {', '.join(topics)}\n" if topics else ""
+        industry_line = f"Learner's work industry - bias toward this field if relevant: {industry}\n" if industry else ""
+        user = (
+            f"Target language the learner is learning (ISO 639-1): {language_code}\n"
+            f"Translate into language code: {translation_language}\n"
+            f"Learner level: {level}\n"
+            f"Exact amount of new distinct phrases to generate: {amount}\n"
+            f"{category_line}{topics_line}{industry_line}"
+            f"Phrases the learner already has - never repeat any of these: {known or 'none'}\n"
+        )
+        return await self._complete(
+            "generate_popular_phrases", user_id, _POPULAR_PHRASES_SYSTEM, user, _parse_popular_phrases_response
+        )
 
     async def _complete(self, operation: str, user_id: int, system: str, user: str, parse: Callable[[str], T]) -> T:
         """Runs one operation end-to-end (network call + parse/validate)

@@ -368,6 +368,8 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
         )
     with pytest.raises(AIConfigurationError):
         await svc.translate_phrases(["hi"], language_code="en", translation_language="ru", user_id=1)
+    with pytest.raises(AIConfigurationError):
+        await svc.generate_popular_phrases(language_code="en", translation_language="ru", level="beginner", user_id=1)
 
 
 # --- 15. translate_phrases (🔥 Популярные фразы batch translation cache) ---
@@ -393,6 +395,73 @@ async def test_translate_phrases_tolerates_a_mismatched_count():
         ["How are you?", "Thanks a lot"], language_code="en", translation_language="ru", user_id=1,
     )
     assert result == ["Как дела?"]
+
+
+# --- 16. generate_popular_phrases (✨ Сгенерировать ещё) ---
+
+GOOD_POPULAR_PHRASES_JSON = (
+    '{"phrases": ['
+    '{"phrase": "Could you give me a hand?", "translation": "Не могли бы вы мне помочь?", '
+    '"pronunciation": "kud yu giv mi a hand?", "category": "work"}, '
+    '{"phrase": "I\'ll get back to you.", "translation": "Я свяжусь с вами позже.", '
+    '"pronunciation": "ail get bak tu yu", "category": "work"}'
+    ']}'
+)
+
+
+async def test_generate_popular_phrases_returns_validated_batch():
+    svc, provider = _service([GOOD_POPULAR_PHRASES_JSON])
+    result = await svc.generate_popular_phrases(
+        language_code="en", translation_language="ru", level="intermediate", amount=2, user_id=1,
+    )
+    assert [p.phrase for p in result.phrases] == ["Could you give me a hand?", "I'll get back to you."]
+    assert result.phrases[0].translation == "Не могли бы вы мне помочь?"
+    assert result.phrases[0].pronunciation == "kud yu giv mi a hand?"
+    assert result.phrases[0].category == "work"
+    assert "native speaker" in provider.last_system.lower()
+    assert "never repeat" in provider.last_system.lower()
+
+
+async def test_generate_popular_phrases_drops_unrecognised_category_but_keeps_the_phrase():
+    bad_category_json = (
+        '{"phrases": [{"phrase": "Hi there.", "translation": "Привет.", '
+        '"pronunciation": "hai ther", "category": "not-a-real-category"}]}'
+    )
+    svc, _ = _service([bad_category_json])
+    result = await svc.generate_popular_phrases(
+        language_code="en", translation_language="ru", level="beginner", user_id=1,
+    )
+    assert result.phrases[0].phrase == "Hi there."
+    assert result.phrases[0].category is None
+
+
+async def test_generate_popular_phrases_skips_invalid_entries_keeps_valid_ones():
+    mixed_json = (
+        '{"phrases": ['
+        '{"phrase": "", "translation": "bad - blank phrase"}, '
+        '{"phrase": "Good morning.", "translation": "Доброе утро.", "pronunciation": "gud MOR-ning"}'
+        ']}'
+    )
+    svc, _ = _service([mixed_json])
+    result = await svc.generate_popular_phrases(
+        language_code="en", translation_language="ru", level="beginner", user_id=1,
+    )
+    assert len(result.phrases) == 1
+    assert result.phrases[0].phrase == "Good morning."
+
+
+async def test_generate_popular_phrases_prompt_includes_amount_known_phrases_and_personalization():
+    svc, provider = _service([GOOD_POPULAR_PHRASES_JSON])
+    await svc.generate_popular_phrases(
+        language_code="en", translation_language="ru", level="advanced", amount=6,
+        category="work", industry="construction", topics=["business"],
+        known_phrases=["Hello", "How are you?"], user_id=1,
+    )
+    assert "6" in provider.last_user
+    assert "Hello" in provider.last_user and "How are you?" in provider.last_user
+    assert "construction" in provider.last_user
+    assert "business" in provider.last_user
+    assert "work" in provider.last_user
 
 
 def test_get_ai_service_factory_respects_ai_enabled_and_api_key(monkeypatch):

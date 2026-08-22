@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 Studio",
   "phrase_situation.customer_service": "🔧 Servizio clienti",
   "phrases.popular.next": "➡️ Altre frasi",
-  "phrases.popular.prev": "⬅️ Precedenti"
+  "phrases.popular.prev": "⬅️ Precedenti",
+  "phrases.popular.generate_more": "✨ Genera altre",
+  "phrases.popular.generating": "⏳ Sto cercando nuove frasi popolari...",
+  "phrases.popular.generating_wait": "⏳ Generazione già in corso, attendi un momento",
+  "phrases.popular.generate_failed": "Impossibile creare nuove frasi. Riprova.",
+  "phrases.popular.no_new_phrases": "Nessuna nuova frase trovata. Riprova."
 }

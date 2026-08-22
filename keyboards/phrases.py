@@ -46,12 +46,14 @@ _NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣
 
 
 def popular_list_keyboard(page_indices: list[int], *, page: int, has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
-    """🔥 Популярные фразы pagination (bugfix stage sections 8-10): one
-    numbered "open to save" button per phrase on THIS page - numbered
+    """🔥 Популярные фразы pagination (bugfix stage sections 8-10, 21-37):
+    one numbered "open to save" button per phrase on THIS page - numbered
     globally (matching the spec's own example: page 2 continues 6️⃣-🔟,
-    it doesn't restart at 1️⃣) - plus ➡️/⬅️ page navigation. Navigating
-    pages never touches AI - phrase_service.get_translated_popular_phrases
-    already cached everything before this keyboard is ever built."""
+    it doesn't restart at 1️⃣) - plus ➡️/⬅️ page navigation (never touches
+    AI - phrase_service.get_translated_popular_phrases already cached
+    everything before this keyboard is ever built) and ✨ Сгенерировать
+    ещё, which is the one button here that DOES call AI - kept visually
+    separate from ⬅️/➡️ so the two are never confused (section 29)."""
     buttons = [
         InlineKeyboardButton(
             _NUMBER_EMOJI[idx] if idx < len(_NUMBER_EMOJI) else str(idx + 1),
@@ -69,6 +71,7 @@ def popular_list_keyboard(page_indices: list[int], *, page: int, has_prev: bool,
     if nav_row:
         rows.append(nav_row)
 
+    rows.append([InlineKeyboardButton(t("phrases.popular.generate_more", get_current_language()), callback_data="phr:populargen")])
     rows.append([InlineKeyboardButton(t("phrases.button.back", get_current_language()), callback_data="phr:menu")])
     return InlineKeyboardMarkup(rows)
 

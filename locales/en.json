@@ -405,5 +405,10 @@
   "phrase_situation.study": "🎓 Studying",
   "phrase_situation.customer_service": "🔧 Customer service",
   "phrases.popular.next": "➡️ Next phrases",
-  "phrases.popular.prev": "⬅️ Previous"
+  "phrases.popular.prev": "⬅️ Previous",
+  "phrases.popular.generate_more": "✨ Generate more",
+  "phrases.popular.generating": "⏳ Finding new popular phrases...",
+  "phrases.popular.generating_wait": "⏳ Already generating, please wait",
+  "phrases.popular.generate_failed": "Couldn't create new phrases. Please try again.",
+  "phrases.popular.no_new_phrases": "Couldn't find new phrases. Please try again."
 }

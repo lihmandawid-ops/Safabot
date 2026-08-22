@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import User, UserLanguage
 from database.repositories import phrases as phrases_repo
 from database.repositories import popular_phrase_translations as popular_translations_repo
+from database.repositories import popular_phrases as popular_phrases_repo
 from services import ai_models
 from services.ai_errors import AIError
 from services.ai_service import get_ai_service
 from utils.logging import get_logger
 from utils.phrase_situations import PRESET_SITUATIONS
 from utils.popular_phrases import get_popular_phrases
+from utils.text import normalize_word
 
 logger = get_logger(__name__)
 
@@ -116,6 +118,33 @@ class TranslatedPopularPhrase:
     situation: str
 
 
+@dataclass(frozen=True)
+class _CombinedEntry:
+    phrase: str
+    pronunciation: str
+    category: str | None
+
+
+async def _combined_popular_entries(session: AsyncSession, *, language_code: str) -> list[_CombinedEntry]:
+    """The full 🔥 Популярные фразы pool for one learning language: every
+    static seed entry (utils.popular_phrases - fixed code, reviewed,
+    ships with the app) FIRST, in their fixed tuple order, followed by
+    every ✨ Сгенерировать ещё AI-generated database.models.PopularPhrase
+    row, in ascending id (insertion) order. This combined order must stay
+    stable forever - PopularPhraseTranslation's cache keys a translation
+    to a position in exactly this list, so a new phrase must only ever
+    be appended at the end, never inserted earlier."""
+    static = [
+        _CombinedEntry(phrase=e.phrase, pronunciation=e.pronunciation, category=e.situation)
+        for e in get_popular_phrases(language_code)
+    ]
+    generated = [
+        _CombinedEntry(phrase=row.phrase, pronunciation=row.pronunciation or "", category=row.category)
+        for row in await popular_phrases_repo.list_by_language(session, language_code=language_code)
+    ]
+    return static + generated
+
+
 async def get_translated_popular_phrases(
     session: AsyncSession, *, language_code: str, translation_language: str, user_id: int,
 ) -> list[TranslatedPopularPhrase]:
@@ -126,14 +155,16 @@ async def get_translated_popular_phrases(
     Cyrillic for a Russian interface - which in practice sometimes came
     back reading like a copy of the translation. Popular-phrase
     pronunciation now NEVER touches AI at all: it's the static seed data's
-    own already-Latin, already-phrase-specific pronunciation. Only the
-    TRANSLATION is fetched from AI, and only via one small BATCH call per
-    (language_code, translation_language) pair, cached forever afterward
-    (database.repositories.popular_phrase_translations) - so browsing,
-    re-opening, and paging through the list all read from the DB, never
-    calling AI again once a language pair has been translated once.
+    (or, for a ✨ Сгенерировать ещё row, the AI's own one-time answer,
+    saved once and never regenerated) own already-Latin, already-phrase-
+    specific pronunciation. Only the TRANSLATION is fetched from AI, and
+    only via one small BATCH call per (language_code, translation_language)
+    pair, cached forever afterward (database.repositories.
+    popular_phrase_translations) - so browsing, re-opening, and paging
+    through the list all read from the DB, never calling AI again once a
+    language pair has been translated once.
     """
-    entries = get_popular_phrases(language_code)
+    entries = await _combined_popular_entries(session, language_code=language_code)
     if not entries:
         return []
 
@@ -165,7 +196,87 @@ async def get_translated_popular_phrases(
     return [
         TranslatedPopularPhrase(
             index=i, phrase=entry.phrase, pronunciation=entry.pronunciation,
-            translation=cached.get(i, ""), situation=entry.situation,
+            translation=cached.get(i, ""), situation=entry.category or "",
         )
         for i, entry in enumerate(entries)
     ]
+
+
+async def generate_more_popular_phrases(
+    session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int = 8,
+) -> list[TranslatedPopularPhrase]:
+    """✨ Сгенерировать ещё (native-speaker phrasebook stage, sections
+    21-35): asks the AI for a batch of `amount` NEW phrases, skips any
+    that turn out to already exist (case-insensitive, section 26), and
+    retries - same bounded pattern as
+    services.word_generation_service._top_up_via_ai - up to
+    settings.max_generation_attempts times for the shortfall, rather than
+    looping forever. Each accepted phrase is saved once
+    (database.repositories.popular_phrases) and its translation for THIS
+    user's own translation_language is cached immediately from the very
+    same AI response (no second translate_phrases call needed for it).
+
+    Never swallows AIError on its own - handlers/phrases.py decides the
+    user-facing fallback, same convention as generate_phrase() above.
+    Returns however many distinct new phrases it actually managed - an
+    empty list is a valid, non-error result (AI kept returning
+    duplicates)."""
+    from config import get_settings
+
+    settings = get_settings()
+    language_code = user_language.language_code
+    translation_language = user_language.translation_language
+
+    existing = await _combined_popular_entries(session, language_code=language_code)
+    known_phrases = [e.phrase for e in existing][-50:]  # bounded sample (section 30), never the whole pool
+    # The real, unbounded dedup guarantee (section 26) - covers the
+    # static seed set too, not just database.models.PopularPhrase rows,
+    # which popular_phrases_repo.exists() alone can't see.
+    seen_normalized = {normalize_word(e.phrase) for e in existing}
+    next_index = len(existing)
+
+    created: list[TranslatedPopularPhrase] = []
+    attempts = 0
+    while len(created) < amount and attempts < settings.max_generation_attempts:
+        attempts += 1
+        shortfall = amount - len(created)
+        batch = await get_ai_service().generate_popular_phrases(
+            language_code=language_code, translation_language=translation_language,
+            level=user_language.level, amount=shortfall,
+            industry=industry_hint(user_language), topics=user_language.selected_topics or None,
+            known_phrases=known_phrases, user_id=user.id,
+        )
+        if not batch.phrases:
+            break
+
+        new_translations: dict[int, str] = {}
+        for entry in batch.phrases:
+            if len(created) >= amount:
+                break
+            normalized = normalize_word(entry.phrase)
+            if normalized in seen_normalized:
+                continue  # section 26: never save a duplicate, just skip it
+
+            row = await popular_phrases_repo.add(
+                session, language_code=language_code, phrase=entry.phrase,
+                pronunciation=entry.pronunciation, category=entry.category,
+            )
+            index = next_index
+            next_index += 1
+            new_translations[index] = entry.translation
+            created.append(
+                TranslatedPopularPhrase(
+                    index=index, phrase=row.phrase, pronunciation=row.pronunciation or "",
+                    translation=entry.translation, situation=row.category or "",
+                )
+            )
+            seen_normalized.add(normalized)
+            known_phrases.append(entry.phrase)
+
+        if new_translations:
+            await popular_translations_repo.bulk_save(
+                session, language_code=language_code, translation_language=translation_language,
+                translations=new_translations,
+            )
+
+    return created
