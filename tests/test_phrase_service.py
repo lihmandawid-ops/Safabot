@@ -216,3 +216,54 @@ async def test_get_translated_popular_phrases_degrades_gracefully_when_ai_unconf
     assert len(result) > 0
     assert all(e.translation == "" for e in result)
     assert all(e.pronunciation for e in result)  # pronunciation is unaffected, always present
+
+
+# --- §18 checklist: one popular phrase per supported learning language ---
+
+@pytest.mark.parametrize("language_code", ["en", "ru", "de", "he", "es", "fr", "it", "uk"])
+async def test_popular_phrase_pronunciation_and_translation_are_correctly_separated(session, monkeypatch, language_code):
+    """For every supported learning language: phrase != translation,
+    pronunciation != translation, pronunciation belongs to the phrase
+    (comes straight from the untouched seed data, never AI), and the
+    translation follows translation_language (mocked here as a distinct,
+    recognizable transform so a mix-up with the phrase or a fixed
+    hardcoded value would fail the assertions below)."""
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"[{translation_language}] {p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    result = await phrase_service.get_translated_popular_phrases(
+        session, language_code=language_code, translation_language="ru", user_id=1,
+    )
+    assert len(result) > 0
+    for entry in result:
+        assert entry.phrase != entry.translation
+        assert entry.pronunciation != entry.translation
+        assert entry.pronunciation  # every seed entry has one
+        assert entry.translation == f"[ru] {entry.phrase}"  # translation is of THIS phrase, into translation_language
+
+
+async def test_popular_phrase_translation_follows_interface_language_not_a_fixed_one(session, monkeypatch):
+    """Same learning_language (Hebrew), two different translation
+    languages (section 4's own example) - the translation must differ
+    accordingly, never staying fixed to one language."""
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"[{translation_language}] {p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    ru_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="he", translation_language="ru", user_id=1,
+    )
+    await session.commit()
+    uk_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="he", translation_language="uk", user_id=1,
+    )
+
+    assert ru_view[0].phrase == uk_view[0].phrase  # same learning-language phrase
+    assert ru_view[0].translation != uk_view[0].translation  # different translation per interface language
+    assert ru_view[0].translation.startswith("[ru]")
+    assert uk_view[0].translation.startswith("[uk]")
