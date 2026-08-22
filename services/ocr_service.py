@@ -78,6 +78,7 @@ def get_ocr_service() -> OCRService:
             model=settings.gemini_multimodal_model or settings.gemini_model,
             base_url=settings.gemini_base_url,
             timeout=settings.ai_timeout_seconds,
+            proxy=settings.gemini_proxy_url,
         )
         return LiveOCRService(provider=provider, provider_label="gemini")
 

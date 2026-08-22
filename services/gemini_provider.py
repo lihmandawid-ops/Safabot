@@ -86,6 +86,7 @@ class _GeminiTransportError(Exception):
 async def _generate_content(
     *, api_key: str, model: str, base_url: str | None, timeout: float,
     parts: list[dict], system_instruction: str | None = None, response_mime_type: str | None = None,
+    proxy: str | None = None,
 ) -> str:
     """One Gemini `models/{model}:generateContent` call. `parts` can mix a
     text part with an inlineData (base64 image/audio) part for multimodal
@@ -93,6 +94,13 @@ async def _generate_content(
     EMPTY string, which is a valid answer for OCR ("no text in the
     image")/STT ("no speech in the audio") and is the caller's job to
     interpret; only a genuinely malformed/absent response raises here.
+
+    `proxy`: some regions get HTTP 400 "User location is not supported
+    for the API use" from Google regardless of API key validity - this
+    routes ONLY this Gemini request through a forward proxy in a
+    supported region when set (GEMINI_PROXY_URL), leaving DeepSeek/
+    Telegram/OCR-legacy traffic (their own separate httpx clients)
+    completely untouched.
     """
     url_base = (base_url or DEFAULT_BASE_URL).rstrip("/")
     url = f"{url_base}/v1beta/models/{model}:generateContent"
@@ -107,7 +115,7 @@ async def _generate_content(
         payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise _GeminiTransportError("timeout", "Gemini request timed out") from exc
@@ -175,17 +183,22 @@ class GeminiTextProvider(AIProvider):
     prompt and Pydantic parser in services/ai_service.py works completely
     unchanged - only the transport differs."""
 
-    def __init__(self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 30.0,
+        proxy: str | None = None,
+    ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
         self._timeout = timeout
+        self._proxy = proxy
 
     async def complete(self, *, system: str, user: str) -> str:
         try:
             text = await _generate_content(
                 api_key=self._api_key, model=self._model, base_url=self._base_url, timeout=self._timeout,
                 parts=[{"text": user}], system_instruction=system, response_mime_type="application/json",
+                proxy=self._proxy,
             )
         except _GeminiTransportError as exc:
             raise _AI_ERROR_MAP[exc.kind](exc.detail) from exc
@@ -200,17 +213,22 @@ class GeminiOCRProvider(OCRProvider):
     the same call, no separate OCR-specific endpoint needed - unlike
     HttpOCRProvider, which talks to a dedicated vision-chat endpoint."""
 
-    def __init__(self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 30.0,
+        proxy: str | None = None,
+    ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
         self._timeout = timeout
+        self._proxy = proxy
 
     async def extract_text(self, image_bytes: bytes, *, mime_type: str) -> str:
         try:
             text = await _generate_content(
                 api_key=self._api_key, model=self._model, base_url=self._base_url, timeout=self._timeout,
                 parts=[{"text": _GEMINI_OCR_PROMPT}, _inline_data_part(image_bytes, mime_type=mime_type)],
+                proxy=self._proxy,
             )
         except _GeminiTransportError as exc:
             raise _OCR_ERROR_MAP[exc.kind](exc.detail) from exc
@@ -224,17 +242,22 @@ class GeminiSTTProvider(SpeechToTextProvider):
     for parity with that provider but unused here: Gemini only needs the
     audio bytes and their mime type, never a multipart file upload."""
 
-    def __init__(self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 60.0) -> None:
+    def __init__(
+        self, *, api_key: str, model: str, base_url: str | None = None, timeout: float = 60.0,
+        proxy: str | None = None,
+    ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
         self._timeout = timeout
+        self._proxy = proxy
 
     async def transcribe(self, audio_bytes: bytes, *, mime_type: str, filename: str) -> str:
         try:
             text = await _generate_content(
                 api_key=self._api_key, model=self._model, base_url=self._base_url, timeout=self._timeout,
                 parts=[{"text": _GEMINI_STT_PROMPT}, _inline_data_part(audio_bytes, mime_type=mime_type)],
+                proxy=self._proxy,
             )
         except _GeminiTransportError as exc:
             raise _STT_ERROR_MAP[exc.kind](exc.detail) from exc

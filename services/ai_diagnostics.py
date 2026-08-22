@@ -124,6 +124,7 @@ async def test_gemini_connection(*, provider: AIProvider | None = None) -> Conne
             model=settings.gemini_text_model or settings.gemini_model,
             base_url=settings.gemini_base_url,
             timeout=settings.ai_timeout_seconds,
+            proxy=settings.gemini_proxy_url,
         )
 
     try:

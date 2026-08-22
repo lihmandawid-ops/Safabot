@@ -83,6 +83,7 @@ class Settings:
     gemini_multimodal_model: str | None
     gemini_base_url: str | None
     gemini_enabled: bool
+    gemini_proxy_url: str | None
     max_generation_attempts: int
     max_extra_words_per_day: int
     max_text_length: int
@@ -161,6 +162,13 @@ def get_settings() -> Settings:
         gemini_multimodal_model=os.getenv("GEMINI_MULTIMODAL_MODEL") or None,
         gemini_base_url=os.getenv("GEMINI_BASE_URL") or None,
         gemini_enabled=_get_bool("GEMINI_ENABLED", True),
+        # Some regions are not served by the Gemini Developer API at all
+        # ("User location is not supported for the API use") - set this to
+        # route ONLY Gemini's own HTTP requests through a forward proxy
+        # sitting in a supported region, without touching DeepSeek/
+        # Telegram/OCR-legacy traffic, which never sees this setting.
+        # Standard proxy URL form: http://user:pass@host:port.
+        gemini_proxy_url=os.getenv("GEMINI_PROXY_URL") or None,
         max_generation_attempts=_get_int("MAX_GENERATION_ATTEMPTS", 3),
         # Bugfix stage: "➕ Ещё новые слова" draws from a separate daily
         # pool than daily_new_words, precisely so an eager user can ask for

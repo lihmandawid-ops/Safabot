@@ -106,6 +106,48 @@ async def test_gemini_text_provider_respects_custom_base_url(monkeypatch):
     assert captured["url"] == "https://my-proxy.example/v1beta/models/m:generateContent"
 
 
+async def test_gemini_text_provider_routes_through_gemini_proxy_url_when_set(monkeypatch):
+    """Some regions get HTTP 400 "User location is not supported for the
+    API use" from Google regardless of key validity - GEMINI_PROXY_URL
+    routes ONLY this request through a forward proxy in a supported
+    region, by passing `proxy=` straight to httpx.AsyncClient."""
+    captured = {}
+    real_init = httpx.AsyncClient.__init__
+
+    def spy_init(self, *args, **kwargs):
+        captured["proxy"] = kwargs.get("proxy")
+        return real_init(self, *args, **kwargs)
+
+    async def fake_post(self, url, *, headers, json):
+        return _FakeResponse(200, _ok_body("ok"))
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy_init)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    provider = GeminiTextProvider(api_key="k", model="m", proxy="http://proxyhost:3128")
+    await provider.complete(system="s", user="u")
+    assert captured["proxy"] == "http://proxyhost:3128"
+
+
+async def test_gemini_text_provider_no_proxy_by_default(monkeypatch):
+    captured = {}
+    real_init = httpx.AsyncClient.__init__
+
+    def spy_init(self, *args, **kwargs):
+        captured["proxy"] = kwargs.get("proxy")
+        return real_init(self, *args, **kwargs)
+
+    async def fake_post(self, url, *, headers, json):
+        return _FakeResponse(200, _ok_body("ok"))
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy_init)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    provider = GeminiTextProvider(api_key="k", model="m")
+    await provider.complete(system="s", user="u")
+    assert captured["proxy"] is None
+
+
 @pytest.mark.parametrize(
     "status_code,expected_error",
     [
@@ -398,6 +440,22 @@ def test_get_ai_service_uses_gemini_only_when_deepseek_not_configured(monkeypatc
         assert isinstance(service._provider, GeminiTextProvider)
     finally:
         monkeypatch.setenv("GEMINI_API_KEY", "")
+        _reset_ai_factories()
+
+
+def test_get_ai_service_wires_gemini_proxy_url_into_the_provider(monkeypatch):
+    from services.ai_service import get_ai_service
+
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
+    monkeypatch.setenv("AI_API_KEY", "")
+    monkeypatch.setenv("GEMINI_PROXY_URL", "http://proxyhost:3128")
+    _reset_ai_factories()
+    try:
+        service = get_ai_service()
+        assert service._provider._proxy == "http://proxyhost:3128"
+    finally:
+        monkeypatch.setenv("GEMINI_API_KEY", "")
+        monkeypatch.setenv("GEMINI_PROXY_URL", "")
         _reset_ai_factories()
 
 

@@ -736,6 +736,7 @@ def get_ai_service() -> AIService:
             model=settings.gemini_text_model or settings.gemini_model,
             base_url=settings.gemini_base_url,
             timeout=settings.ai_timeout_seconds,
+            proxy=settings.gemini_proxy_url,
         )
 
     deepseek_provider: AIProvider | None = None

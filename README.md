@@ -524,6 +524,7 @@ FallbackAIProvider (когда настроены оба ключа)
 | `GEMINI_TEXT_MODEL` / `GEMINI_MULTIMODAL_MODEL` | нет | Необязательные переопределения `GEMINI_MODEL` отдельно для текста и для фото/аудио — оставьте пустыми, чтобы использовать одну модель для всего. |
 | `GEMINI_BASE_URL` | нет | Только для нестандартного эндпоинта Gemini. |
 | `GEMINI_ENABLED` | нет (умолч. `true`) | Явный выключатель поверх `GEMINI_API_KEY`. |
+| `GEMINI_PROXY_URL` | нет | Форвард-прокси (`http://user:pass@host:port`) для запросов К Gemini, если регион сервера не поддерживается Gemini Developer API напрямую (ошибка `"User location is not supported for the API use"`) — не затрагивает DeepSeek/Telegram/OCR_*/STT_*. |
 | `AI_API_KEY` | нет | FALLBACK-провайдер (DeepSeek по умолчанию) для текстовых задач — используется только если Gemini не настроен или временно недоступен. Пусто = нет fallback. **Никогда не коммитить.** |
 | `AI_MODEL` | нет (умолч. `gpt-4o-mini`) | Имя модели у fallback-провайдера. |
 | `AI_BASE_URL` | нет | Только для не-OpenAI, но OpenAI-совместимого эндпоинта. |
@@ -560,6 +561,19 @@ FallbackAIProvider (когда настроены оба ключа)
   `timeout` / `network_error` / `invalid_response`).
 - Вручную: `python -c "import asyncio; from services.ai_diagnostics import test_gemini_connection; print(asyncio.run(test_gemini_connection()))"`
   (аналогично с `test_deepseek_connection`).
+- **`reason=invalid_response` от Gemini на рабочем ключе?** Часто это не
+  проблема ключа, а `"User location is not supported for the API use"` —
+  Gemini Developer API недоступен из региона сервера. Проверить напрямую:
+  ```bash
+  source .env
+  curl -s "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL:-gemini-flash-latest}:generateContent" \
+    -H "x-goog-api-key: $GEMINI_API_KEY" -H 'Content-Type: application/json' \
+    -d '{"contents":[{"parts":[{"text":"ping"}]}]}'
+  ```
+  Если в ответе именно эта ошибка — бот при этом продолжает работать на
+  DeepSeek (fallback сработал автоматически); чтобы вернуть Gemini,
+  задайте `GEMINI_PROXY_URL` (форвард-прокси в поддерживаемом регионе,
+  см. таблицу переменных выше).
 - В 📖 Словарь введите слово, которого точно нет в seed-наборе
   (`database/seed_words.py`) — например `serendipity`. Если AI настроен
   правильно, придёт карточка с переводом; при следующем вводе того же
