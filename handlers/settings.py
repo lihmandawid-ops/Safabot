@@ -26,7 +26,6 @@ from database.repositories import users as users_repo
 from keyboards.language import settings_add_learning_language_keyboard
 from keyboards.settings import (
     add_language_level_keyboard,
-    add_language_words_keyboard,
     back_to_settings_keyboard,
     difficulty_pick_keyboard,
     goal_pick_keyboard,
@@ -294,20 +293,22 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             )
 
         elif data.startswith("set:addlang:level:"):
-            await query.answer()
+            # study-flow-rework stage (real user feedback): the bot must
+            # never offer/generate words on its own outside an explicit
+            # 📚 Учить слова tap - the old "how many new words per day?"
+            # step here fed the retired auto-quota generator
+            # (learning_service.get_new_words_for_today, unreachable from
+            # any screen since "Учить слова" was reworked to always
+            # generate exactly 2 words on request). Adding a language now
+            # finishes right after the level pick, with no word
+            # suggestion of any kind - the learner goes to 📚 Учить слова
+            # themselves whenever they're ready.
             learning_code, translation_code, level = data.removeprefix("set:addlang:level:").split(":")
-            options = get_settings().plan_limits.daily_new_words_options
-            await safe_edit_message_text(query,
-                t("settings.pick_daily_words", get_current_language()),
-                reply_markup=add_language_words_keyboard(learning_code, translation_code, level, options),
-            )
-
-        elif data.startswith("set:addlang:words:"):
-            learning_code, translation_code, level, count = data.removeprefix("set:addlang:words:").split(":")
             try:
                 new_language = await user_languages_repo.add_language(
                     session, user_id=user.id, language_code=learning_code,
-                    translation_language=translation_code, level=level, daily_new_words=int(count),
+                    translation_language=translation_code, level=level,
+                    daily_new_words=get_settings().plan_limits.daily_new_words_options[0],
                 )
             except user_languages_repo.DuplicateUserLanguageError:
                 await query.answer(t("settings.add_language_duplicate", get_current_language()), show_alert=True)

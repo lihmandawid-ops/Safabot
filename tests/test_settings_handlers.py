@@ -194,12 +194,11 @@ async def test_add_language_full_flow(handler_db):
     labels = [b.text for row in markup.inline_keyboard for b in row]
     assert labels[0] == "🟢 Только начинаю"
 
+    # study-flow-rework stage (real user feedback): the daily-words-count
+    # step is gone - picking a level now finishes the flow immediately.
     pick_level = await _run("set:addlang:level:de:ru:advanced")
     assert pick_level.answer.call_count == 1
-
-    final = await _run("set:addlang:words:de:ru:advanced:8")
-    assert final.answer.call_count == 1
-    final.edit_message_text.assert_awaited_once()
+    pick_level.edit_message_text.assert_awaited_once()
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -207,12 +206,12 @@ async def test_add_language_full_flow(handler_db):
         de = next(ul for ul in languages if ul.language_code == "de")
         assert de.translation_language == "ru"
         assert de.level == "advanced"
-        assert de.daily_new_words == 8
+        assert de.daily_new_words == 2  # silently defaulted, no picker step anymore
         assert de.is_current is True  # newly added language becomes active
 
 
 async def test_add_language_duplicate_shows_alert_without_crashing(handler_db):
-    q = await _run("set:addlang:words:en:ru:beginner:4")  # en/ru already exists from the fixture
+    q = await _run("set:addlang:level:en:ru:beginner")  # en/ru already exists from the fixture
     assert q.answer.call_count == 1
     args, kwargs = q.answer.call_args
     assert kwargs.get("show_alert") is True

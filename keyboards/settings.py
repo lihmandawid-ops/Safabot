@@ -90,23 +90,6 @@ def add_language_level_keyboard(learning_language: str, translation_language: st
     return InlineKeyboardMarkup(rows)
 
 
-def add_language_words_keyboard(
-    learning_language: str, translation_language: str, level: str, options: tuple[int, ...]
-) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    str(n),
-                    callback_data=f"set:addlang:words:{learning_language}:{translation_language}:{level}:{n}",
-                )
-                for n in options
-            ],
-            [InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:lang:list")],
-        ]
-    )
-
-
 def interface_language_pick_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(f"{lang.flag} {language_display_name(lang)}", callback_data=f"set:iface:pick:{lang.code}")
