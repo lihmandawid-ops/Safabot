@@ -28,7 +28,6 @@ from keyboards.settings import (
     add_language_level_keyboard,
     add_language_words_keyboard,
     back_to_settings_keyboard,
-    daily_words_pick_keyboard,
     difficulty_pick_keyboard,
     goal_pick_keyboard,
     industry_pick_keyboard,
@@ -73,7 +72,6 @@ async def _build_summary(session, user) -> str:
             name=language_display_name(interface_lang) if interface_lang else user.interface_language,
         ),
         t("settings.level", get_current_language(), level=t(f"level.{user.level}", get_current_language())),
-        t("settings.daily_words", get_current_language(), count=user.daily_new_words),
         t("settings.timezone", get_current_language(), timezone=user.timezone),
     ]
     current_language = next((ul for ul in languages if ul.is_current), None)
@@ -360,21 +358,6 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.message.reply_text(
                 t("settings.main_menu_updated", code), reply_markup=main_menu_keyboard(code)
             )
-
-        elif data == "set:words:list":
-            await query.answer()
-            options = get_settings().plan_limits.daily_new_words_options
-            await safe_edit_message_text(query,
-                t("settings.pick_daily_words", get_current_language()), reply_markup=daily_words_pick_keyboard(options)
-            )
-
-        elif data.startswith("set:words:pick:"):
-            count = int(data.removeprefix("set:words:pick:"))
-            current = await user_languages_repo.get_current_language(session, user.id)
-            if current is not None:
-                await user_languages_repo.set_daily_new_words(session, current, count)
-            await query.answer(t("settings.daily_words_updated", get_current_language(), count=count))
-            await _render_home(query, session, user)
 
         elif data == "set:goal:list":
             await query.answer()

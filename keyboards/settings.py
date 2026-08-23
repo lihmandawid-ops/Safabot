@@ -32,7 +32,6 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(t("settings.menu.language", get_current_language()), callback_data="set:lang:list")],
             [InlineKeyboardButton(t("settings.menu.interface_language", get_current_language()), callback_data="set:iface:list")],
-            [InlineKeyboardButton(t("settings.menu.daily_words", get_current_language()), callback_data="set:words:list")],
             [InlineKeyboardButton(t("settings.menu.notification_time", get_current_language()), callback_data="set:notif:slots")],
             [InlineKeyboardButton(t("settings.menu.notifications_toggle", get_current_language()), callback_data="set:notif:toggle")],
             [InlineKeyboardButton(t("settings.menu.review_settings", get_current_language()), callback_data="set:revsettings:home")],
@@ -116,15 +115,6 @@ def interface_language_pick_keyboard() -> InlineKeyboardMarkup:
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
-
-
-def daily_words_pick_keyboard(options: tuple[int, ...]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(str(n), callback_data=f"set:words:pick:{n}") for n in options],
-            [InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")],
-        ]
-    )
 
 
 def notification_slot_keyboard() -> InlineKeyboardMarkup:

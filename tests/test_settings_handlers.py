@@ -143,12 +143,6 @@ async def test_switching_to_ukrainian_actually_renders_ukrainian_everywhere(hand
     assert user.interface_language == "uk"
 
 
-async def test_daily_words_pick_answers_once_and_updates_screen(handler_db):
-    q = await _run("set:words:pick:8")
-    assert q.answer.call_count == 1
-    q.edit_message_text.assert_awaited_once()
-
-
 async def test_difficulty_pick_answers_once_and_updates_screen(handler_db):
     q = await _run("set:difficulty:pick:c1")
     assert q.answer.call_count == 1
