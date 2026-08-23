@@ -396,6 +396,23 @@ async def test_menu_button_shows_the_two_options(handler_db):
     assert "learn:topics" in callbacks
 
 
+async def test_callback_survives_a_message_not_modified_bad_request(handler_db):
+    """Bugfix: a double-tap (or any edit that happens to land on content
+    identical to what's already showing) must never crash the handler and
+    leave the user's button spinner stuck forever - Telegram's own
+    "Message is not modified" BadRequest is swallowed by
+    utils.telegram_helpers.safe_edit_message_text."""
+    from telegram.error import BadRequest
+
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:menu")
+    q.callback_query.edit_message_text.side_effect = BadRequest("Message is not modified: specified new message content...")
+
+    await learning_handler.handle_learning_callback(q, context)  # must not raise
+
+
 async def test_newwords_without_ai_shows_the_exact_failure_message(handler_db):
     """Spec sections 40-62: on AI failure this must be shown verbatim -
     never a silent fallback to random database words."""

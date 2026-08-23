@@ -50,6 +50,7 @@ from keyboards.review_now import (
 )
 from services import learning_service, quiz_service, review_now_service, user_word_service
 from utils.i18n import get_current_language, set_current_language, t
+from utils.telegram_helpers import safe_edit_message_reply_markup, safe_edit_message_text
 from utils.time import local_today, utc_now
 
 _REVIEWABLE_STATUSES = (WordStatus.LEARNING, WordStatus.REVIEW)
@@ -156,7 +157,7 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
     data = query.data
 
     async def edit(text: str, reply_markup=None) -> None:
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, query.from_user.id)
@@ -257,7 +258,7 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
 
         elif data == "revnow:skip":
             await query.answer()
-            await query.edit_message_reply_markup(reply_markup=None)
+            await safe_edit_message_reply_markup(query, reply_markup=None)
 
         elif data in ("revnow:cancel", "revnow:mainmenu"):
             await query.answer()

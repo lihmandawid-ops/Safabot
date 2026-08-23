@@ -46,6 +46,7 @@ from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.phrase_situations import MAX_CUSTOM_SITUATION_LENGTH, PRESET_SITUATIONS
 from utils.popular_phrases import get_popular_phrases
+from utils.telegram_helpers import safe_edit_message_text
 
 _NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
 
@@ -240,7 +241,7 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     async def edit(text: str, reply_markup=None) -> None:
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, query.from_user.id)

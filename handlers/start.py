@@ -52,6 +52,7 @@ from utils.industries import PRESET_INDUSTRIES
 from utils.languages import LANGUAGE_BY_CODE, is_supported, language_display_name
 from utils.levels import LEVEL_CODES
 from utils.logging import get_logger
+from utils.telegram_helpers import safe_edit_message_text
 from utils.timezones import TIMEZONE_CHOICES
 
 logger = get_logger(__name__)
@@ -175,7 +176,7 @@ async def choose_interface_language(update: Update, context: ContextTypes.DEFAUL
     set_current_language(code)
     lang = LANGUAGE_BY_CODE[code]
 
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t("onboarding.interface_language_selected", code, flag=lang.flag, name=language_display_name(lang, code))
     )
     await query.message.reply_text(
@@ -192,7 +193,7 @@ async def choose_learning_language(update: Update, context: ContextTypes.DEFAULT
     context.user_data["learning_language"] = code
     lang = LANGUAGE_BY_CODE[code]
 
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t("onboarding.learning_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
     )
     await query.message.reply_text(
@@ -215,7 +216,7 @@ async def choose_translation_language(update: Update, context: ContextTypes.DEFA
     context.user_data["translation_language"] = code
     lang = LANGUAGE_BY_CODE[code]
 
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t("onboarding.translation_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
     )
     await query.message.reply_text(t("onboarding.choose_level", get_current_language()), reply_markup=_level_keyboard())
@@ -229,7 +230,7 @@ async def choose_level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     level = query.data.removeprefix(LEVEL_PREFIX)
     context.user_data["level"] = level
 
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t("onboarding.level_selected", get_current_language(), level=t(f"level.{level}", get_current_language()))
     )
     await query.message.reply_text(
@@ -245,7 +246,7 @@ async def choose_daily_words(update: Update, context: ContextTypes.DEFAULT_TYPE)
     daily_words = int(query.data.removeprefix(DAILY_WORDS_PREFIX))
     context.user_data["daily_words"] = daily_words
 
-    await query.edit_message_text(t("onboarding.daily_words_selected", get_current_language(), count=daily_words))
+    await safe_edit_message_text(query, t("onboarding.daily_words_selected", get_current_language(), count=daily_words))
     await query.message.reply_text(t("onboarding.choose_goal", get_current_language()), reply_markup=_goal_keyboard())
     return CHOOSING_GOAL
 
@@ -263,13 +264,13 @@ async def choose_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data["learning_goal"] = goal
 
     if goal == "work":
-        await query.edit_message_text(t("goal.work", get_current_language()))
+        await safe_edit_message_text(query, t("goal.work", get_current_language()))
         await query.message.reply_text(
             t("onboarding.choose_industry", get_current_language()), reply_markup=_industry_keyboard()
         )
         return CHOOSING_INDUSTRY
 
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t(f"goal.{goal}", get_current_language()) if goal else t("onboarding.button.skip", get_current_language())
     )
     await query.message.reply_text(
@@ -285,12 +286,12 @@ async def choose_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     code = query.data.removeprefix(INDUSTRY_PREFIX)
 
     if code == "other":
-        await query.edit_message_text(t("onboarding.industry_custom_prompt", get_current_language()))
+        await safe_edit_message_text(query, t("onboarding.industry_custom_prompt", get_current_language()))
         return CHOOSING_INDUSTRY
 
     industry = None if code == "skip" else code
     context.user_data["work_industry"] = industry
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t(f"industry.{industry}", get_current_language()) if industry else t("onboarding.button.skip", get_current_language())
     )
     await query.message.reply_text(
@@ -363,7 +364,7 @@ async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     trial_days = settings.trial_days
     learning_lang = LANGUAGE_BY_CODE[learning_language]
-    await query.edit_message_text(
+    await safe_edit_message_text(query,
         t(
             "onboarding.registration_complete",
             get_current_language(),

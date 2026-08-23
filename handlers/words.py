@@ -39,6 +39,7 @@ from keyboards.words import (
 from services import pronunciation_service, user_word_service, word_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.pagination import paginate
+from utils.telegram_helpers import safe_edit_message_text
 from utils.text import parse_number_list
 from utils.word_display import render_word_card_text, status_label
 
@@ -253,7 +254,8 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer(t("card.no_language", get_current_language()), show_alert=True)
             return
 
-        edit = lambda text, reply_markup=None: query.edit_message_text(text, reply_markup=reply_markup)
+        async def edit(text, reply_markup=None):
+            await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
         if data == "words:filters":
             context.user_data.pop("words_list", None)

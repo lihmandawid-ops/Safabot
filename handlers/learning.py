@@ -43,6 +43,7 @@ from services import learning_service, pronunciation_service, user_word_service,
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
+from utils.telegram_helpers import safe_edit_message_text
 from utils.topics import MAX_CUSTOM_TOPIC_LENGTH
 
 MODE = "learning"
@@ -306,7 +307,7 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
     data = query.data
 
     async def edit(text: str, reply_markup=None) -> None:
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, query.from_user.id)

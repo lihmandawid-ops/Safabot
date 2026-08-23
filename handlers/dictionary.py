@@ -30,6 +30,7 @@ from services import dictionary_service, pronunciation_service, user_word_servic
 from services.ai_errors import AIConfigurationError, AIError
 from services.ai_service import get_ai_service
 from utils.i18n import get_current_language, set_current_language, t
+from utils.telegram_helpers import safe_edit_message_reply_markup, safe_edit_message_text
 from utils.text import split_word_batch, truncate_text
 from utils.word_display import (
     render_conjugation_messages,
@@ -247,7 +248,7 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
 
         elif data == "dict:back":
             await query.answer()
-            await query.edit_message_text(t("dictionary.prompt", get_current_language()))
+            await safe_edit_message_text(query, t("dictionary.prompt", get_current_language()))
 
         elif data.startswith("card:add:"):
             word_id = int(data.removeprefix("card:add:"))
@@ -327,11 +328,11 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.resume_word(session, user_word)
                 await query.answer()
-                await query.edit_message_text(t("words.resumed_single", get_current_language()))
+                await safe_edit_message_text(query, t("words.resumed_single", get_current_language()))
 
         elif data.startswith("dict:resume_no:"):
             await query.answer()
-            await query.edit_message_reply_markup(reply_markup=None)
+            await safe_edit_message_reply_markup(query, reply_markup=None)
 
 
 dictionary_callback_handler = CallbackQueryHandler(handle_dictionary_callback, pattern="^(dict|card):")

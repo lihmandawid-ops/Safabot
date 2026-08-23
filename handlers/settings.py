@@ -52,6 +52,7 @@ from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
+from utils.telegram_helpers import safe_edit_message_text
 from utils.timezones import TIMEZONE_BY_NAME, is_valid_timezone, search_timezones
 from utils.topics import MAX_CUSTOM_TOPIC_LENGTH, MAX_SELECTED_TOPICS, PRESET_TOPICS
 
@@ -231,7 +232,7 @@ async def _get_user_or_warn(session, query) -> object | None:
 
 async def _render_home(query, session, user) -> None:
     summary = await _build_summary(session, user)
-    await query.edit_message_text(summary, reply_markup=settings_home_keyboard())
+    await safe_edit_message_text(query, summary, reply_markup=settings_home_keyboard())
 
 
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -264,7 +265,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 if subscription_service.has_pro_access(user)
                 else get_settings().plan_limits.free_max_languages
             )
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_current_language", get_current_language()),
                 reply_markup=language_switch_keyboard(languages, can_add_more=len(languages) < max_languages),
             )
@@ -280,7 +281,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 await query.answer(t("settings.add_language_limit_reached", get_current_language(), max=max_languages), show_alert=True)
                 return
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.add_language_pick_learning", get_current_language()),
                 reply_markup=settings_add_learning_language_keyboard(),
             )
@@ -289,7 +290,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             learning_code = data.removeprefix("set:addlang:learn:")
             lang = LANGUAGE_BY_CODE[learning_code]
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.add_language_pick_translation", get_current_language(), flag=lang.flag, name=language_display_name(lang)),
                 reply_markup=settings_add_translation_language_keyboard(learning_language=learning_code),
             )
@@ -297,7 +298,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data.startswith("set:addlang:trans:"):
             await query.answer()
             learning_code, translation_code = data.removeprefix("set:addlang:trans:").split(":")
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_level", get_current_language()),
                 reply_markup=add_language_level_keyboard(learning_code, translation_code),
             )
@@ -306,7 +307,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             learning_code, translation_code, level = data.removeprefix("set:addlang:level:").split(":")
             options = get_settings().plan_limits.daily_new_words_options
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_daily_words", get_current_language()),
                 reply_markup=add_language_words_keyboard(learning_code, translation_code, level, options),
             )
@@ -344,7 +345,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:iface:list":
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_interface_language", get_current_language()),
                 reply_markup=interface_language_pick_keyboard(),
             )
@@ -367,7 +368,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data == "set:words:list":
             await query.answer()
             options = get_settings().plan_limits.daily_new_words_options
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_daily_words", get_current_language()), reply_markup=daily_words_pick_keyboard(options)
             )
 
@@ -381,7 +382,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:goal:list":
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_goal", get_current_language()), reply_markup=goal_pick_keyboard()
             )
 
@@ -394,7 +395,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             if goal == "work":
                 await user_languages_repo.set_goal(session, current, learning_goal=goal, work_industry=current.work_industry)
                 await query.answer()
-                await query.edit_message_text(
+                await safe_edit_message_text(query,
                     t("settings.pick_industry", get_current_language()), reply_markup=industry_pick_keyboard()
                 )
                 return
@@ -416,7 +417,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 context.user_data["mode"] = MODE
                 context.user_data["settings_submode"] = "industry_custom"
                 await query.answer()
-                await query.edit_message_text(t("onboarding.industry_custom_prompt", get_current_language()))
+                await safe_edit_message_text(query, t("onboarding.industry_custom_prompt", get_current_language()))
                 return
             await user_languages_repo.set_goal(session, current, learning_goal="work", work_industry=code)
             await query.answer(t("settings.industry_updated", get_current_language()))
@@ -428,7 +429,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             context.user_data.pop("settings_submode", None)
             current = await user_languages_repo.get_current_language(session, user.id)
             topics = current.selected_topics if current is not None else []
-            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+            await safe_edit_message_text(query, t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
 
         elif data.startswith("set:topics:toggle:"):
             code = data.removeprefix("set:topics:toggle:")
@@ -446,7 +447,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 topics.append(code)
             await user_languages_repo.set_topics(session, current, topics=topics)
             await query.answer()
-            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+            await safe_edit_message_text(query, t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
 
         elif data.startswith("set:topics:removecustom:"):
             index = int(data.removeprefix("set:topics:removecustom:"))
@@ -460,7 +461,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 topics.remove(custom_topics[index])
                 await user_languages_repo.set_topics(session, current, topics=topics)
             await query.answer()
-            await query.edit_message_text(t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
+            await safe_edit_message_text(query, t("settings.topics_title", get_current_language()), reply_markup=topics_keyboard(topics))
 
         elif data == "set:topics:add_custom":
             current = await user_languages_repo.get_current_language(session, user.id)
@@ -473,18 +474,18 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             context.user_data["mode"] = MODE
             context.user_data["settings_submode"] = "topics_custom"
             await query.answer()
-            await query.edit_message_text(t("settings.topics_custom_prompt", get_current_language()))
+            await safe_edit_message_text(query, t("settings.topics_custom_prompt", get_current_language()))
 
         elif data == "set:notif:slots":
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_notification_slot", get_current_language()), reply_markup=notification_slot_keyboard()
             )
 
         elif data.startswith("set:notif:slot:"):
             await query.answer()
             slot = data.removeprefix("set:notif:slot:")
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_notification_time", get_current_language()), reply_markup=notification_time_keyboard(slot)
             )
 
@@ -517,7 +518,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:revsettings:home":
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
 
@@ -528,7 +529,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 return
             await users_repo.update_user(session, user, notification_word_count=count)
             await query.answer(t("settings.review_settings.count_updated", get_current_language(), count=count))
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
 
@@ -546,7 +547,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await users_repo.update_user(session, user, **{field_by_slot[slot]: new_value})
             key = "settings.review_settings.slot_toggled_on" if new_value else "settings.review_settings.slot_toggled_off"
             await query.answer(t(key, get_current_language(), slot=t(f"notification_slot.{slot}", get_current_language())))
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
 
@@ -557,13 +558,13 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 return
             await users_repo.update_user(session, user, review_mode=None if mode == "ask" else mode)
             await query.answer(t("settings.review_settings.mode_updated", get_current_language()))
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
 
         elif data == "set:difficulty:list":
             await query.answer()
-            await query.edit_message_text(
+            await safe_edit_message_text(query,
                 t("settings.pick_difficulty", get_current_language()), reply_markup=difficulty_pick_keyboard()
             )
 
@@ -590,13 +591,13 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             context.user_data.pop("mode", None)
             context.user_data.pop("settings_submode", None)
-            await query.edit_message_text(t("settings.pick_timezone", get_current_language()), reply_markup=timezone_pick_keyboard())
+            await safe_edit_message_text(query, t("settings.pick_timezone", get_current_language()), reply_markup=timezone_pick_keyboard())
 
         elif data == "set:tz:search":
             await query.answer()
             context.user_data.pop("settings_submode", None)
             context.user_data["mode"] = MODE
-            await query.edit_message_text(t("settings.timezone_search_prompt", get_current_language()))
+            await safe_edit_message_text(query, t("settings.timezone_search_prompt", get_current_language()))
 
         elif data.startswith("set:tz:pick:"):
             iana_name = data.removeprefix("set:tz:pick:")
@@ -616,7 +617,7 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             lines = [status_line]
             if user.trial_end:
                 lines.append(t("settings.trial_until", get_current_language(), date=user.trial_end.isoformat()))
-            await query.edit_message_text("\n".join(lines), reply_markup=back_to_settings_keyboard())
+            await safe_edit_message_text(query, "\n".join(lines), reply_markup=back_to_settings_keyboard())
 
         else:
             await query.answer()

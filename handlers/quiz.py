@@ -28,6 +28,7 @@ from keyboards.quiz import quiz_choice_keyboard, quiz_continue_keyboard, quiz_re
 from services import quiz_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
+from utils.telegram_helpers import safe_edit_message_text
 
 
 async def _current_user_and_language(session, telegram_id: int):
@@ -101,7 +102,7 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
 
     async def edit(text: str, reply_markup=None) -> None:
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
     async with session_scope() as session:
         user, current = await _current_user_and_language(session, query.from_user.id)
