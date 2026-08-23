@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Parola aggiunta all'apprendimento.",
   "learning.candidates_done": "Hai esaminato tutte le parole proposte.\n\nAggiunte: {count}.",
   "revnow.button.already_learned": "✅ Conosco già questa parola",
-  "revnow.mastered_confirmed": "✅ Ottimo! La parola è stata spostata tra quelle apprese."
+  "revnow.mastered_confirmed": "✅ Ottimo! La parola è stata spostata tra quelle apprese.",
+  "notification.morning.greeting": "🌅 Buongiorno!",
+  "notification.morning.new_words_header": "Oggi ci sono {count} nuove parole per te:",
+  "notification.morning.no_new_words": "Oggi non è stato possibile preparare nuove parole, ma puoi comunque ripassare.",
+  "notification.morning.review_intro": "🧠 Ora controlliamo le parole che devi ripassare.",
+  "notification.afternoon.invite": "☀️ Un breve ripasso?\n\nConsolidiamo le parole che devi ripassare.",
+  "notification.evening.invite": "🌙 È ora di consolidare quanto imparato!\n\nFacciamo un breve quiz sulle parole che devi ripassare.",
+  "quiz.question": "Cosa significa questa parola?"
 }

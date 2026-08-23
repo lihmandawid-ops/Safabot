@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Wort zum Lernen hinzugefügt.",
   "learning.candidates_done": "Du hast alle vorgeschlagenen Wörter durchgesehen.\n\nHinzugefügt: {count}.",
   "revnow.button.already_learned": "✅ Dieses Wort kann ich schon",
-  "revnow.mastered_confirmed": "✅ Klasse! Das Wort wurde zu den gelernten Wörtern verschoben."
+  "revnow.mastered_confirmed": "✅ Klasse! Das Wort wurde zu den gelernten Wörtern verschoben.",
+  "notification.morning.greeting": "🌅 Guten Morgen!",
+  "notification.morning.new_words_header": "Heute gibt es {count} neue Wörter für dich:",
+  "notification.morning.no_new_words": "Heute konnten keine neuen Wörter vorbereitet werden, aber du kannst trotzdem wiederholen.",
+  "notification.morning.review_intro": "🧠 Schauen wir uns jetzt die Wörter an, die du wiederholen solltest.",
+  "notification.afternoon.invite": "☀️ Eine kurze Wiederholung?\n\nLass uns die fälligen Wörter festigen.",
+  "notification.evening.invite": "🌙 Zeit, das Gelernte zu festigen!\n\nMachen wir ein kurzes Quiz zu den fälligen Wörtern.",
+  "quiz.question": "Was bedeutet dieses Wort?"
 }

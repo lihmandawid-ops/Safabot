@@ -26,10 +26,15 @@ def quiz_continue_keyboard(*, is_last_question: bool) -> InlineKeyboardMarkup:
 
 
 def quiz_results_keyboard(*, has_wrong: bool) -> InlineKeyboardMarkup:
+    """Learning-methodology stage section 14: after a quiz, the next step
+    is ▶️ Начать следующее повторение (revnow:menu - the same count-free
+    pool-choice screen keyboards.review_now.completion_keyboard() offers
+    after a regular review session, for one consistent "what's next"
+    action across both) and, if needed, ⬅️ Главное меню - never
+    📚 Учить слова as a required next step."""
     rows = []
     if has_wrong:
         rows.append([InlineKeyboardButton(t("quiz.button.retry_wrong", get_current_language()), callback_data="quiz:retry_wrong")])
-    rows.append([InlineKeyboardButton(t("quiz.button.new_quiz", get_current_language()), callback_data="quiz:start")])
-    rows.append([InlineKeyboardButton(t("menu.button.learn_words", get_current_language()), callback_data="quiz:learnwords")])
+    rows.append([InlineKeyboardButton(t("revnow.button.again", get_current_language()), callback_data="revnow:menu")])
     rows.append([InlineKeyboardButton(t("quiz.button.main_menu", get_current_language()), callback_data="quiz:mainmenu")])
     return InlineKeyboardMarkup(rows)

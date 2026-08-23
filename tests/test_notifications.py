@@ -92,6 +92,11 @@ async def _add_due_word(db_session, user_id, word="go"):
 
 
 async def test_morning_notification_sent_when_due_words_exist(notif_db):
+    """Learning-methodology stage sections 1-2, 6-7, 13: the morning
+    message no longer spells out due words with their translations in the
+    text (that would hand the learner the quiz answer before being
+    tested) - it just greets, degrades gracefully for new words (AI is
+    unconfigured in this default test env), and invites to review."""
     from database.database import session_scope
     from services import notification_service
 
@@ -106,9 +111,9 @@ async def test_morning_notification_sent_when_due_words_exist(notif_db):
     bot.send_message.assert_awaited_once()
     kwargs = bot.send_message.await_args.kwargs
     assert kwargs["chat_id"] == user.telegram_id
-    assert "Быстрое повторение" in kwargs["text"]
-    assert "go" in kwargs["text"]
-    assert "1️⃣" in kwargs["text"]
+    assert "Доброе утро" in kwargs["text"]
+    assert "проверим слова" in kwargs["text"]  # due word present -> review invite shown
+    assert "go" not in kwargs["text"]  # the due word itself is never spelled out
 
 
 async def test_morning_notification_includes_quiz_button(notif_db):
@@ -130,46 +135,48 @@ async def test_morning_notification_includes_quiz_button(notif_db):
     assert any("🧠" in label for label in labels)
 
 
-async def test_morning_notification_shows_cached_pronunciation_per_word(notif_db):
-    """Global pronunciation rule section 48: each word line gets its own
-    cached pronunciation - never a live AI call from the scheduler's hot
-    path, so this must come from an already-cached Word.pronunciation."""
+async def test_morning_notification_shows_exactly_two_ai_generated_new_words(notif_db, monkeypatch):
+    """Learning-methodology stage sections 1-3, 24, 27: the morning
+    message shows exactly MORNING_NEW_WORD_COUNT (2) freshly AI-generated
+    words - word, Latin pronunciation, translation - all from the ONE AI
+    call generate_and_add_morning_words already made (never a second live
+    lookup here)."""
     from database.database import session_scope
-    from database.repositories import words as words_repo
-    from services import notification_service
+    from services import ai_models, notification_service, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(words=[
+                ai_models.GeneratedWord(word="cat", pronunciation="kat", translations=[ai_models.TranslationResult(translation="кошка")]),
+                ai_models.GeneratedWord(word="dog", pronunciation="dog", translations=[ai_models.TranslationResult(translation="собака")]),
+            ])
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
 
     async with session_scope() as s:
-        user, _ = await _create_user(s)
-        await _add_due_word(s, user.id)
-        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
-        await words_repo.set_pronunciation(s, word, pronunciation="goh", phonetic=None)
+        await _create_user(s)
 
     bot = AsyncMock()
     await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
     text = bot.send_message.await_args.kwargs["text"]
-    assert "go (goh)" in text
-
-
-async def test_morning_notification_word_line_plain_when_pronunciation_not_cached(notif_db):
-    """No cached pronunciation must never crash or block the send - the
-    line simply stays plain, exactly like before this feature."""
-    from database.database import session_scope
-    from services import notification_service
+    assert "cat" in text and "kat" in text and "кошка" in text
+    assert "dog" in text and "собака" in text
+    assert "2 новых слов" in text
 
     async with session_scope() as s:
-        user, _ = await _create_user(s)
-        await _add_due_word(s, user.id)
+        from database.repositories import user_words as user_words_repo
+        from database.repositories import users as users_repo
 
-    bot = AsyncMock()
-    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
-
-    text = bot.send_message.await_args.kwargs["text"]
-    assert "go —" in text
-    assert "go (" not in text
+        user = await users_repo.get_by_telegram_id(s, 5000)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert {uw.word.word for uw in words} == {"cat", "dog"}
 
 
-async def test_no_notification_when_nothing_is_due(notif_db):
+async def test_morning_notification_degrades_gracefully_when_ai_unavailable(notif_db):
+    """Learning-methodology stage section 32: AI being unavailable must
+    never cancel the whole morning notification - it still greets and
+    still offers to review, just without the new-words section."""
     from database.database import session_scope
     from services import notification_service
 
@@ -179,8 +186,29 @@ async def test_no_notification_when_nothing_is_due(notif_db):
     bot = AsyncMock()
     sent = await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
-    assert sent == 0
-    bot.send_message.assert_not_awaited()
+    assert sent == 1
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "Доброе утро" in text
+    assert "не удалось подготовить новые слова" in text
+
+
+async def test_morning_notification_still_sent_when_nothing_is_due(notif_db):
+    """Learning-methodology stage section 1: morning is special - it
+    always sends (greeting + degraded new-words text, AI unconfigured in
+    this test env) even when there's nothing due to review yet, unlike
+    the old design where "nothing due" could mean total silence."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        await _create_user(s)
+
+    bot = AsyncMock()
+    sent = await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    assert sent == 1
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "проверим слова" not in text  # nothing due -> no review invite line
 
 
 async def test_disabled_notifications_are_never_sent(notif_db):
@@ -335,42 +363,35 @@ async def test_afternoon_notification_reviews_wording(notif_db):
 
     assert sent == 1
     text = bot.send_message.await_args.kwargs["text"]
-    assert "Быстрое повторение" in text
+    assert "Небольшое повторение" in text
+    assert "go" not in text  # the due word itself is never spelled out (spec §6, §13)
 
 
-async def test_evening_shows_completion_message_when_daily_session_done(notif_db):
+async def test_afternoon_notification_sent_even_with_nothing_due(notif_db):
+    """Learning-methodology stage section 8's root cause: the afternoon
+    slot used to go completely silent whenever nothing happened to be due
+    right at that exact minute - the ordinary case most days, not a
+    scheduler malfunction. It must now always send the same invite."""
     from database.database import session_scope
-    from database.repositories import user_languages as user_languages_repo
-    from database.repositories import users as users_repo
-    from database.repositories import user_words as user_words_repo
-    from services import learning_service, notification_service, word_service
-    from services.repetition_service import ReviewGrade
+    from services import notification_service
 
     async with session_scope() as s:
-        user, ul = await _create_user(s, evening=time(20, 0))
-        w, _ = await word_service.get_or_create_word(s, language_code="en", word="go")
-        await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
-
-    morning = datetime(2026, 6, 15, 8, 0, 0)
-    async with session_scope() as s:
-        user = await users_repo.get_by_telegram_id(s, 5000)
-        ul = (await user_languages_repo.get_user_languages(s, user.id))[0]
-        learning_session = await learning_service.build_learning_session(s, user=user, user_language=ul, now=morning)
-        await learning_service.record_review_answer(
-            s, learning_session, learning_session.items[0].user_word_id, grade=ReviewGrade.GOOD, now=morning
-        )
-        await learning_service.finish_session_if_complete(s, user, learning_session, now=morning)
+        await _create_user(s, afternoon=time(14, 0))
 
     bot = AsyncMock()
-    evening_utc = datetime(2026, 6, 15, 20, 0, 0)
-    sent = await notification_service.send_for_slot(bot, "evening", now=evening_utc)
+    afternoon_utc = datetime(2026, 6, 15, 14, 0, 0)
+    sent = await notification_service.send_for_slot(bot, "afternoon", now=afternoon_utc)
 
     assert sent == 1
+    bot.send_message.assert_awaited_once()
     text = bot.send_message.await_args.kwargs["text"]
-    assert "выполнено" in text
+    assert "Небольшое повторение" in text
 
 
-async def test_evening_silent_when_nothing_due_and_nothing_done_today(notif_db):
+async def test_evening_sent_even_when_nothing_due_and_nothing_done_today(notif_db):
+    """Learning-methodology stage sections 7-8: symmetric with afternoon -
+    evening must never go silent either, and must never say anything like
+    "время повторения закончено"."""
     from database.database import session_scope
     from services import notification_service
 
@@ -381,8 +402,10 @@ async def test_evening_silent_when_nothing_due_and_nothing_done_today(notif_db):
     evening_utc = datetime(2026, 6, 15, 20, 0, 0)
     sent = await notification_service.send_for_slot(bot, "evening", now=evening_utc)
 
-    assert sent == 0
-    bot.send_message.assert_not_awaited()
+    assert sent == 1
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "закрепить изученное" in text
+    assert "закончен" not in text  # never "время повторения закончено"
 
 
 async def test_send_due_notifications_checks_all_three_slots(notif_db):
@@ -417,17 +440,21 @@ async def test_notification_follows_users_interface_language(notif_db):
     await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
     kwargs = bot.send_message.await_args.kwargs
-    assert "Quick review" in kwargs["text"]
-    assert "Быстрое повторение" not in kwargs["text"]
+    assert "Good morning" in kwargs["text"]
+    assert "Доброе утро" not in kwargs["text"]
     button_text = kwargs["reply_markup"].inline_keyboard[0][0].text
     assert button_text == "▶️ Start review"
 
 
 async def test_notification_word_count_caps_the_word_list(notif_db):
-    """Repetition-system stage section 9: notification_word_count (4/6/8,
-    default 4) caps how many due words go into one automatic reminder,
-    even when more are actually due."""
+    """Repetition-system stage section 9 / learning-methodology stage
+    section 11: notification_word_count (4/6/8, default 4) caps how many
+    due words are attached to one automatic reminder (and, in turn, how
+    many the quiz launched from it covers), even when more are actually
+    due - checked via NotificationLog.word_ids now that the reminder text
+    itself no longer spells the words out."""
     from database.database import session_scope
+    from database.repositories import notifications as notifications_repo
     from database.repositories import users as users_repo
     from services import notification_service
 
@@ -440,8 +467,11 @@ async def test_notification_word_count_caps_the_word_list(notif_db):
     bot = AsyncMock()
     await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
-    text = bot.send_message.await_args.kwargs["text"]
-    assert text.count("️⃣") == 6  # 6 numbered-emoji lines, not all 6 due words unbounded
+    async with session_scope() as s:
+        word_ids = await notifications_repo.get_word_ids_for(
+            s, user_id=user.id, notification_type="morning", scheduled_date=MORNING_UTC.date()
+        )
+    assert len(word_ids) == 6
 
 
 async def test_slot_can_be_individually_disabled(notif_db):
@@ -467,6 +497,7 @@ async def test_slot_can_be_individually_disabled(notif_db):
 async def test_paused_and_mastered_words_never_appear_in_reminder(notif_db):
     from database.database import session_scope
     from database.models import WordStatus
+    from database.repositories import notifications as notifications_repo
     from services import notification_service
 
     async with session_scope() as s:
@@ -480,10 +511,11 @@ async def test_paused_and_mastered_words_never_appear_in_reminder(notif_db):
     bot = AsyncMock()
     await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
 
-    text = bot.send_message.await_args.kwargs["text"]
-    assert "reviewme" in text
-    assert "pausedword" not in text
-    assert "masteredword" not in text
+    async with session_scope() as s:
+        word_ids = await notifications_repo.get_word_ids_for(
+            s, user_id=user.id, notification_type="morning", scheduled_date=MORNING_UTC.date()
+        )
+    assert word_ids == [due.id]
 
 
 async def test_tapping_start_review_on_notification_reviews_the_exact_words_shown(notif_db, monkeypatch):
@@ -569,7 +601,7 @@ async def test_send_review_notification_now_sends_regardless_of_scheduled_time(n
     assert sent is True
     bot.send_message.assert_awaited_once()
     text = bot.send_message.await_args.kwargs["text"]
-    assert "Быстрое повторение" in text
+    assert "Доброе утро" in text
 
 
 async def test_send_review_notification_now_does_not_touch_notification_log(notif_db):
@@ -610,12 +642,25 @@ async def test_send_review_notification_now_returns_false_for_unknown_user(notif
 
 
 async def test_send_review_notification_now_returns_false_when_nothing_to_send(notif_db):
+    """Learning-methodology stage sections 6-8: afternoon/evening now
+    always have SOMETHING to send once a learning language is set up
+    (an invite, even with nothing due) - the only remaining "genuinely
+    nothing to send" case is a profile that hasn't picked a learning
+    language yet at all."""
+    from datetime import time as dtime
+
     from database.database import session_scope
     from database.repositories import users as users_repo
     from services import notification_service
 
     async with session_scope() as s:
-        await _create_user(s, telegram_id=5400)
+        await users_repo.create_user(
+            s, telegram_id=5400, username=None, first_name="T",
+            interface_language="ru", timezone="UTC", level="beginner", daily_new_words=4,
+            morning_time=dtime(9, 0), afternoon_time=dtime(14, 0), evening_time=dtime(20, 0),
+        )
+        # No user_languages_repo.add_language call - no active learning
+        # language configured yet.
 
     bot = AsyncMock()
     sent = await notification_service.send_review_notification_now(bot, telegram_id=5400, slot="afternoon")

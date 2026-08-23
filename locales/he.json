@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ המילה נוספה ללמידה.",
   "learning.candidates_done": "עברת על כל המילים שהוצעו.\n\nנוספו: {count}.",
   "revnow.button.already_learned": "✅ אני כבר יודע/ת את המילה הזו",
-  "revnow.mastered_confirmed": "✅ מעולה! המילה הועברה למילים שנלמדו."
+  "revnow.mastered_confirmed": "✅ מעולה! המילה הועברה למילים שנלמדו.",
+  "notification.morning.greeting": "🌅 בוקר טוב!",
+  "notification.morning.new_words_header": "היום יש לך {count} מילים חדשות:",
+  "notification.morning.no_new_words": "היום לא הצלחנו להכין מילים חדשות, אבל אפשר לעשות חזרה.",
+  "notification.morning.review_intro": "🧠 עכשיו נבדוק את המילים שהגיע הזמן לחזור עליהן.",
+  "notification.afternoon.invite": "☀️ חזרה קצרה?\n\nבואו נחזק את המילים שהגיע הזמן לחזור עליהן.",
+  "notification.evening.invite": "🌙 הגיע הזמן לחזק את מה שלמדת!\n\nבואו נעשה חידון קצר על המילים שהגיע הזמן לחזור עליהן.",
+  "quiz.question": "מה המשמעות של המילה הזו?"
 }

@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Слово додано до вивчення.",
   "learning.candidates_done": "Ви переглянули всі запропоновані слова.\n\nДодано: {count}.",
   "revnow.button.already_learned": "✅ Я вже знаю це слово",
-  "revnow.mastered_confirmed": "✅ Чудово! Слово перенесено до вивчених."
+  "revnow.mastered_confirmed": "✅ Чудово! Слово перенесено до вивчених.",
+  "notification.morning.greeting": "🌅 Доброго ранку!",
+  "notification.morning.new_words_header": "Сьогодні для тебе є {count} нових слів:",
+  "notification.morning.no_new_words": "Сьогодні не вдалося підготувати нові слова, але можна пройти повторення.",
+  "notification.morning.review_intro": "🧠 А тепер перевіримо слова, які тобі час повторити.",
+  "notification.afternoon.invite": "☀️ Невеличке повторення?\n\nЗакріпимо слова, які тобі час повторити.",
+  "notification.evening.invite": "🌙 Час закріпити вивчене!\n\nПройдемо невеличку вікторину зі слів, які тобі час повторити.",
+  "quiz.question": "Що означає це слово?"
 }

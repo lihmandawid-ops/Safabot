@@ -58,12 +58,22 @@ def _flag_for(language_code: str) -> str:
 
 
 async def _render_question(edit, state: dict) -> None:
+    """Learning-methodology stage sections 12-13: the word's pronunciation
+    is shown WITH the question (matches the spec's own worked example -
+    it never reveals the translation, only how the word sounds) - the
+    translation itself only ever appears in the post-answer feedback,
+    never before the learner has actually answered."""
     q = state["questions"][state["position"]]
     total = len(state["questions"])
     title = t("quiz.title", get_current_language())
     progress = t("quiz.progress", get_current_language(), current=state["position"] + 1, total=total)
     flag = _flag_for(state["language_code"])
-    text = f"{title}\n{progress}\n\n{flag} {q['word']}"
+    lines = [title, progress, "", f"{flag} {q['word']}"]
+    if q.get("pronunciation"):
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"]))
+    lines.append("")
+    lines.append(t("quiz.question", get_current_language()))
+    text = "\n".join(lines)
     await edit(text, reply_markup=quiz_choice_keyboard(q["options"]))
 
 

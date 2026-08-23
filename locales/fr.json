@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Mot ajouté à l'apprentissage.",
   "learning.candidates_done": "Vous avez parcouru tous les mots proposés.\n\nAjoutés : {count}.",
   "revnow.button.already_learned": "✅ Je connais déjà ce mot",
-  "revnow.mastered_confirmed": "✅ Bravo ! Le mot a été déplacé vers les mots maîtrisés."
+  "revnow.mastered_confirmed": "✅ Bravo ! Le mot a été déplacé vers les mots maîtrisés.",
+  "notification.morning.greeting": "🌅 Bonjour !",
+  "notification.morning.new_words_header": "Voici {count} nouveaux mots pour toi aujourd'hui :",
+  "notification.morning.no_new_words": "Impossible de préparer de nouveaux mots aujourd'hui, mais tu peux quand même réviser.",
+  "notification.morning.review_intro": "🧠 Vérifions maintenant les mots que tu dois réviser.",
+  "notification.afternoon.invite": "☀️ Une petite révision ?\n\nRenforçons les mots que tu dois réviser.",
+  "notification.evening.invite": "🌙 Il est temps de consolider tes acquis !\n\nFaisons un petit quiz sur les mots que tu dois réviser.",
+  "quiz.question": "Que signifie ce mot ?"
 }

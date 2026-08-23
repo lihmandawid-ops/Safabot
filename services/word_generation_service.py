@@ -306,6 +306,44 @@ async def add_candidate_to_learning(
     return await _persist_and_add(session, entry=entry, user=user, user_language=user_language)
 
 
+async def generate_and_add_morning_words(
+    session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int
+) -> list[ai_models.GeneratedWord]:
+    """🌅 Automatic morning notification (learning-methodology stage
+    sections 1-5, 18, 27-28, 34): exactly `amount` (2, per the scheduler
+    caller) new words are added straight away, with no confirm/reject
+    step - a morning word is part of the daily routine, not an offer the
+    learner has to accept (spec section 18: "не спрашивать 'Добавить
+    слово в обучение?'"). Composes the two building blocks the manual
+    🆕/🎯 flow already uses (generate_candidates for the context-aware,
+    already-known/rejected-excluding AI pick, add_candidate_to_learning
+    for the actual persistence) into a single call, so this shares 100%
+    of the same exclusion logic and AI prompt - no separate code path,
+    no separate AI call shape. One AI request covers the whole batch
+    (generate_candidates already asks for `amount` words in one call,
+    section 27's "один AI-запрос -> сразу 2 слова" - not one request per
+    word).
+
+    Returns the ai_models.GeneratedWord entries that were actually
+    persisted (word/pronunciation/translations already in hand, ready for
+    the notification text) rather than the resulting UserWord rows -
+    add_candidate_to_learning's return value has an unloaded `.word`
+    relationship (same MissingGreenlet trap documented on
+    word_generation_service._persist_and_add's other callers), so handing
+    back the already-in-memory AI entry instead is both simpler and
+    avoids an extra DB round-trip. However many actually got added is
+    returned - 0 is a valid, non-error result (AI unavailable/failed),
+    the caller degrades the morning message gracefully rather than
+    treating this as fatal."""
+    candidates = await generate_candidates(session, user=user, user_language=user_language, amount=amount)
+    added: list[ai_models.GeneratedWord] = []
+    for entry in candidates:
+        user_word = await add_candidate_to_learning(session, entry=entry, user=user, user_language=user_language)
+        if user_word is not None:
+            added.append(entry)
+    return added
+
+
 async def reject_word(session: AsyncSession, *, user: User, user_language: UserLanguage, word: str) -> None:
     """❌ Я уже знаю это слово (AI-new-words stage sections 6-7): records
     the rejection so future generate_candidates calls exclude it, WITHOUT

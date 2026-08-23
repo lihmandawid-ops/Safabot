@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Palabra añadida al aprendizaje.",
   "learning.candidates_done": "Has revisado todas las palabras sugeridas.\n\nAñadidas: {count}.",
   "revnow.button.already_learned": "✅ Ya me sé esta palabra",
-  "revnow.mastered_confirmed": "✅ ¡Genial! La palabra se movió a las palabras dominadas."
+  "revnow.mastered_confirmed": "✅ ¡Genial! La palabra se movió a las palabras dominadas.",
+  "notification.morning.greeting": "🌅 ¡Buenos días!",
+  "notification.morning.new_words_header": "Hoy tienes {count} palabras nuevas:",
+  "notification.morning.no_new_words": "Hoy no se pudieron preparar palabras nuevas, pero puedes repasar.",
+  "notification.morning.review_intro": "🧠 Ahora repasemos las palabras que te toca repasar.",
+  "notification.afternoon.invite": "☀️ ¿Un repaso rápido?\n\nRefirmemos las palabras que te toca repasar.",
+  "notification.evening.invite": "🌙 ¡Hora de reforzar lo aprendido!\n\nHagamos un breve cuestionario sobre las palabras que te toca repasar.",
+  "quiz.question": "¿Qué significa esta palabra?"
 }

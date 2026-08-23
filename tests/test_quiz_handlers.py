@@ -136,6 +136,34 @@ async def test_quiz_question_screen_shows_the_word_never_the_flashcard_reveal_bu
     assert not any(cb.startswith("quiz:selfgrade:") for cb in callbacks)
 
 
+async def test_quiz_question_shows_pronunciation_but_never_the_translation(handler_db):
+    """Learning-methodology stage sections 12-13: the question shows the
+    word's pronunciation (matches the spec's own worked example) but must
+    NEVER reveal any of the 4 options' correct translation text before
+    the learner answers - only after grading does the translation appear
+    (in the feedback)."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import quiz as quiz_handler
+
+    async with session_scope() as s:
+        for i in range(5):
+            word = await words_repo.find_exact(s, language_code="en", normalized_word=f"cat{i}")
+            await words_repo.set_pronunciation(s, word, pronunciation=f"kat-{i}", phonetic=None)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("quiz:start")
+    await quiz_handler.handle_quiz_callback(q, context)
+
+    state = context.user_data["quiz"]
+    question = state["questions"][state["position"]]
+    text = q.callback_query.edit_message_text.call_args[0][0]
+
+    assert question["pronunciation"] in text  # pronunciation shown alongside the word
+    assert question["correct_answer"] not in text  # the answer is never pre-revealed
+    assert "Что означает это слово?" in text
+
+
 async def test_quiz_correct_answer_shows_correct_feedback(handler_db):
     from handlers import quiz as quiz_handler
 
@@ -246,6 +274,37 @@ async def test_results_screen_learnwords_button_shows_learning_intro(handler_db)
     q.callback_query.edit_message_text.assert_awaited_once()
     args, kwargs = q.callback_query.edit_message_text.call_args
     assert kwargs["reply_markup"] is not None
+
+
+async def test_results_screen_offers_next_review_never_learn_words(handler_db):
+    """Learning-methodology stage section 14: after finishing a quiz, the
+    next step offered is ▶️ Начать следующее повторение (revnow:menu),
+    never 📚 Учить слова (quiz:learnwords/menu.button.learn_words) as a
+    required next action."""
+    from handlers import quiz as quiz_handler
+
+    context = SimpleNamespace(user_data={})
+    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+
+    q_next = None
+    for _ in range(len(state["questions"])):
+        pos = state["position"]
+        q0 = state["questions"][pos]
+        correct_index = q0["options"].index(q0["correct_answer"])
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
+        q_next = _query("quiz:next")
+        await quiz_handler.handle_quiz_callback(q_next, context)
+
+    # The final "quiz:next" call above pushed position past the last
+    # question, so it rendered the results screen - its own edit call
+    # carries the results keyboard.
+    markup = q_next.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "revnow:menu" in callbacks
+    assert "quiz:learnwords" not in callbacks
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("следующее повторение" in label for label in labels)
 
 
 async def test_results_screen_mainmenu_button_clears_quiz_state_and_sends_menu(handler_db):

@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Слово добавлено в обучение.",
   "learning.candidates_done": "Вы просмотрели все предложенные слова.\n\nДобавлено: {count}.",
   "revnow.button.already_learned": "✅ Слово уже выучено",
-  "revnow.mastered_confirmed": "✅ Отлично! Слово перенесено в выученные."
+  "revnow.mastered_confirmed": "✅ Отлично! Слово перенесено в выученные.",
+  "notification.morning.greeting": "🌅 Доброе утро!",
+  "notification.morning.new_words_header": "Сегодня для тебя есть {count} новых слов:",
+  "notification.morning.no_new_words": "Сегодня не удалось подготовить новые слова, но можно пройти повторение.",
+  "notification.morning.review_intro": "🧠 А теперь проверим слова, которые тебе пора повторить.",
+  "notification.afternoon.invite": "☀️ Небольшое повторение?\n\nДавай закрепим слова, которые тебе пора повторить.",
+  "notification.evening.invite": "🌙 Время закрепить изученное!\n\nПройдём небольшую викторину по словам, которые тебе пора повторить.",
+  "quiz.question": "Что означает это слово?"
 }

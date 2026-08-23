@@ -407,5 +407,12 @@
   "learning.candidate_added": "✅ Word added to learning.",
   "learning.candidates_done": "You've gone through all the suggested words.\n\nAdded: {count}.",
   "revnow.button.already_learned": "✅ I already know this word",
-  "revnow.mastered_confirmed": "✅ Great! The word has been moved to your mastered words."
+  "revnow.mastered_confirmed": "✅ Great! The word has been moved to your mastered words.",
+  "notification.morning.greeting": "🌅 Good morning!",
+  "notification.morning.new_words_header": "Here are {count} new words for you today:",
+  "notification.morning.no_new_words": "Couldn't prepare new words today, but you can still review.",
+  "notification.morning.review_intro": "🧠 Now let's check the words you're due to review.",
+  "notification.afternoon.invite": "☀️ A quick review?\n\nLet's reinforce the words you're due to review.",
+  "notification.evening.invite": "🌙 Time to reinforce what you've learned!\n\nLet's do a quick quiz on the words you're due to review.",
+  "quiz.question": "What does this word mean?"
 }
