@@ -129,7 +129,7 @@ async def _lookup_and_persist(
     for translation in data.translations:
         await words_repo.add_translation(
             session, word_id=word.id, language_code=translation_language,
-            translation=translation.translation, usage_note=translation.usage_note,
+            translation=translation.translation, definition=data.definition, usage_note=translation.usage_note,
         )
     for example in data.examples:
         await words_repo.add_example(

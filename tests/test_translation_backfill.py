@@ -77,3 +77,47 @@ async def test_ensure_translation_backfills_a_missing_language_from_ai(session, 
     assert by_language == {"ru": "тихий", "de": "ruhig"}
 
     get_ai_service.cache_clear()
+
+
+async def test_ensure_translation_stores_the_definition_on_the_new_language_row(session, monkeypatch):
+    """Root cause of "пояснение не меняется после смены языка интерфейса":
+    Word.definition is a single column shared by every user studying that
+    word - the backfilled definition must land on the NEW WordTranslation
+    row (word_service.build_word_card then prefers it), never overwrite
+    the shared Word.definition."""
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            return (
+                '{"word": "quiet", "translations": [{"translation": "ruhig", "usage_note": null}], '
+                '"part_of_speech": "adjective", "phonetic": null, "pronunciation": null, '
+                '"definition": "Deutsche Bedeutung", "examples": [], "difficulty": null, "category": null, '
+                '"verb_forms": null}'
+            )
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("services.dictionary_service.get_ai_service", lambda: live)
+
+    word, _ = await word_service.get_or_create_word(
+        session, language_code="en", word="quiet", definition="EN legacy shared definition",
+    )
+    await session.commit()
+
+    result = await word_service.ensure_translation(session, word, translation_language="de", user_id=1)
+
+    de_translation = next(t for t in result.translations if t.language_code == "de")
+    assert de_translation.definition == "Deutsche Bedeutung"
+    # The legacy shared column is untouched - other viewers (or the "en"
+    # side of the word) never see it silently flip language.
+    assert word.definition == "EN legacy shared definition"
+
+    card = await word_service.get_word_card(session, word_id=word.id, translation_language="de")
+    assert card.definition == "Deutsche Bedeutung"
+
+    get_ai_service.cache_clear()

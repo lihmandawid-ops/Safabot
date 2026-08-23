@@ -21,13 +21,27 @@ class WordCard:
     translations: list[WordTranslation] = field(default_factory=list)
     examples: list[WordExample] = field(default_factory=list)
     forms: list[WordForm] = field(default_factory=list)
+    # Root cause of "пояснение не меняется после смены языка интерфейса":
+    # Word.definition is ONE shared column on a Word row that many users
+    # studying the same word can share - it must never be treated as "the"
+    # definition for a specific viewer's translation_language. Each
+    # WordTranslation row carries its OWN definition (set alongside the
+    # translation itself, see word_service.ensure_translation/
+    # word_generation_service._persist_and_add) - this field is that
+    # per-language value, with Word.definition kept only as a last-resort
+    # fallback for old rows saved before this existed.
+    definition: str | None = None
 
 
 def build_word_card(word: Word, *, translation_language: str | None = None) -> WordCard:
     translations = [
         t for t in word.translations if translation_language is None or t.language_code == translation_language
     ]
-    return WordCard(word=word, translations=translations, examples=list(word.examples), forms=list(word.forms))
+    definition = next((t.definition for t in translations if t.definition), None) or word.definition
+    return WordCard(
+        word=word, translations=translations, examples=list(word.examples), forms=list(word.forms),
+        definition=definition,
+    )
 
 
 async def search_words(session: AsyncSession, *, language_code: str, query: str, limit: int = 5) -> list[Word]:
@@ -99,7 +113,7 @@ async def ensure_translation(session: AsyncSession, word: Word, *, translation_l
     for translation in result.translations:
         row = await words_repo.add_translation(
             session, word_id=word.id, language_code=translation_language,
-            translation=translation.translation, usage_note=translation.usage_note,
+            translation=translation.translation, definition=result.definition, usage_note=translation.usage_note,
         )
         # Append directly onto the already-loaded collection rather than
         # re-fetching again - `word.translations` was already safely

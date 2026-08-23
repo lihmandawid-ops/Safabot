@@ -99,6 +99,29 @@ async def test_get_word_card_filters_translations_by_language(session):
     assert [t.translation for t in card.translations] == ["идти"]
 
 
+async def test_word_card_definition_is_per_translation_language(session):
+    """Root cause of "перевод и пояснение не меняются после смены языка
+    интерфейса": Word.definition is a single column shared by every user
+    studying that word - build_word_card must prefer the definition
+    attached to the matching WordTranslation row, never the shared
+    Word-level one, once a per-language definition exists."""
+    word = await _make_word(session, language_code="en", word="go", definition="EN shared legacy definition")
+    await words_repo.add_translation(
+        session, word_id=word.id, language_code="ru", translation="идти", definition="Значение по-русски",
+    )
+    await words_repo.add_translation(
+        session, word_id=word.id, language_code="de", translation="gehen",  # no per-language definition yet
+    )
+
+    ru_card = await word_service.get_word_card(session, word_id=word.id, translation_language="ru")
+    assert ru_card.definition == "Значение по-русски"
+
+    # No per-language definition for "de" yet - falls back to the legacy
+    # shared Word.definition rather than showing nothing.
+    de_card = await word_service.get_word_card(session, word_id=word.id, translation_language="de")
+    assert de_card.definition == "EN shared legacy definition"
+
+
 async def test_get_verb_forms(session):
     word = await _make_word(session, language_code="en", word="go", is_verb=True)
     await words_repo.add_form(session, word_id=word.id, form_type="past", form="went")

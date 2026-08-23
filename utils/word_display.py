@@ -83,7 +83,7 @@ def render_word_card_text(card, *, status: str | None = None) -> str:
 
     lines.append("")
     lines.append(t("card.definition_header", get_current_language()))
-    lines.append(card.word.definition if card.word.definition else t("card.no_definition", get_current_language()))
+    lines.append(card.definition if card.definition else t("card.no_definition", get_current_language()))
 
     lines.append("")
     lines.append(t("card.example_label", get_current_language()))

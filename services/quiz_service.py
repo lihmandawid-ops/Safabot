@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import UserWord, WordStatus
 from database.repositories import learning as learning_repo
 from database.repositories import user_words as user_words_repo
-from services import pronunciation_service
+from services import pronunciation_service, word_service
 from services.repetition_service import ReviewGrade, calculate_next_review
 from utils.time import utc_now
 
@@ -147,7 +147,19 @@ async def build_quiz(
     for user_word in to_ask:
         translation = _translation_for(user_word, translation_language)
         if translation is None:
-            continue
+            # Root cause of "перевод не меняется после смены языка
+            # интерфейса": a word added under a DIFFERENT translation_
+            # language has no WordTranslation row for the new one yet - a
+            # no-op, no AI call, once a translation for this exact
+            # language exists (same on-demand backfill word_service.
+            # ensure_translation already uses for 📖 Словарь/📚 Учить
+            # слова card views).
+            await word_service.ensure_translation(
+                session, user_word.word, translation_language=translation_language, user_id=user_id
+            )
+            translation = _translation_for(user_word, translation_language)
+            if translation is None:
+                continue
         question = _build_question(user_word, translation, pool, translation_language)
         if question is not None:
             questions.append(question)

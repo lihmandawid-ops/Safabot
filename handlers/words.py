@@ -96,6 +96,21 @@ def _render_list_text(items, translation_language: str, page: int, total_pages: 
     return "\n".join(lines)
 
 
+async def _backfill_translations(session, items, translation_language: str, *, user_id: int) -> None:
+    """Root cause of "перевод не меняется после смены языка интерфейса":
+    a word added under a DIFFERENT translation_language has no
+    WordTranslation row for the new one yet - _translation_for() used to
+    silently fall back to whatever language WAS stored. No-op, no AI call,
+    once a translation for this exact language already exists (same
+    on-demand backfill word_service.ensure_translation already uses for
+    the full card views)."""
+    for uw in items:
+        if not any(tr.language_code == translation_language for tr in uw.word.translations):
+            await word_service.ensure_translation(
+                session, uw.word, translation_language=translation_language, user_id=user_id
+            )
+
+
 async def _render_page(send, session, context, *, user_id: int, language_code: str, translation_language: str, filter_code: str, page: int) -> None:
     items = await user_word_service.list_user_words(
         session, user_id=user_id, language_code=language_code, status_filter=filter_code
@@ -106,6 +121,8 @@ async def _render_page(send, session, context, *, user_id: int, language_code: s
         context.user_data.pop("words_list", None)
         await send(t("words.empty", get_current_language()), reply_markup=list_keyboard(has_previous=False, has_next=False))
         return
+
+    await _backfill_translations(session, page_obj.items, translation_language, user_id=user_id)
 
     context.user_data["words_list"] = {
         "kind": "filter",
@@ -128,6 +145,8 @@ async def _render_search_results(send, session, context, *, user_id: int, langua
         context.user_data.pop("words_list", None)
         await send(t("words.search_not_found", get_current_language()), reply_markup=list_keyboard(has_previous=False, has_next=False))
         return
+
+    await _backfill_translations(session, items, translation_language, user_id=user_id)
 
     context.user_data["words_list"] = {
         "kind": "search",
@@ -166,11 +185,17 @@ async def _refresh_list(send, session, context, *, user_id: int) -> None:
 
 
 async def _render_manage_screen(
-    send, session, user_word_id: int, translation_language: str, *, number: int | None = None
+    send, session, user_word_id: int, translation_language: str, *, user_id: int, number: int | None = None
 ) -> None:
     user_word = await user_words_repo.get_by_id(session, user_word_id)
     if user_word is None:
         return
+    # Root cause of "перевод не меняется после смены языка интерфейса" -
+    # see _backfill_translations' docstring.
+    if not any(tr.language_code == translation_language for tr in user_word.word.translations):
+        await word_service.ensure_translation(
+            session, user_word.word, translation_language=translation_language, user_id=user_id
+        )
     header = (
         t("words.manage_header", get_current_language(), number=number, word=user_word.word.word)
         if number is not None
@@ -228,7 +253,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if len(numbers) == 1:
             user_word_id = ids[numbers[0] - 1]
             await _render_manage_screen(
-                update.message.reply_text, session, user_word_id, cache["translation_language"], number=numbers[0]
+                update.message.reply_text, session, user_word_id, cache["translation_language"],
+                user_id=user.id, number=numbers[0],
             )
             return
 
@@ -312,7 +338,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.resume_word(session, user_word)
                 await query.answer(t("words.resumed_single", get_current_language()))
-                await _render_manage_screen(edit, session, uw_id, current.translation_language)
+                await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
 
         elif data.startswith("uw:pause:"):
             uw_id = int(data.removeprefix("uw:pause:"))
@@ -320,7 +346,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.pause_word(session, user_word)
                 await query.answer(t("words.paused_single", get_current_language()))
-                await _render_manage_screen(edit, session, uw_id, current.translation_language)
+                await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
 
         elif data.startswith("uw:delete:"):
             uw_id = int(data.removeprefix("uw:delete:"))
@@ -343,7 +369,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         elif data.startswith("uw:delete_cancel:"):
             uw_id = int(data.removeprefix("uw:delete_cancel:"))
             await query.answer()
-            await _render_manage_screen(edit, session, uw_id, current.translation_language)
+            await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
 
         elif data.startswith("uw:card:"):
             uw_id = int(data.removeprefix("uw:card:"))
@@ -375,7 +401,7 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         elif data.startswith("uw:card_back:"):
             uw_id = int(data.removeprefix("uw:card_back:"))
             await query.answer()
-            await _render_manage_screen(edit, session, uw_id, current.translation_language)
+            await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
 
         elif data in ("bulk:review", "bulk:pause"):
             ids = context.user_data.get("bulk_selection") or []

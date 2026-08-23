@@ -20,7 +20,7 @@ def _card(**word_fields):
         SimpleNamespace(language_code="ru", translation="запись", usage_note=None),
     ]
     examples = [SimpleNamespace(example_text="I have an appointment tomorrow.", translation="У меня завтра встреча.", pronunciation=None)]
-    return WordCard(word=word, translations=translations, examples=examples, forms=[])
+    return WordCard(word=word, translations=translations, examples=examples, forms=[], definition=defaults["definition"])
 
 
 def test_card_shows_one_line_per_translation():

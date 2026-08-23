@@ -457,3 +457,56 @@ async def test_my_words_menu_buttons_have_no_numbering_prefix(handler_db):
     labels = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
     assert labels == ["📚 Все", "🔄 Повторение", "✅ Выученные слова", "🔎 Найти моё слово", "➕ Добавить слово для изучения"]
     assert not any(label[0].isdigit() or "️⃣" in label for label in labels)
+
+
+async def test_my_words_list_backfills_translation_after_interface_language_change(handler_db, monkeypatch):
+    """Real user report: "при смене языка интерфейса не меняется перевод
+    ... в сохранённых словах" - a word saved while translation_language
+    was "ru" must show a fresh "de" translation in the ⭐ Мои слова list
+    once the user switches to translation_language "de", not silently
+    fall back to the stale Russian one."""
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.repositories import words as words_repo
+    from handlers import words as words_handler
+    from services import ai_models, word_service
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="quiet")
+        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="тихий")
+        await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+        current = await user_languages_repo.get_current_language(s, user.id)
+        # Simulate the user switching their interface language, which per
+        # database.repositories.user_languages.set_translation_language_for_all
+        # propagates translation_language onto every UserLanguage row.
+        current.translation_language = "de"
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            return (
+                '{"word": "quiet", "translations": [{"translation": "ruhig", "usage_note": null}], '
+                '"part_of_speech": "adjective", "phonetic": null, "pronunciation": null, '
+                '"definition": null, "examples": [], "difficulty": null, "category": null, '
+                '"verb_forms": null}'
+            )
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("services.dictionary_service.get_ai_service", lambda: live)
+
+    q = _query("words:filter:all")
+    await words_handler.handle_words_callback(q, SimpleNamespace(user_data={}))
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "ruhig" in text
+    assert "тихий" not in text
+
+    get_ai_service.cache_clear()

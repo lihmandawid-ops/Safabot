@@ -15,7 +15,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import UserWord
-from services import pronunciation_service
+from services import pronunciation_service, word_service
 from utils.languages import LANGUAGE_BY_CODE
 from utils.word_display import translation_for
 
@@ -32,6 +32,22 @@ async def build_flashcard_items(
     items = []
     for uw in user_words:
         translation = translation_for(uw, translation_language)
+        if translation is None or not any(
+            tr.language_code == translation_language for tr in uw.word.translations
+        ):
+            # Root cause of "перевод не меняется после смены языка
+            # интерфейса": a word added under a DIFFERENT translation_
+            # language has no WordTranslation row for the new one yet -
+            # translation_for() was silently falling back to whichever
+            # language IS stored instead of showing the current one. No-op,
+            # no AI call, once a translation for this exact language
+            # exists (same on-demand backfill word_service.ensure_
+            # translation already uses for 📖 Словарь/📚 Учить слова card
+            # views).
+            await word_service.ensure_translation(
+                session, uw.word, translation_language=translation_language, user_id=user_id
+            )
+            translation = translation_for(uw, translation_language)
         if translation is None:
             continue
         lang = LANGUAGE_BY_CODE.get(uw.word.language_code)

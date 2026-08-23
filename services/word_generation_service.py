@@ -465,7 +465,7 @@ async def _persist_and_add(
         for translation in entry.translations:
             await words_repo.add_translation(
                 session, word_id=word.id, language_code=user_language.translation_language,
-                translation=translation.translation, usage_note=translation.usage_note,
+                translation=translation.translation, definition=entry.definition, usage_note=translation.usage_note,
             )
         for example in entry.examples:
             await words_repo.add_example(
@@ -475,6 +475,15 @@ async def _persist_and_add(
         if entry.part_of_speech == "verb" and entry.verb_forms:
             for form_type, form in entry.verb_forms.items():
                 await words_repo.add_form(session, word_id=word.id, form_type=form_type, form=form)
+    else:
+        # Root cause of "перевод и пояснение не меняются после смены языка
+        # интерфейса": the Word row already existed (e.g. another user
+        # already added it) but may have no translation at all into THIS
+        # user's translation_language yet - same on-demand backfill
+        # word_service.ensure_translation already uses everywhere else.
+        await word_service.ensure_translation(
+            session, word, translation_language=user_language.translation_language, user_id=user.id
+        )
 
     added = await user_word_service.add_word_to_learning(
         session, user_id=user.id, word_id=word.id, language_code=user_language.language_code
