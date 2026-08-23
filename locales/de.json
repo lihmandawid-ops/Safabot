@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Wiederholung {current}/{total}",
   "revnow.button.know": "✅ Weiß ich",
   "revnow.button.dontknow": "❌ Weiß ich nicht",
+  "revnow.button.next": "➡️ Weiter",
   "revnow.completed": "🎉 Klasse! Ein weiterer kleiner Schritt beim Sprachenlernen. Weiter so! 💪\n\nWiederholt: {count}/{total}",
   "revnow.button.again": "▶️ Nächste Wiederholung starten",
   "revnow.empty": "📚 Du hast noch keine Wörter zum Wiederholen.\n\nLass uns mit dem Lernen beginnen!",

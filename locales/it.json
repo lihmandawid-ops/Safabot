@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Ripasso {current}/{total}",
   "revnow.button.know": "✅ La so",
   "revnow.button.dontknow": "❌ Non la so",
+  "revnow.button.next": "➡️ Avanti",
   "revnow.completed": "🎉 Ottimo lavoro! Un altro piccolo passo verso la lingua. Continua così! 💪\n\nRipassate: {count}/{total}",
   "revnow.button.again": "▶️ Avvia la prossima ripetizione",
   "revnow.empty": "📚 Non hai ancora parole da ripassare.\n\nIniziamo a studiare!",

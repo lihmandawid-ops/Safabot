@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Повторення {current}/{total}",
   "revnow.button.know": "✅ Знаю",
   "revnow.button.dontknow": "❌ Не знаю",
+  "revnow.button.next": "➡️ Далі",
   "revnow.completed": "🎉 Чудово! Ще один маленький крок до вивчення мови. Так тримати! 💪\n\nПовторено: {count}/{total}",
   "revnow.button.again": "▶️ Почати наступне повторення",
   "revnow.empty": "📚 У вас поки немає слів для повторення.\n\nДавайте почнемо навчання!",

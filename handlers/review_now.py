@@ -206,16 +206,20 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
                 return
             await _launch(session, edit, context, user, current, words, mode=mode_str)
 
-        elif data in ("revnow:know", "revnow:dontknow"):
+        elif data == "revnow:next":
+            # study-flow-rework stage (real user feedback): the flashcard
+            # only offers "🏆 Уже выучено" / "➡️ Далее" now - no separate
+            # "✅ Знаю" / "❌ Не знаю" grading step. ➡️ Далее just moves on
+            # WITHOUT touching this word's repetition schedule (never calls
+            # record_on_demand_answer) - by explicit product decision, a
+            # skip is not an answer, so next_review_at/interval/repetitions
+            # stay exactly as they were; the word simply comes up again in
+            # a future review the same as if it hadn't been shown at all.
             await query.answer()
             state = context.user_data.get("revnow")
             if state is None:
                 await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
                 return
-            item = state["items"][state["position"]]
-            user_word = await user_words_repo.get_by_id(session, item["user_word_id"])
-            if user_word is not None:
-                await learning_service.record_on_demand_answer(session, user_word, correct=(data == "revnow:know"))
             state["position"] += 1
             if state["position"] >= len(state["items"]):
                 await _finish_flashcards(edit, context, state, user=user)

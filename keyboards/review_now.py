@@ -31,20 +31,17 @@ def mode_picker_keyboard(*, count: int, mastered: bool) -> InlineKeyboardMarkup:
 
 
 def flashcard_keyboard() -> InlineKeyboardMarkup:
-    """AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже выучено
-    skips straight to MASTERED (services.user_word_service.mark_mastered -
-    the exact same bypass 🤔 Я это уже знаю already uses for a brand-new
-    word), independent of the ✅/❌ Знаю/Не знаю grading row, which still
-    always goes through the normal spaced-repetition ladder."""
-    # study-flow-rework stage sections 14/48: ❌ Не знаю / ✅ Знаю /
-    # 🏆 Уже выучил, in that exact order (was ✅/❌ before this stage).
+    """study-flow-rework stage (real user feedback): simplified to just two
+    buttons - 🏆 Уже выучено (services.user_word_service.mark_mastered,
+    skips straight to MASTERED) and ➡️ Далее (moves to the next word
+    without touching this word's repetition schedule at all - explicit
+    product decision: a skip is not an answer). The old ✅/❌ Знаю/Не знаю
+    grading row (which fed learning_service.record_on_demand_answer) is
+    removed from this flow."""
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(t("revnow.button.dontknow", get_current_language()), callback_data="revnow:dontknow"),
-                InlineKeyboardButton(t("revnow.button.know", get_current_language()), callback_data="revnow:know"),
-            ],
             [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data="revnow:mastered")],
+            [InlineKeyboardButton(t("revnow.button.next", get_current_language()), callback_data="revnow:next")],
         ]
     )
 

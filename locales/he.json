@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 חזרה {current}/{total}",
   "revnow.button.know": "✅ יודע",
   "revnow.button.dontknow": "❌ לא יודע",
+  "revnow.button.next": "➡️ הבא",
   "revnow.completed": "🎉 כל הכבוד! עוד צעד קטן לקראת שליטה בשפה. כך ממשיכים! 💪\n\nנחזרו: {count}/{total}",
   "revnow.button.again": "▶️ התחל את החזרה הבאה",
   "revnow.empty": "📚 עדיין אין לך מילים לחזרה.\n\nבואו נתחיל ללמוד!",

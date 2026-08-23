@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Review {current}/{total}",
   "revnow.button.know": "✅ I know it",
   "revnow.button.dontknow": "❌ I don't know it",
+  "revnow.button.next": "➡️ Next",
   "revnow.completed": "🎉 Great job! Another small step toward mastering the language. Keep it up! 💪\n\nReviewed: {count}/{total}",
   "revnow.button.again": "▶️ Start next review",
   "revnow.empty": "📚 No words to review yet.\n\nLet's start learning!",

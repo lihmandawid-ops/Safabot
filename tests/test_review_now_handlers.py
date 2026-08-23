@@ -109,9 +109,10 @@ async def test_review_new_words_pool_with_no_saved_mode_shows_mode_picker(handle
     assert "Как повторять" in text
 
 
-async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetition(handler_db):
-    from database.database import session_scope
-    from database.repositories import user_words as user_words_repo
+async def test_flashcard_mode_renders_compact_card_with_only_mastered_and_next_buttons(handler_db):
+    """study-flow-rework stage (real user feedback): the flashcard only
+    offers 🏆 Уже выучено / ➡️ Далее now - no separate ✅/❌ Знаю/Не знаю
+    grading step."""
     from handlers.review_now import handle_review_now_callback
 
     context = SimpleNamespace(user_data={})
@@ -122,14 +123,33 @@ async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetitio
     assert "1/1" in text
     assert "appointment" in text
     assert "встреча" in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:mastered", "revnow:next"]
+
+
+async def test_next_button_advances_without_touching_the_repetition_schedule(handler_db):
+    """study-flow-rework stage (real user feedback, explicit product
+    decision): ➡️ Далее is not an answer - it must never call
+    learning_service.record_on_demand_answer, so repetitions/wrong_answers/
+    next_review_at are all left exactly as they were."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from handlers.review_now import handle_review_now_callback
+
+    context = SimpleNamespace(user_data={})
+    q = _query("revnow:mode:flashcard:4:0")
+    await handle_review_now_callback(q, context)
 
     state = context.user_data["revnow"]
     uw_id = state["items"][0]["user_word_id"]
     async with session_scope() as s:
         uw = await user_words_repo.get_by_id(s, uw_id)
         old_repetitions = uw.repetitions
+        old_wrong_answers = uw.wrong_answers
+        old_next_review_at = uw.next_review_at
 
-    q2 = _query("revnow:dontknow")
+    q2 = _query("revnow:next")
     await handle_review_now_callback(q2, context)
 
     final_text = q2.callback_query.edit_message_text.call_args[0][0]
@@ -146,8 +166,9 @@ async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetitio
 
     async with session_scope() as s:
         uw = await user_words_repo.get_by_id(s, uw_id)
-    assert uw.repetitions == old_repetitions + 1
-    assert uw.wrong_answers >= 1
+    assert uw.repetitions == old_repetitions
+    assert uw.wrong_answers == old_wrong_answers
+    assert uw.next_review_at == old_next_review_at
 
 
 async def test_finishing_flashcard_review_updates_the_streak(handler_db):
@@ -168,7 +189,7 @@ async def test_finishing_flashcard_review_updates_the_streak(handler_db):
 
     context = SimpleNamespace(user_data={})
     await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
-    await handle_review_now_callback(_query("revnow:know"), context)
+    await handle_review_now_callback(_query("revnow:next"), context)
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)

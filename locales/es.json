@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Repaso {current}/{total}",
   "revnow.button.know": "✅ Lo sé",
   "revnow.button.dontknow": "❌ No lo sé",
+  "revnow.button.next": "➡️ Siguiente",
   "revnow.completed": "🎉 ¡Genial! Un paso más hacia el dominio del idioma. ¡Sigue así! 💪\n\nRepasadas: {count}/{total}",
   "revnow.button.again": "▶️ Empezar el siguiente repaso",
   "revnow.empty": "📚 Todavía no tienes palabras para repasar.\n\n¡Empecemos a aprender!",

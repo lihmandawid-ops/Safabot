@@ -358,6 +358,7 @@
   "revnow.progress": "🔁 Révision {current}/{total}",
   "revnow.button.know": "✅ Je le sais",
   "revnow.button.dontknow": "❌ Je ne le sais pas",
+  "revnow.button.next": "➡️ Suivant",
   "revnow.completed": "🎉 Bravo ! Un pas de plus vers la maîtrise de la langue. Continue comme ça ! 💪\n\nRévisés : {count}/{total}",
   "revnow.button.again": "▶️ Démarrer la révision suivante",
   "revnow.empty": "📚 Vous n'avez pas encore de mots à réviser.\n\nCommençons à apprendre !",
