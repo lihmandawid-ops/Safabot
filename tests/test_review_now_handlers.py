@@ -150,6 +150,32 @@ async def test_flashcard_mode_renders_compact_card_and_grading_updates_repetitio
     assert uw.wrong_answers >= 1
 
 
+async def test_finishing_flashcard_review_updates_the_streak(handler_db):
+    """study-flow-rework stage: with "📚 Учить слова" no longer routing
+    through the old LearningSession-based flow (the only place that used
+    to call learning_service.update_streak), completing a 🔄 Повторить
+    batch must now be one of the daily-practice checkpoints that keeps the
+    streak alive - otherwise the whole streak feature would silently stop
+    working for every user."""
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from handlers.review_now import handle_review_now_callback
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        assert user.current_streak == 0
+        assert user.last_learning_date is None
+
+    context = SimpleNamespace(user_data={})
+    await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
+    await handle_review_now_callback(_query("revnow:know"), context)
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        assert user.current_streak == 1
+        assert user.last_learning_date is not None
+
+
 async def test_mastered_button_during_flashcard_review_skips_ladder(handler_db):
     """AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже выучено
     during 🔄 Повторить jumps straight to MASTERED - never the normal

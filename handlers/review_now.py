@@ -105,9 +105,15 @@ async def _render_flashcard(edit, state: dict) -> None:
     await edit(text, reply_markup=flashcard_keyboard())
 
 
-async def _finish_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, state: dict) -> None:
+async def _finish_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, state: dict, *, user) -> None:
+    """study-flow-rework stage: with "📚 Учить слова" no longer routing
+    through the old LearningSession-based due+new flow (the only place
+    that used to update the streak), completing a 🔄 Повторить flashcard
+    batch is now one of the two daily-practice checkpoints that keeps it
+    alive - see learning_service.update_streak's docstring."""
     total = len(state["items"])
     context.user_data.pop("revnow", None)
+    await learning_service.update_streak(user, utc_now())
     await edit(t("revnow.completed", get_current_language(), count=total, total=total), reply_markup=completion_keyboard())
 
 
@@ -212,7 +218,7 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
                 await learning_service.record_on_demand_answer(session, user_word, correct=(data == "revnow:know"))
             state["position"] += 1
             if state["position"] >= len(state["items"]):
-                await _finish_flashcards(edit, context, state)
+                await _finish_flashcards(edit, context, state, user=user)
             else:
                 await _render_flashcard(edit, state)
 
@@ -235,7 +241,7 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
             await query.answer(t("revnow.mastered_confirmed", get_current_language()), show_alert=True)
             state["position"] += 1
             if state["position"] >= len(state["items"]):
-                await _finish_flashcards(edit, context, state)
+                await _finish_flashcards(edit, context, state, user=user)
             else:
                 await _render_flashcard(edit, state)
 

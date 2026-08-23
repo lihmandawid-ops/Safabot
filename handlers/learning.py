@@ -46,6 +46,7 @@ from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.telegram_helpers import safe_edit_message_text
+from utils.time import utc_now
 from utils.topics import MAX_CUSTOM_TOPIC_LENGTH
 
 MODE = "learning"
@@ -322,6 +323,13 @@ async def _show_candidate_card(edit, session, context: ContextTypes.DEFAULT_TYPE
         # section 11: the post-study menu - never 📚 Учить слова as a
         # required next step.
         context.user_data.pop("new_words_candidates", None)
+        # study-flow-rework stage: with "📚 Учить слова" no longer routing
+        # through the old LearningSession-based flow that used to update
+        # the streak, finishing today's new-word study is now one of the
+        # two daily-practice checkpoints that keeps it alive (the other is
+        # review_now.py's flashcard completion) - see learning_service.
+        # update_streak's docstring.
+        await learning_service.update_streak(user, utc_now())
         await edit(text, reply_markup=post_study_keyboard())
     else:
         state["card_position"] += 1
@@ -361,7 +369,22 @@ async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, inc
 
 
 async def show_learning_intro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _show_intro(update, context, include_new_words=True)
+    """study-flow-rework stage section 1: "📚 Учить слова" must show
+    EXACTLY the two new-word scenarios immediately - never the old due-
+    reviews-mixed-with-daily-quota screen (_compute_intro/start_keyboard),
+    which used to live here. Repetition of existing words is now reached
+    exclusively through "🔄 Повторить" (handlers/review_now.py)."""
+    async with session_scope() as session:
+        user, current = await _current_user_and_language(session, update.effective_user.id)
+        if user is None:
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
+            return
+        if current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+        await update.message.reply_text(
+            t("learning.menu.header", get_current_language()), reply_markup=learn_menu_keyboard()
+        )
 
 
 async def show_review_intro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -402,12 +425,11 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             )
             await _show_current_word(session, edit, learning_session, current.translation_language, user_id=user.id)
 
-        elif data == "learn:intro":
-            await query.answer()
-            text, keyboard = await _compute_intro(session, user, current, include_new_words=True)
-            await edit(text, reply_markup=keyboard)
-
-        elif data == "learn:menu":
+        elif data in ("learn:intro", "learn:menu"):
+            # study-flow-rework stage section 1: every "back to Учить
+            # слова" re-entry point (not just the main-menu button) shows
+            # the same exactly-two-options screen - never the old due-
+            # reviews-mixed-with-quota _compute_intro screen.
             await query.answer()
             await edit(t("learning.menu.header", get_current_language()), reply_markup=learn_menu_keyboard())
 

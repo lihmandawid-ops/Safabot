@@ -398,7 +398,7 @@ async def finish_session_if_complete(
 
     now = now if now is not None else utc_now()
     await sessions_repo.complete_session(session, learning_session, now=now)
-    await _update_streak(user, now)
+    await update_streak(user, now)
 
     # LevelProgressService (level-and-difficulty stage): checked once per
     # completed session, never per-answer - cheap, and matches the "only
@@ -412,10 +412,19 @@ async def finish_session_if_complete(
     return True
 
 
-async def _update_streak(user: User, now: datetime) -> None:
+async def update_streak(user: User, now: datetime) -> None:
     """Section 22-23: one completed session per LOCAL calendar day counts,
     consecutive local days extend the streak, a gap resets it, and
-    finishing a second session on the same local day is a no-op."""
+    finishing a second session on the same local day is a no-op.
+
+    study-flow-rework stage: made public (was _update_streak, called only
+    from finish_session_if_complete) because "📚 Учить слова" no longer
+    routes through the old LearningSession-based due+new mixed flow (spec
+    section 1) - handlers/review_now.py's on-demand-review completion and
+    handlers/learning.py's new-word-candidate-study completion are now the
+    daily-practice checkpoints that keep the streak alive, and both call
+    this directly. Idempotent per local day, so calling it from more than
+    one of these in the same day is always safe."""
     today = local_today(now, user.timezone)
 
     if user.last_learning_date == today:

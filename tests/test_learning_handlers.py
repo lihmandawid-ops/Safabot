@@ -396,6 +396,59 @@ async def test_menu_button_shows_the_two_options(handler_db):
     assert "learn:topics" in callbacks
 
 
+async def test_main_menu_learn_words_always_shows_the_two_options_directly(handler_db, monkeypatch):
+    """study-flow-rework stage section 1: "📚 Учить слова" must show
+    EXACTLY the two new-word options immediately - never the old due-
+    reviews-mixed-with-daily-quota "Время заниматься... Начать?" screen,
+    even when there ARE due reviews and even when there's an active
+    (stuck) old-style LearningSession to resume."""
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from database.repositories import user_languages as user_languages_repo
+    from handlers import learning as learning_handler
+    from services import learning_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        # Build and leave an active session in-progress (like the "7 слов в
+        # текущем занятии" resume screen a real user got stuck on).
+        await learning_service.build_learning_session(s, user=user, user_language=current, include_new_words=True)
+
+    message = AsyncMock()
+    update = NS(effective_user=NS(id=42), message=message)
+    await learning_handler.show_learning_intro(update, SimpleNamespace(user_data={}))
+
+    message.reply_text.assert_awaited_once()
+    args, kwargs = message.reply_text.call_args
+    assert "Начнём?" not in args[0]
+    assert "текущем занятии" not in args[0]
+    markup = kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "learn:newwords" in callbacks
+    assert "learn:topics" in callbacks
+    assert "learn:start" not in callbacks
+    assert "learn:continue" not in callbacks
+
+
+async def test_learn_intro_callback_also_shows_the_two_options_directly(handler_db):
+    """Same requirement as above, but for the "learn:intro" re-entry point
+    (reached from several back-navigation buttons elsewhere)."""
+    from handlers import learning as learning_handler
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:intro")
+    await learning_handler.handle_learning_callback(q, context)
+
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "learn:newwords" in callbacks
+    assert "learn:topics" in callbacks
+
+
 async def test_callback_survives_a_message_not_modified_bad_request(handler_db):
     """Bugfix: a double-tap (or any edit that happens to land on content
     identical to what's already showing) must never crash the handler and
@@ -567,6 +620,39 @@ async def test_candidate_study_persists_word_and_shows_full_card(handler_db, mon
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
     assert callbacks == ["revnow:menu", "learn:newwords", "revnow:mainmenu"]
     assert "new_words_candidates" not in context.user_data
+
+
+async def test_finishing_new_word_study_updates_the_streak(handler_db, monkeypatch):
+    """study-flow-rework stage: with "📚 Учить слова" no longer routing
+    through the old LearningSession-based flow (the only place that used
+    to call learning_service.update_streak), finishing today's new-word
+    study must now be one of the daily-practice checkpoints that keeps the
+    streak alive."""
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        assert user.current_streak == 0
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+    await learning_handler.handle_learning_callback(_query("learn:candidate:study"), context)
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        assert user.current_streak == 1
+        assert user.last_learning_date is not None
 
 
 async def test_marking_one_of_two_known_leaves_the_other_studyable(handler_db, monkeypatch):
