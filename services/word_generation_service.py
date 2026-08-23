@@ -469,7 +469,8 @@ async def _persist_and_add(
             )
         for example in entry.examples:
             await words_repo.add_example(
-                session, word_id=word.id, example_text=example.text, translation=example.translation
+                session, word_id=word.id, example_text=example.text, translation=example.translation,
+                pronunciation=example.pronunciation,
             )
         if entry.part_of_speech == "verb" and entry.verb_forms:
             for form_type, form in entry.verb_forms.items():

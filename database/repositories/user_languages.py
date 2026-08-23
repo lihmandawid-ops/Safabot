@@ -181,6 +181,19 @@ async def set_automatic_difficulty(session: AsyncSession, user_language: UserLan
     return user_language
 
 
+async def set_translation_language_for_all(session: AsyncSession, *, user_id: int, translation_language: str) -> None:
+    """study-flow-rework stage sections 5-6: translation_language must
+    always equal interface_language EVERYWHERE - when a user changes their
+    interface language in Settings, every existing UserLanguage row's
+    translation_language is updated to match, not just newly-added ones."""
+    await session.execute(
+        update(UserLanguage)
+        .where(UserLanguage.user_id == user_id)
+        .values(translation_language=translation_language)
+    )
+    await session.flush()
+
+
 async def set_active_language(session: AsyncSession, *, user_id: int, user_language_id: int) -> UserLanguage:
     """Mark `user_language_id` as the user's current (menu-visible) language,
     clearing the flag on every other language they study (section 13)."""

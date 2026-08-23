@@ -90,6 +90,8 @@ def render_word_card_text(card, *, status: str | None = None) -> str:
     if card.examples:
         example = card.examples[0]
         lines.append(example.example_text)
+        if example.pronunciation:
+            lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=example.pronunciation))
         if example.translation:
             lines.append(example.translation)
     else:

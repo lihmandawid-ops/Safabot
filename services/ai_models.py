@@ -55,6 +55,11 @@ class TranslationResult(BaseModel):
 class ExampleResult(BaseModel):
     text: str
     translation: str | None = None
+    # study-flow-rework stage section 40: the example sentence's OWN Latin
+    # pronunciation (global pronunciation rule, sections 8/35) - a whole
+    # sentence reads differently than the headword alone, so this is never
+    # inferred from GeneratedWord.pronunciation.
+    pronunciation: str | None = None
 
     @field_validator("text")
     @classmethod
@@ -64,7 +69,7 @@ class ExampleResult(BaseModel):
             raise ValueError("example text must not be blank")
         return value
 
-    @field_validator("translation", mode="before")
+    @field_validator("translation", "pronunciation", mode="before")
     @classmethod
     def _clean_translation(cls, value: object) -> object:
         return _clean(value) if isinstance(value, str) else value

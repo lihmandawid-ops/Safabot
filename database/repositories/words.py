@@ -180,8 +180,11 @@ async def add_example(
     example_text: str,
     translation: str | None = None,
     level: str | None = None,
+    pronunciation: str | None = None,
 ) -> WordExample:
-    row = WordExample(word_id=word_id, example_text=example_text, translation=translation, level=level)
+    row = WordExample(
+        word_id=word_id, example_text=example_text, translation=translation, level=level, pronunciation=pronunciation
+    )
     session.add(row)
     await session.flush()
     return row

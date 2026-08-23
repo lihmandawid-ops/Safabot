@@ -240,8 +240,9 @@ _LOOKUP_WORD_SYSTEM = (
     "Given a single word or short phrase, respond with ONLY a JSON object (no extra text) with "
     'this shape: {"query_language": str, "word": str, "translations": [{"translation": str, '
     '"usage_note": str|null}], "part_of_speech": str|null, "phonetic": str|null, "pronunciation": '
-    'str|null, "definition": str|null, "examples": [{"text": str, "translation": str|null}], '
-    '"difficulty": str|null, "category": str|null, "verb_forms": object|null}. '
+    'str|null, "definition": str|null, "examples": [{"text": str, "translation": str|null, '
+    '"pronunciation": str|null}], "difficulty": str|null, "category": str|null, '
+    '"verb_forms": object|null}. '
     "The input word or phrase may be written in EITHER learning_language or native_language - the "
     "user does not indicate which. Detect which one it's actually in yourself and report your "
     'decision as "query_language" (the ISO 639-1 code of learning_language or native_language, '
@@ -270,6 +271,8 @@ _LOOKUP_WORD_SYSTEM = (
     '"phonetic" is a SEPARATE, standard IPA transcription of the same word (e.g. "/ɡoʊ/") - always '
     "attempt it too when you can produce a real IPA transcription; leave it null only if you are "
     "not confident in the exact IPA symbols, never fill it with the same content as \"pronunciation\". "
+    "Each example sentence's own \"pronunciation\" must be the same kind of readable transcription "
+    "but for the WHOLE sentence, not just the headword - always attempt it too, for the same reason. "
     "verb_forms MUST be set whenever part_of_speech is \"verb\" - include every commonly-taught "
     "inflected form for that specific learning_language (do not force English's forms onto other "
     "languages, and do not invent a form you are not confident about, but do not omit the field "
@@ -280,8 +283,9 @@ _GENERATE_WORDS_SYSTEM = (
     "You generate new vocabulary for a language-learning app. Respond with ONLY a JSON object: "
     '{"words": [ {"word": str, "translations": [{"translation": str, "usage_note": str|null}], '
     '"part_of_speech": str|null, "phonetic": str|null, "pronunciation": str|null, '
-    '"definition": str|null, "examples": [{"text": str, "translation": str|null}], '
-    '"difficulty": str|null, "category": str|null, "verb_forms": object|null}, ... ]}. '
+    '"definition": str|null, "examples": [{"text": str, "translation": str|null, '
+    '"pronunciation": str|null}], "difficulty": str|null, "category": str|null, '
+    '"verb_forms": object|null}, ... ]}. '
     "Return exactly the requested amount of DISTINCT words the learner does not already know. "
     "Never repeat a word from the learner's known-words list. "
     "The \"Category/topic\" line may be a free-text theme, not just a fixed label - genuinely "
@@ -293,7 +297,10 @@ _GENERATE_WORDS_SYSTEM = (
     "language's own spelling conventions (not IPA) so the learner can sound it out directly - "
     'always attempt it, it is shown to the learner and must almost never be null. "phonetic" is a '
     "separate, standard IPA transcription of the same word - attempt it too when confident, leave "
-    "it null otherwise, never duplicate \"pronunciation\" into it. "
+    "it null otherwise, never duplicate \"pronunciation\" into it. Each example sentence's own "
+    "\"pronunciation\" must be the SAME kind of readable transcription (translation language's own "
+    "spelling conventions, not IPA) but for the WHOLE example sentence, not just the headword - "
+    "always attempt it too, for the same reason. "
     "\"translations\"/\"usage_note\"/\"definition\"/example \"translation\" must ALL be written in "
     "the translate-into language given below - never in English or Russian unless that IS the "
     "translate-into language."

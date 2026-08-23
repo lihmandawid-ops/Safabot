@@ -23,10 +23,7 @@ from config import get_settings
 from database.database import session_scope
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
-from keyboards.language import (
-    settings_add_learning_language_keyboard,
-    settings_add_translation_language_keyboard,
-)
+from keyboards.language import settings_add_learning_language_keyboard
 from keyboards.settings import (
     add_language_level_keyboard,
     add_language_words_keyboard,
@@ -289,15 +286,10 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data.startswith("set:addlang:learn:"):
             await query.answer()
             learning_code = data.removeprefix("set:addlang:learn:")
-            lang = LANGUAGE_BY_CODE[learning_code]
-            await safe_edit_message_text(query,
-                t("settings.add_language_pick_translation", get_current_language(), flag=lang.flag, name=language_display_name(lang)),
-                reply_markup=settings_add_translation_language_keyboard(learning_language=learning_code),
-            )
-
-        elif data.startswith("set:addlang:trans:"):
-            await query.answer()
-            learning_code, translation_code = data.removeprefix("set:addlang:trans:").split(":")
+            # study-flow-rework stage sections 4-6: no separate "which
+            # language to translate into" question - translation_language
+            # always equals the user's own interface_language.
+            translation_code = user.interface_language
             await safe_edit_message_text(query,
                 t("settings.pick_level", get_current_language()),
                 reply_markup=add_language_level_keyboard(learning_code, translation_code),
@@ -353,6 +345,10 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
         elif data.startswith("set:iface:pick:"):
             code = data.removeprefix("set:iface:pick:")
             await users_repo.update_user(session, user, interface_language=code)
+            # study-flow-rework stage sections 5-6: translation_language
+            # always equals interface_language - propagate to every
+            # language this user already studies, not just new ones.
+            await user_languages_repo.set_translation_language_for_all(session, user_id=user.id, translation_language=code)
             set_current_language(code)
             lang = LANGUAGE_BY_CODE[code]
             await query.answer(t("settings.interface_language_updated", code, flag=lang.flag, name=language_display_name(lang, code)))

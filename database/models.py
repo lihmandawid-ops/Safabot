@@ -360,6 +360,11 @@ class WordExample(Base):
     example_text: Mapped[str] = mapped_column(Text, nullable=False)
     translation: Mapped[str | None] = mapped_column(Text, nullable=True)
     level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # study-flow-rework stage section 40: the example sentence's OWN Latin
+    # pronunciation (global pronunciation rule, sections 8/35) - separate
+    # from the headword's Word.pronunciation, since a whole sentence reads
+    # differently than the word in isolation.
+    pronunciation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     word: Mapped[Word] = relationship(back_populates="examples")
 

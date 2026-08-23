@@ -36,11 +36,13 @@ def flashcard_keyboard() -> InlineKeyboardMarkup:
     the exact same bypass 🤔 Я это уже знаю already uses for a brand-new
     word), independent of the ✅/❌ Знаю/Не знаю grading row, which still
     always goes through the normal spaced-repetition ladder."""
+    # study-flow-rework stage sections 14/48: ❌ Не знаю / ✅ Знаю /
+    # 🏆 Уже выучил, in that exact order (was ✅/❌ before this stage).
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(t("revnow.button.know", get_current_language()), callback_data="revnow:know"),
                 InlineKeyboardButton(t("revnow.button.dontknow", get_current_language()), callback_data="revnow:dontknow"),
+                InlineKeyboardButton(t("revnow.button.know", get_current_language()), callback_data="revnow:know"),
             ],
             [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data="revnow:mastered")],
         ]
@@ -48,8 +50,17 @@ def flashcard_keyboard() -> InlineKeyboardMarkup:
 
 
 def empty_keyboard() -> InlineKeyboardMarkup:
+    """study-flow-rework stage sections 20-21: the on-demand-review pool
+    being empty is never a dead end - 🆕 Выучить новые слова routes into
+    the EXACT SAME "🆕 Получить новые слова" flow as handlers/learning.py's
+    own learn:newwords entry point (cross-handler callback_data reuse -
+    every CallbackQueryHandler is registered globally in bot.py, so this
+    button works with zero new wiring on the learning.py side)."""
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(t("quiz.button.main_menu", get_current_language()), callback_data="revnow:mainmenu")]]
+        [
+            [InlineKeyboardButton(t("revnow.button.start_learning", get_current_language()), callback_data="learn:newwords")],
+            [InlineKeyboardButton(t("quiz.button.main_menu", get_current_language()), callback_data="revnow:mainmenu")],
+        ]
     )
 
 

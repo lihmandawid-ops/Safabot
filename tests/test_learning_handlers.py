@@ -426,11 +426,11 @@ async def test_newwords_without_ai_shows_the_exact_failure_message(handler_db):
     assert text == "Сейчас не удалось подобрать новые слова. Попробуйте ещё раз."
 
 
-async def test_newwords_with_working_ai_shows_a_candidate_card_not_yet_added(handler_db, monkeypatch):
-    """AI-new-words stage sections 1-5: tapping 🆕 Новые слова must show
-    the candidate as a full card (word/pronunciation/translation) with
-    ➕/❌ buttons - the word must NOT be added to the learner's list until
-    they explicitly tap ➕ Добавить в обучение."""
+async def test_newwords_with_working_ai_shows_a_summary_screen_not_yet_added(handler_db, monkeypatch):
+    """study-flow-rework stage sections 2-3, 9: tapping 🆕 Получить новые
+    слова must show a compact summary (word/pronunciation/translation) of
+    BOTH candidates with a per-word "already know" button and ▶️ Начнём
+    изучать - nothing is persisted until study actually starts."""
     from database.database import session_scope
     from database.repositories import user_words as user_words_repo
     from database.repositories import users as users_repo
@@ -458,7 +458,10 @@ async def test_newwords_with_working_ai_shows_a_candidate_card_not_yet_added(han
     assert "ии-слово" in text
     markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert callbacks == ["learn:candidate:add", "learn:candidate:reject"]
+    # Fake AI keeps returning the same word, deduped down to exactly one
+    # candidate (amount=2 requested, retries exhausted) - one "already
+    # know" button for it plus ▶️ Начнём изучать.
+    assert callbacks == ["learn:candidate:known:0", "learn:candidate:study"]
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -466,7 +469,65 @@ async def test_newwords_with_working_ai_shows_a_candidate_card_not_yet_added(han
     assert not any(uw.word.word == "aiword" for uw in words)
 
 
-async def test_candidate_add_persists_word_and_advances(handler_db, monkeypatch):
+async def test_two_distinct_candidates_walk_through_cards_sequentially(handler_db, monkeypatch):
+    """study-flow-rework stage sections 7, 9, 11: with two genuinely
+    distinct candidates, ▶️ Начнём изучать persists and shows the FIRST
+    card with a ➡️ Далее button (not yet the post-study menu, and the
+    second word must not be persisted yet); tapping Далее persists and
+    shows the SECOND (last) card with the post-study menu."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from database.models import WordStatus as _WordStatus
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[
+                    ai_models.GeneratedWord(word="firstword", translations=[ai_models.TranslationResult(translation="первое-слово")]),
+                    ai_models.GeneratedWord(word="secondword", translations=[ai_models.TranslationResult(translation="второе-слово")]),
+                ]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+
+    q_study = _query("learn:candidate:study")
+    await learning_handler.handle_learning_callback(q_study, context)
+
+    text1 = q_study.callback_query.edit_message_text.call_args[0][0]
+    assert "firstword" in text1
+    assert "secondword" not in text1
+    markup1 = q_study.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    assert [b.callback_data for row in markup1.inline_keyboard for b in row] == ["learn:candidate:next"]
+    assert "new_words_candidates" in context.user_data  # not finished yet
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert any(uw.word.word == "firstword" and uw.status == _WordStatus.NEW for uw in words)
+    assert not any(uw.word.word == "secondword" for uw in words)
+
+    q_next = _query("learn:candidate:next")
+    await learning_handler.handle_learning_callback(q_next, context)
+
+    text2 = q_next.callback_query.edit_message_text.call_args[0][0]
+    assert "secondword" in text2
+    markup2 = q_next.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    assert [b.callback_data for row in markup2.inline_keyboard for b in row] == ["revnow:menu", "learn:newwords", "revnow:mainmenu"]
+    assert "new_words_candidates" not in context.user_data
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert any(uw.word.word == "secondword" and uw.status == _WordStatus.NEW for uw in words)
+
+
+async def test_candidate_study_persists_word_and_shows_full_card(handler_db, monkeypatch):
     from database.database import session_scope
     from database.repositories import user_words as user_words_repo
     from database.repositories import users as users_repo
@@ -485,11 +546,10 @@ async def test_candidate_add_persists_word_and_advances(handler_db, monkeypatch)
     context = SimpleNamespace(user_data={})
     await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
 
-    q2 = _query("learn:candidate:add")
+    q2 = _query("learn:candidate:study")
     await learning_handler.handle_learning_callback(q2, context)
 
     q2.callback_query.answer.assert_awaited_once()
-    assert "✅" in q2.callback_query.answer.call_args[0][0]
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -498,15 +558,65 @@ async def test_candidate_add_persists_word_and_advances(handler_db, monkeypatch)
     assert len(added) == 1
     assert added[0].status == _WordStatus.NEW
 
-    # Exactly one candidate was requested (daily_new_words=2 in this
-    # fixture would normally ask for 2, but only one entry was returned) -
-    # after handling it, the flow must end, not crash on an empty list.
+    # Only one candidate survived the dedup, so its card is also the LAST
+    # one - the post-study menu is attached directly, and the state is
+    # cleared, not a "Далее" button.
     text = q2.callback_query.edit_message_text.call_args[0][0]
-    assert "Добавлено: 1" in text
+    assert "aiword" in text
+    markup = q2.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:menu", "learn:newwords", "revnow:mainmenu"]
     assert "new_words_candidates" not in context.user_data
 
 
-async def test_candidate_reject_excludes_from_future_batches_without_adding(handler_db, monkeypatch):
+async def test_marking_one_of_two_known_leaves_the_other_studyable(handler_db, monkeypatch):
+    """study-flow-rework stage section 10: marking ONE candidate as known
+    must exclude only that one - the other must still show up in the
+    summary and still be studyable via ▶️ Начнём изучать."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[
+                    ai_models.GeneratedWord(word="firstword", translations=[ai_models.TranslationResult(translation="первое-слово")]),
+                    ai_models.GeneratedWord(word="secondword", translations=[ai_models.TranslationResult(translation="второе-слово")]),
+                ]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+
+    q_known = _query("learn:candidate:known:0")
+    await learning_handler.handle_learning_callback(q_known, context)
+
+    text = q_known.callback_query.edit_message_text.call_args[0][0]
+    assert "firstword" not in text
+    assert "secondword" in text
+    markup = q_known.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    assert [b.callback_data for row in markup.inline_keyboard for b in row] == [
+        "learn:candidate:known:1", "learn:candidate:study",
+    ]
+
+    q_study = _query("learn:candidate:study")
+    await learning_handler.handle_learning_callback(q_study, context)
+    text2 = q_study.callback_query.edit_message_text.call_args[0][0]
+    assert "secondword" in text2
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert not any(uw.word.word == "firstword" for uw in words)
+    assert any(uw.word.word == "secondword" for uw in words)
+
+
+async def test_candidate_known_excludes_from_future_batches_without_adding(handler_db, monkeypatch):
     from database.database import session_scope
     from database.repositories import rejected_words as rejected_words_repo
     from database.repositories import user_words as user_words_repo
@@ -525,10 +635,10 @@ async def test_candidate_reject_excludes_from_future_batches_without_adding(hand
     context = SimpleNamespace(user_data={})
     await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
 
-    q2 = _query("learn:candidate:reject")
+    q2 = _query("learn:candidate:known:0")
     await learning_handler.handle_learning_callback(q2, context)
 
-    q2.callback_query.answer.assert_awaited_once_with()  # no alert text for a reject
+    q2.callback_query.answer.assert_awaited_once()
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -536,6 +646,14 @@ async def test_candidate_reject_excludes_from_future_batches_without_adding(hand
         assert not any(uw.word.word == "aiword" for uw in words)
         rejected = await rejected_words_repo.list_words(s, user_id=user.id, language_code="en")
     assert "aiword" in rejected
+
+    # The only candidate was just marked known - nothing left to study,
+    # so this lands straight on the "all known" post-study screen.
+    text = q2.callback_query.edit_message_text.call_args[0][0]
+    markup = q2.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:menu", "learn:newwords", "revnow:mainmenu"]
+    assert "new_words_candidates" not in context.user_data
 
 
 async def test_topics_button_shows_topic_picker(handler_db):

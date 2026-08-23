@@ -39,10 +39,8 @@ from database.repositories import users as users_repo
 from keyboards.language import (
     INTERFACE_LANGUAGE_PREFIX,
     LEARNING_LANGUAGE_PREFIX,
-    TRANSLATION_LANGUAGE_PREFIX,
     interface_language_keyboard,
     learning_language_keyboard,
-    translation_language_keyboard,
 )
 from keyboards.main_menu import main_menu_keyboard
 from services import subscription_service
@@ -60,15 +58,15 @@ logger = get_logger(__name__)
 (
     CHOOSING_INTERFACE_LANGUAGE,
     CHOOSING_LEARNING_LANGUAGE,
-    CHOOSING_TRANSLATION_LANGUAGE,
     CHOOSING_LEVEL,
     CHOOSING_DAILY_WORDS,
     CHOOSING_GOAL,
     CHOOSING_INDUSTRY,
     CHOOSING_TIMEZONE,
-) = range(8)
+) = range(7)
 
 LEVEL_PREFIX = "onb:level:"
+BEGINNER_LEVEL_CALLBACK = f"{LEVEL_PREFIX}a1"
 DAILY_WORDS_PREFIX = "onb:words:"
 GOAL_PREFIX = "onb:goal:"
 INDUSTRY_PREFIX = "onb:industry:"
@@ -100,12 +98,15 @@ def _detect_interface_language(telegram_user) -> str:
 
 
 def _level_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"{LEVEL_PREFIX}{code}")]
-            for code in LEVEL_CODES
-        ]
-    )
+    # study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
+    # button, not a new level value - it posts the exact same callback_data
+    # as the A1 button below, so picking either stores level="a1".
+    rows = [[InlineKeyboardButton(t("level.beginner_button", get_current_language()), callback_data=BEGINNER_LEVEL_CALLBACK)]]
+    rows += [
+        [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"{LEVEL_PREFIX}{code}")]
+        for code in LEVEL_CODES
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 def _daily_words_keyboard() -> InlineKeyboardMarkup:
@@ -196,29 +197,9 @@ async def choose_learning_language(update: Update, context: ContextTypes.DEFAULT
     await safe_edit_message_text(query,
         t("onboarding.learning_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
     )
-    await query.message.reply_text(
-        t("onboarding.choose_translation_language", get_current_language()),
-        reply_markup=translation_language_keyboard(exclude_learning_language=code),
-    )
-    return CHOOSING_TRANSLATION_LANGUAGE
-
-
-async def choose_translation_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    set_current_language(context.user_data.get("interface_language"))
-    code = query.data.removeprefix(TRANSLATION_LANGUAGE_PREFIX)
-
-    if code == context.user_data.get("learning_language"):
-        await query.answer(t("onboarding.translation_language_must_differ", get_current_language()), show_alert=True)
-        return CHOOSING_TRANSLATION_LANGUAGE
-
-    context.user_data["translation_language"] = code
-    lang = LANGUAGE_BY_CODE[code]
-
-    await safe_edit_message_text(query,
-        t("onboarding.translation_language_selected", get_current_language(), flag=lang.flag, name=language_display_name(lang))
-    )
+    # study-flow-rework stage sections 4-6: the separate "which language to
+    # translate into" question is removed entirely - translation_language
+    # always equals interface_language (set in choose_timezone below).
     await query.message.reply_text(t("onboarding.choose_level", get_current_language()), reply_markup=_level_keyboard())
     return CHOOSING_LEVEL
 
@@ -324,7 +305,9 @@ async def choose_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     settings = get_settings()
     interface_language = context.user_data["interface_language"]
     learning_language = context.user_data["learning_language"]
-    translation_language = context.user_data["translation_language"]
+    # study-flow-rework stage sections 4-6: translation_language is never a
+    # separate onboarding choice - it always equals interface_language.
+    translation_language = interface_language
     level = context.user_data["level"]
     daily_words = context.user_data["daily_words"]
     learning_goal = context.user_data.get("learning_goal")
@@ -402,9 +385,6 @@ start_conversation_handler = ConversationHandler(
         ],
         CHOOSING_LEARNING_LANGUAGE: [
             CallbackQueryHandler(choose_learning_language, pattern=f"^{LEARNING_LANGUAGE_PREFIX}")
-        ],
-        CHOOSING_TRANSLATION_LANGUAGE: [
-            CallbackQueryHandler(choose_translation_language, pattern=f"^{TRANSLATION_LANGUAGE_PREFIX}")
         ],
         CHOOSING_LEVEL: [CallbackQueryHandler(choose_level, pattern=f"^{LEVEL_PREFIX}")],
         CHOOSING_DAILY_WORDS: [CallbackQueryHandler(choose_daily_words, pattern=f"^{DAILY_WORDS_PREFIX}")],

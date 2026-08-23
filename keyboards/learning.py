@@ -24,10 +24,11 @@ def start_keyboard() -> InlineKeyboardMarkup:
 
 def learn_menu_keyboard() -> InlineKeyboardMarkup:
     """📚 Учить слова -> "how should new words be picked" submenu
-    (level-and-difficulty stage, spec sections 10-16): exactly two ways to
-    get new words, both AI-first (services.word_generation_service.
-    generate_words_ai_first) - never a third "random from the database"
-    option. 🎯 leads into the existing, unchanged topics_keyboard()."""
+    (study-flow-rework stage sections 1, 38): exactly two genuinely
+    distinct ways to get new words, both AI-first (services.
+    word_generation_service.generate_candidates) - never a third "random
+    from the database" option. 🎯 leads into the existing, unchanged
+    topics_keyboard()."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("learning.button.new_words_now", get_current_language()), callback_data="learn:newwords")],
@@ -115,18 +116,52 @@ def known_keyboard(user_word_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def candidate_keyboard() -> InlineKeyboardMarkup:
-    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
-    4-7): shown under every AI-generated candidate card BEFORE it becomes
-    a real UserWord - no id in callback_data (unlike reveal_keyboard/
-    rating_keyboard) since these always act on whichever candidate is
-    currently at context.user_data["new_words_candidates"]["position"],
-    the same ephemeral-state pattern handlers/quiz.py and handlers/
-    review_now.py already use for their own in-progress state."""
+_CANDIDATE_NUMBERS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣")
+
+
+def candidate_summary_keyboard(remaining_indices: list[int]) -> InlineKeyboardMarkup:
+    """study-flow-rework stage sections 2-3, 10: the compact "here are your
+    two new words" screen, shown BEFORE either candidate is persisted -
+    one "already know" button per still-undecided candidate (never for one
+    already marked known), plus ▶️ Начнём изучать to walk the rest through
+    full cards."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                t("learning.button.candidate_known", get_current_language(), num=_CANDIDATE_NUMBERS[i]),
+                callback_data=f"learn:candidate:known:{i}",
+            )
+        ]
+        for i in remaining_indices
+    ]
+    rows.append([InlineKeyboardButton(t("learning.button.start_studying", get_current_language()), callback_data="learn:candidate:study")])
+    return InlineKeyboardMarkup(rows)
+
+
+def candidate_next_keyboard() -> InlineKeyboardMarkup:
+    """Shown under a candidate's full card (study-flow-rework stage
+    section 7) when at least one more candidate is still to come - the
+    LAST card gets post_study_keyboard() directly instead, skipping an
+    extra tap."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("learning.button.next_card", get_current_language()), callback_data="learn:candidate:next")]]
+    )
+
+
+def post_study_keyboard() -> InlineKeyboardMarkup:
+    """study-flow-rework stage section 11: shown after the last new-word
+    card (or when both candidates were marked already-known before study
+    started) - 🔄 Повторить невыученные слова reuses the existing on-demand
+    review pool entry point (handlers/review_now.py's revnow:menu, scoped
+    to ALL active-learning words, never just these 2 - cross-handler
+    callback_data reuse, same pattern as quiz_results_keyboard), 🆕 Получить
+    ещё слова restarts this exact same flow, and the main menu - never
+    📚 Учить слова as a required next step."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t("learning.button.add_candidate", get_current_language()), callback_data="learn:candidate:add")],
-            [InlineKeyboardButton(t("learning.button.reject_candidate", get_current_language()), callback_data="learn:candidate:reject")],
+            [InlineKeyboardButton(t("learning.button.repeat_unlearned", get_current_language()), callback_data="revnow:menu")],
+            [InlineKeyboardButton(t("learning.button.get_more_words", get_current_language()), callback_data="learn:newwords")],
+            [InlineKeyboardButton(t("quiz.button.main_menu", get_current_language()), callback_data="revnow:mainmenu")],
         ]
     )
 

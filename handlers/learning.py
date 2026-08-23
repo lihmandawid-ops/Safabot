@@ -24,12 +24,14 @@ from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
 from keyboards.learning import (
     after_session_keyboard,
-    candidate_keyboard,
+    candidate_next_keyboard,
+    candidate_summary_keyboard,
     continue_keyboard,
     extra_amount_keyboard,
     known_keyboard,
     learn_menu_keyboard,
     old_words_amount_keyboard,
+    post_study_keyboard,
     rating_keyboard,
     reveal_keyboard,
     start_keyboard,
@@ -77,6 +79,8 @@ def _render_back(user_word: UserWord, translation_language: str) -> str:
     if card.examples:
         example = card.examples[0]
         example_text = t("card.example_label", get_current_language()) + "\n" + example.example_text
+        if example.pronunciation:
+            example_text += "\n" + t("card.pronunciation_line", get_current_language(), pronunciation=example.pronunciation)
         if example.translation:
             example_text += "\n" + example.translation
     else:
@@ -168,12 +172,17 @@ async def _compute_intro(session, user, current, *, include_new_words: bool) -> 
     return t("learning.ready_review", get_current_language(), count=total), start_review_keyboard()
 
 
+_CANDIDATE_NUMBERS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣")
+
+
 def _render_candidate_card(entry, *, language_code: str, translation_language: str) -> str:
-    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
-    4, 9): shown for a candidate BEFORE it's persisted, so this reads
-    straight off the AI's ai_models.GeneratedWord rather than a WordCard
-    built from a saved Word row (which _render_back/render_word_card_text
-    need, since those assume the word already exists in the DB)."""
+    """study-flow-rework stage section 7: the FULL card shown for a
+    candidate once ▶️ Начнём изучать has been tapped - word, pronunciation,
+    translation, meaning, example, and the example's OWN pronunciation
+    (section 40). Reads straight off the AI's ai_models.GeneratedWord
+    rather than a WordCard built from a saved Word row (which
+    _render_back/render_word_card_text need, since those assume the word
+    already exists in the DB) - this is shown BEFORE persistence."""
     lang = LANGUAGE_BY_CODE.get(language_code)
     lines = [f"{lang.flag if lang else ''} {entry.word}".strip()]
 
@@ -196,88 +205,145 @@ def _render_candidate_card(entry, *, language_code: str, translation_language: s
         lines.append(t("card.example_label", get_current_language()))
         example = entry.examples[0]
         lines.append(example.text)
+        if example.pronunciation:
+            lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=example.pronunciation))
         if example.translation:
             lines.append(example.translation)
 
     return "\n".join(lines)
 
 
-async def _show_current_candidate(edit, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _render_candidate_summary_line(entry, index: int, *, language_code: str) -> str:
+    """study-flow-rework stage sections 2-3: one compact line per
+    candidate - number, word, pronunciation, translation - never the full
+    meaning/example (those only appear later, on the full card)."""
+    lang = LANGUAGE_BY_CODE.get(language_code)
+    lines = [f"{index + 1}. {lang.flag if lang else ''} {entry.word}".strip()]
+    pronunciation = entry.pronunciation or entry.phonetic
+    if pronunciation:
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=pronunciation))
+    if entry.translations:
+        lines.append(", ".join(tr.translation for tr in entry.translations))
+    return "\n".join(lines)
+
+
+def _render_candidate_summary(state: dict) -> str:
+    lines = [t("learning.candidates.header", get_current_language())]
+    for i, entry in enumerate(state["entries"]):
+        if state["known"][i]:
+            continue
+        lines.append("")
+        lines.append(_render_candidate_summary_line(entry, i, language_code=state["language_code"]))
+    return "\n".join(lines)
+
+
+async def _show_candidate_summary(edit, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = context.user_data.get("new_words_candidates")
     if state is None:
         await edit(t("learning.session_gone", get_current_language()))
         return
-    entries = state["entries"]
-    position = state["position"]
-    if position >= len(entries):
-        added = state["added"]
+    remaining = [i for i, known in enumerate(state["known"]) if not known]
+    if not remaining:
+        # study-flow-rework stage section 10: both candidates were marked
+        # "already know" before study even started - nothing left to add,
+        # but never a dead end (section 11/20-21's "no dead ends" theme).
         context.user_data.pop("new_words_candidates", None)
-        await edit(t("learning.candidates_done", get_current_language(), count=added), reply_markup=after_session_keyboard())
+        await edit(t("learning.all_candidates_known", get_current_language()), reply_markup=post_study_keyboard())
         return
-    text = _render_candidate_card(
-        entries[position], language_code=state["language_code"], translation_language=state["translation_language"]
-    )
-    await edit(text, reply_markup=candidate_keyboard())
+    await edit(_render_candidate_summary(state), reply_markup=candidate_summary_keyboard(remaining))
 
 
 async def _start_candidate_flow(
     edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, topics: list[str] | None
 ) -> None:
-    """🆕 Новые слова / 🎯 Новые слова по теме (AI-new-words stage sections
-    1-13): AI generates a batch of candidates (word_generation_service.
-    generate_candidates - context-aware, excludes owned + rejected words,
-    never persisted yet) and the user is walked through them one at a
-    time via _show_current_candidate/candidate_keyboard - a word only
-    becomes a real UserWord on ➕ Добавить в обучение."""
+    """🆕 Получить новые слова / 🎯 Получить слова по теме (study-flow-
+    rework stage sections 1-13, 27, 40): ALWAYS exactly 2 candidates, one
+    AI call (word_generation_service.generate_candidates already asks for
+    the whole `amount` in a single request - never one call per word).
+    Never persisted yet - first shown as a compact summary
+    (_show_candidate_summary) where either can be marked "already know"
+    (excluded, never persisted - word_generation_service.reject_word)
+    before ▶️ Начнём изучать walks the remaining ones through full cards,
+    persisting each exactly when its own card is shown (section 9: joins
+    active learning only once study actually starts)."""
     entries = await word_generation_service.generate_candidates(
-        session, user=user, user_language=current, amount=current.daily_new_words, topics=topics,
+        session, user=user, user_language=current, amount=2, topics=topics,
     )
     if not entries:
         await edit(t("learning.generation_failed", get_current_language()), reply_markup=after_session_keyboard())
         return
     context.user_data["new_words_candidates"] = {
         "entries": entries,
-        "position": 0,
-        "added": 0,
+        "known": [False] * len(entries),
         "language_code": current.language_code,
         "translation_language": current.translation_language,
     }
-    await _show_current_candidate(edit, context)
+    await _show_candidate_summary(edit, context)
 
 
-async def _handle_candidate_decision(
-    query, edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, accept: bool
+async def _handle_candidate_known(
+    query, edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, index: int
 ) -> None:
+    """study-flow-rework stage section 10: marks ONE of the two candidates
+    as already known - excluded from this and future batches (reject_word,
+    same mechanism ❌ Я уже знаю это слово always used), but never added as
+    a UserWord. The other candidate, if any, is unaffected."""
     state = context.user_data.get("new_words_candidates")
-    if state is None or state["position"] >= len(state["entries"]):
+    if state is None or index >= len(state["entries"]) or state["known"][index]:
         await query.answer()
-        await edit(t("learning.session_gone", get_current_language()))
+        await _show_candidate_summary(edit, context)
         return
 
-    entry = state["entries"][state["position"]]
-    if accept:
-        # §5: ➕ Добавить в обучение - persists as a real UserWord, status
-        # NEW, joins the normal repetition system exactly like any other
-        # generated word (services.user_word_service.add_word_to_learning).
-        added = await word_generation_service.add_candidate_to_learning(
-            session, entry=entry, user=user, user_language=current
-        )
-        if added is not None:
-            state["added"] += 1
-            await query.answer(t("learning.candidate_added", get_current_language()), show_alert=True)
-        else:
-            # Already owned under some other status (rare AI-echo edge
-            # case) - nothing to add, but not an error either.
-            await query.answer()
-    else:
-        # §6-7: ❌ Я уже знаю это слово - excluded from future candidate
-        # batches, but NEVER added as a UserWord (never "learned" through
-        # Safabot - see word_generation_service.reject_word's docstring).
-        await word_generation_service.reject_word(session, user=user, user_language=current, word=entry.word)
-        await query.answer()
+    entry = state["entries"][index]
+    await word_generation_service.reject_word(session, user=user, user_language=current, word=entry.word)
+    state["known"][index] = True
+    await query.answer(t("learning.candidate_known_confirm", get_current_language()))
+    await _show_candidate_summary(edit, context)
 
-    state["position"] += 1
-    await _show_current_candidate(edit, context)
+
+async def _show_candidate_card(edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current) -> None:
+    state = context.user_data.get("new_words_candidates")
+    if state is None:
+        await edit(t("learning.session_gone", get_current_language()))
+        return
+    remaining = state["remaining"]
+    position = state["card_position"]
+    entry = state["entries"][remaining[position]]
+
+    # section 9: joins active learning/repetition exactly when its card is
+    # actually shown to the learner - never at summary time, never all at
+    # once before study starts.
+    await word_generation_service.add_candidate_to_learning(session, entry=entry, user=user, user_language=current)
+    text = _render_candidate_card(
+        entry, language_code=state["language_code"], translation_language=state["translation_language"]
+    )
+    is_last = position + 1 >= len(remaining)
+    if is_last:
+        # section 11: the post-study menu - never 📚 Учить слова as a
+        # required next step.
+        context.user_data.pop("new_words_candidates", None)
+        await edit(text, reply_markup=post_study_keyboard())
+    else:
+        state["card_position"] += 1
+        await edit(text, reply_markup=candidate_next_keyboard())
+
+
+async def _handle_candidate_study(
+    query, edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current
+) -> None:
+    await query.answer()
+    state = context.user_data.get("new_words_candidates")
+    if state is None:
+        await edit(t("learning.session_gone", get_current_language()))
+        return
+    remaining = [i for i, known in enumerate(state["known"]) if not known]
+    if not remaining:
+        context.user_data.pop("new_words_candidates", None)
+        await edit(t("learning.all_candidates_known", get_current_language()), reply_markup=post_study_keyboard())
+        return
+    state["remaining"] = remaining
+    state["card_position"] = 0
+    await _show_candidate_card(edit, session, context, user=user, current=current)
 
 
 async def _show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE, *, include_new_words: bool) -> None:
@@ -371,11 +437,16 @@ async def handle_learning_callback(update: Update, context: ContextTypes.DEFAULT
             await user_languages_repo.set_topics(session, current, topics=[code])
             await _start_candidate_flow(edit, session, context, user=user, current=current, topics=[code])
 
-        elif data == "learn:candidate:add":
-            await _handle_candidate_decision(query, edit, session, context, user=user, current=current, accept=True)
+        elif data.startswith("learn:candidate:known:"):
+            index = int(data.removeprefix("learn:candidate:known:"))
+            await _handle_candidate_known(query, edit, session, context, user=user, current=current, index=index)
 
-        elif data == "learn:candidate:reject":
-            await _handle_candidate_decision(query, edit, session, context, user=user, current=current, accept=False)
+        elif data == "learn:candidate:study":
+            await _handle_candidate_study(query, edit, session, context, user=user, current=current)
+
+        elif data == "learn:candidate:next":
+            await query.answer()
+            await _show_candidate_card(edit, session, context, user=user, current=current)
 
         elif data == "learn:extra":
             await query.answer()

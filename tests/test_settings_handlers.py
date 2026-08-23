@@ -184,11 +184,13 @@ async def test_add_language_full_flow(handler_db):
     assert start.answer.call_count == 1
     start.edit_message_text.assert_awaited_once()
 
+    # study-flow-rework stage sections 4-6: no separate translation-language
+    # step anymore - picking the learning language goes straight to the
+    # level picker, with translation_language auto-derived as the user's
+    # own interface_language ("ru" for this fixture user).
     pick_learn = await _run("set:addlang:learn:de")
     assert pick_learn.answer.call_count == 1
-
-    pick_trans = await _run("set:addlang:trans:de:ru")
-    assert pick_trans.answer.call_count == 1
+    pick_learn.edit_message_text.assert_awaited_once()
 
     pick_level = await _run("set:addlang:level:de:ru:advanced")
     assert pick_level.answer.call_count == 1

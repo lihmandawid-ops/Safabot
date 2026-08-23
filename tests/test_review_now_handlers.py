@@ -227,7 +227,7 @@ async def test_paused_word_is_excluded_from_on_demand_review(handler_db):
     await handle_review_now_callback(q, SimpleNamespace(user_data={}))
 
     text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "Пока нет слов" in text
+    assert "У вас пока нет слов для повторения" in text
 
 
 async def test_mastered_word_excluded_by_default_but_included_via_mastered_menu(handler_db):
@@ -243,7 +243,7 @@ async def test_mastered_word_excluded_by_default_but_included_via_mastered_menu(
     q = _query("revnow:menu")
     await handle_review_now_callback(q, SimpleNamespace(user_data={}))
     text = q.callback_query.edit_message_text.call_args[0][0]
-    assert "Пока нет слов" in text
+    assert "У вас пока нет слов для повторения" in text
 
     q2 = _query("revnow:menu:mastered")
     await handle_review_now_callback(q2, SimpleNamespace(user_data={}))

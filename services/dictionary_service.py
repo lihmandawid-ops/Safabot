@@ -132,7 +132,10 @@ async def _lookup_and_persist(
             translation=translation.translation, usage_note=translation.usage_note,
         )
     for example in data.examples:
-        await words_repo.add_example(session, word_id=word.id, example_text=example.text, translation=example.translation)
+        await words_repo.add_example(
+            session, word_id=word.id, example_text=example.text, translation=example.translation,
+            pronunciation=example.pronunciation,
+        )
     if data.part_of_speech == "verb" and data.verb_forms:
         for form_type, form in data.verb_forms.items():
             await words_repo.add_form(session, word_id=word.id, form_type=form_type, form=form)

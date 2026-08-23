@@ -66,7 +66,6 @@ async def _drive_up_to_daily_words(context, telegram_id: int = 900):
 
     await start_handler.choose_interface_language(_query(f"{start_handler.INTERFACE_LANGUAGE_PREFIX}ru", telegram_id), context)
     await start_handler.choose_learning_language(_query(f"{start_handler.LEARNING_LANGUAGE_PREFIX}en", telegram_id), context)
-    await start_handler.choose_translation_language(_query(f"{start_handler.TRANSLATION_LANGUAGE_PREFIX}ru", telegram_id), context)
     await start_handler.choose_level(_query(f"{start_handler.LEVEL_PREFIX}beginner", telegram_id), context)
     await start_handler.choose_daily_words(_query(f"{start_handler.DAILY_WORDS_PREFIX}4", telegram_id), context)
 
@@ -88,7 +87,6 @@ async def test_goal_step_is_shown_after_daily_words(handler_db):
     query = _query(f"{start_handler.DAILY_WORDS_PREFIX}4", 901)
     await start_handler.choose_interface_language(_query(f"{start_handler.INTERFACE_LANGUAGE_PREFIX}ru", 901), context)
     await start_handler.choose_learning_language(_query(f"{start_handler.LEARNING_LANGUAGE_PREFIX}en", 901), context)
-    await start_handler.choose_translation_language(_query(f"{start_handler.TRANSLATION_LANGUAGE_PREFIX}ru", 901), context)
     await start_handler.choose_level(_query(f"{start_handler.LEVEL_PREFIX}beginner", 901), context)
     state = await start_handler.choose_daily_words(query, context)
 
