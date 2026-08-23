@@ -247,6 +247,7 @@
   "learning.topics.header": "🎯 За якою темою підібрати нові слова?",
   "learning.button.new_words_now": "🆕 Отримати нові слова",
   "learning.button.new_words_topic": "🎯 Отримати слова за темою",
+  "learning.generating": "⏳ Підбираємо слова для вас...",
   "learning.candidates.header": "🆕 Ось два нових слова для вас:",
   "learning.button.candidate_known": "{num} Вже знаю",
   "learning.button.start_studying": "▶️ Почнімо вивчати",

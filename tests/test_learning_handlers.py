@@ -789,8 +789,13 @@ async def test_tapping_a_preset_topic_immediately_generates_words(handler_db, mo
     assert captured["category"] == code
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "topicword" in text
-    # exactly one edit_message_text call - no intermediate confirmation screen
-    assert q.callback_query.edit_message_text.call_count == 1
+    # two edit_message_text calls - an immediate "⏳ Подбираем слова..."
+    # placeholder (real DeepSeek calls take a few seconds - never leave the
+    # screen looking frozen with no feedback), then the actual result -
+    # still never an interactive "confirm"/"proceed" step in between.
+    assert q.callback_query.edit_message_text.call_count == 2
+    first_text = q.callback_query.edit_message_text.call_args_list[0][0][0]
+    assert first_text == "⏳ Подбираем слова для вас..."
 
     # the tap also updates the profile's saved selected_topics, so the OLD
     # automatic daily-quota flow's topic hint benefits from it too.
@@ -856,8 +861,15 @@ async def test_custom_topic_free_text_immediately_generates_words(handler_db, mo
     await learning_handler.handle_text_input(update, context, "Слова для работы в автомастерской")
 
     assert captured["category"] == "Слова для работы в автомастерской"
+    # Only ONE message is ever sent (the "⏳ Подбираем слова..." placeholder)
+    # - the actual result then EDITS that same message in place, never
+    # sends a second one (no message clutter from the loading indicator).
     message.reply_text.assert_awaited_once()
-    text = message.reply_text.call_args[0][0]
+    placeholder_text = message.reply_text.call_args[0][0]
+    assert placeholder_text == "⏳ Подбираем слова для вас..."
+    sent_message = message.reply_text.return_value
+    sent_message.edit_text.assert_awaited_once()
+    text = sent_message.edit_text.call_args[0][0]
     assert "autoword" in text
     assert "mode" not in context.user_data
     assert "learning_submode" not in context.user_data

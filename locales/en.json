@@ -247,6 +247,7 @@
   "learning.topics.header": "🎯 Which topic should we pick new words for?",
   "learning.button.new_words_now": "🆕 Get new words",
   "learning.button.new_words_topic": "🎯 Get words by topic",
+  "learning.generating": "⏳ Picking words for you...",
   "learning.candidates.header": "🆕 Here are two new words for you:",
   "learning.button.candidate_known": "{num} Already know it",
   "learning.button.start_studying": "▶️ Let's start learning",

@@ -247,6 +247,7 @@
   "learning.topics.header": "🎯 Per quale argomento scegliamo parole nuove?",
   "learning.button.new_words_now": "🆕 Ottieni parole nuove",
   "learning.button.new_words_topic": "🎯 Ottieni parole per argomento",
+  "learning.generating": "⏳ Stiamo scegliendo le parole per te...",
   "learning.candidates.header": "🆕 Ecco due parole nuove per te:",
   "learning.button.candidate_known": "{num} La conosco già",
   "learning.button.start_studying": "▶️ Iniziamo a studiare",

@@ -192,6 +192,14 @@ async def test_add_language_full_flow(handler_db):
     assert pick_learn.answer.call_count == 1
     pick_learn.edit_message_text.assert_awaited_once()
 
+    # study-flow-rework stage section 30: the add-language level picker
+    # also gets the "🟢 Только начинаю" leading button, aliased onto a1.
+    markup = pick_learn.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks[0] == "set:addlang:level:de:ru:a1"
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert labels[0] == "🟢 Только начинаю"
+
     pick_level = await _run("set:addlang:level:de:ru:advanced")
     assert pick_level.answer.call_count == 1
 
@@ -224,6 +232,18 @@ async def test_add_language_respects_free_plan_limit(handler_db):
     args, kwargs = q.answer.call_args
     assert kwargs.get("show_alert") is True
     q.edit_message_text.assert_not_awaited()  # never entered the picker
+
+
+async def test_difficulty_picker_includes_beginner_button(handler_db):
+    """study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
+    button here too - same callback_data as A1, no new level value."""
+    q = await _run("set:difficulty:list")
+    assert q.answer.call_count == 1
+    markup = q.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert callbacks[0] == "set:difficulty:pick:a1"
+    assert labels[0] == "🟢 Только начинаю"
 
 
 async def test_review_settings_home_shows_defaults(handler_db):

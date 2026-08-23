@@ -15,6 +15,7 @@ on actually belongs to the current user's own active session (section 36).
 from __future__ import annotations
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from database.database import session_scope
@@ -266,7 +267,14 @@ async def _start_candidate_flow(
     (excluded, never persisted - word_generation_service.reject_word)
     before ▶️ Начнём изучать walks the remaining ones through full cards,
     persisting each exactly when its own card is shown (section 9: joins
-    active learning only once study actually starts)."""
+    active learning only once study actually starts).
+
+    A live DeepSeek call can take several seconds - shows an immediate
+    "⏳ Подбираем слова..." placeholder first so the screen never just
+    sits frozen on the old content with no feedback while the request is
+    in flight (real user report: "долгая загрузка бота... как будто
+    завис")."""
+    await edit(t("learning.generating", get_current_language()))
     entries = await word_generation_service.generate_candidates(
         session, user=user, user_language=current, amount=2, topics=topics,
     )
@@ -664,8 +672,23 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await update.message.reply_text(t("card.no_language", get_current_language()))
             return
 
+        sent = None
+
         async def edit(text_: str, reply_markup=None) -> None:
-            await update.message.reply_text(text_, reply_markup=reply_markup)
+            # _start_candidate_flow now sends an interim "⏳ Подбираем
+            # слова..." placeholder before the real result - the first
+            # call here sends it as a new message (there's nothing to
+            # edit yet), every call after that edits that SAME message in
+            # place instead of sending a second one.
+            nonlocal sent
+            if sent is None:
+                sent = await update.message.reply_text(text_, reply_markup=reply_markup)
+            else:
+                try:
+                    await sent.edit_text(text_, reply_markup=reply_markup)
+                except BadRequest as exc:
+                    if "message is not modified" not in str(exc).lower():
+                        raise
 
         await user_languages_repo.set_topics(session, current, topics=[topic])
         await _start_candidate_flow(edit, session, context, user=user, current=current, topics=[topic])

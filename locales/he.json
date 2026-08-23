@@ -247,6 +247,7 @@
   "learning.topics.header": "🎯 לאיזה נושא לבחור מילים חדשות?",
   "learning.button.new_words_now": "🆕 קבל מילים חדשות",
   "learning.button.new_words_topic": "🎯 קבל מילים לפי נושא",
+  "learning.generating": "⏳ בוחרים מילים בשבילך...",
   "learning.candidates.header": "🆕 הנה שתי מילים חדשות בשבילך:",
   "learning.button.candidate_known": "{num} כבר יודע/ת",
   "learning.button.start_studying": "▶️ בואו נתחיל ללמוד",

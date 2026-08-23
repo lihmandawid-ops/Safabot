@@ -67,7 +67,18 @@ def language_switch_keyboard(user_languages, *, can_add_more: bool) -> InlineKey
 
 
 def add_language_level_keyboard(learning_language: str, translation_language: str) -> InlineKeyboardMarkup:
+    # study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
+    # button here too, not a new level value - same callback_data as the
+    # A1 button below, so picking either stores level="a1".
     rows = [
+        [
+            InlineKeyboardButton(
+                t("level.beginner_button", get_current_language()),
+                callback_data=f"set:addlang:level:{learning_language}:{translation_language}:a1",
+            )
+        ]
+    ]
+    rows += [
         [
             InlineKeyboardButton(
                 t(f"level.{code}", get_current_language()),
@@ -205,7 +216,11 @@ def difficulty_pick_keyboard() -> InlineKeyboardMarkup:
     "automatic" so word generation uses the auto-tracked estimated level
     instead - never the other way around (picking a manual level never
     touches that estimate, see services.level_progress_service)."""
-    rows = [
+    # study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
+    # button here too, not a new level value - same callback_data as the
+    # A1 button below, so picking either stores the a1 manual difficulty.
+    rows = [[InlineKeyboardButton(t("level.beginner_button", get_current_language()), callback_data="set:difficulty:pick:a1")]]
+    rows += [
         [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"set:difficulty:pick:{code}")]
         for code in LEVEL_CODES
     ]
