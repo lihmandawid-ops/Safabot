@@ -281,6 +281,21 @@ async def test_review_settings_slot_toggle_flips_and_persists(handler_db):
     assert user.evening_enabled is True  # toggled back on
 
 
+async def test_support_screen_answers_once_and_shows_the_support_message(handler_db, monkeypatch):
+    import config
+
+    monkeypatch.setenv("SUPPORT_CONTACT", "@safabot_support")
+    config.get_settings.cache_clear()
+
+    q = await _run("set:support")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    text = q.edit_message_text.call_args[0][0]
+    assert "@safabot_support" in text
+
+    config.get_settings.cache_clear()
+
+
 async def test_review_settings_mode_pick_saves_and_can_be_cleared(handler_db):
     from database.database import session_scope
     from database.repositories import users as users_repo

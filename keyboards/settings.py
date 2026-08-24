@@ -39,6 +39,7 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.timezone", get_current_language()), callback_data="set:tz:list")],
             [InlineKeyboardButton(t("settings.menu.goal", get_current_language()), callback_data="set:goal:list")],
             [InlineKeyboardButton(t("settings.menu.subscription", get_current_language()), callback_data="set:sub")],
+            [InlineKeyboardButton(t("settings.menu.support", get_current_language()), callback_data="set:support")],
         ]
     )
 

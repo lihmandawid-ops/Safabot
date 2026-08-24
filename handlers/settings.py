@@ -47,6 +47,7 @@ from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
+from utils.support import support_message
 from utils.telegram_helpers import safe_edit_message_text
 from utils.timezones import TIMEZONE_BY_NAME, is_valid_timezone, search_timezones
 from utils.topics import MAX_CUSTOM_TOPIC_LENGTH, MAX_SELECTED_TOPICS, PRESET_TOPICS
@@ -598,6 +599,12 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             if user.trial_end:
                 lines.append(t("settings.trial_until", get_current_language(), date=user.trial_end.isoformat()))
             await safe_edit_message_text(query, "\n".join(lines), reply_markup=back_to_settings_keyboard())
+
+        elif data == "set:support":
+            await query.answer()
+            await safe_edit_message_text(
+                query, support_message(get_current_language()), reply_markup=back_to_settings_keyboard()
+            )
 
         else:
             await query.answer()

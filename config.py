@@ -98,6 +98,7 @@ class Settings:
     level_up_min_accuracy: float
     max_extra_words_per_day: int
     max_text_length: int
+    support_contact: str | None
     plan_limits: PlanLimits = field(default_factory=PlanLimits)
 
 
@@ -200,4 +201,10 @@ def get_settings() -> Settings:
         # Cost control (section 22): a cap on what gets sent to AI
         # providers, regardless of what a user pastes.
         max_text_length=_get_int("MAX_TEXT_LENGTH", 2000),
+        # Real user request: a way to report a bug/error straight to the
+        # operator, from both ⚙️ Настройки and /help - a Telegram @username
+        # or t.me/ link, shown as-is (never validated/parsed). Unset ->
+        # both screens degrade to a "not configured" message instead of
+        # ever showing a blank or broken contact.
+        support_contact=os.getenv("SUPPORT_CONTACT") or None,
     )
