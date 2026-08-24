@@ -233,6 +233,28 @@ async def test_list_user_words_filters_by_status(session):
     assert [uw.word.word for uw in await user_word_service.list_user_words(session, user_id=user.id, language_code="en", status_filter="mastered")] == ["take"]
 
 
+async def test_review_filter_covers_every_status_except_mastered_and_deleted(session):
+    """Real user report: words sat in "Все" but were missing from both
+    "Повторение" and "Выученные" - root cause was "review" only covering
+    [LEARNING, REVIEW], leaving a freshly-added NEW word (and a PAUSED
+    one) with nowhere to show up except "Все". "Повторение" must now mean
+    "not mastered yet", i.e. everything except MASTERED/DELETED."""
+    user = await _create_user(session, telegram_id=915)
+    words = {name: await _create_word(session, word=name) for name in ("go", "make", "take", "have")}
+
+    await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=words["go"].id, language_code="en")
+    paused = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=words["make"].id, language_code="en")
+    await user_word_service.pause_word(session, paused.user_word)
+    mastered = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=words["take"].id, language_code="en")
+    mastered.user_word.status = WordStatus.MASTERED
+    have = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=words["have"].id, language_code="en")
+    have.user_word.status = WordStatus.REVIEW
+    await session.commit()
+
+    review_words = {uw.word.word for uw in await user_word_service.list_user_words(session, user_id=user.id, language_code="en", status_filter="review")}
+    assert review_words == {"go", "make", "have"}
+
+
 async def test_count_user_words_matches_filtered_list(session):
     user = await _create_user(session, telegram_id=912)
     word = await _create_word(session)

@@ -18,10 +18,18 @@ from database.repositories import user_words as user_words_repo
 AddOutcome = Literal["created", "already_active", "restored_from_deleted", "offer_resume_paused"]
 
 # UI-facing filter codes (spec section 8) mapped to the DB statuses they cover.
+#
+# Real user feedback (words stage bugfix): "Повторение" used to mean only
+# [LEARNING, REVIEW] - a freshly added word sits in NEW until its first
+# automatic/manual review, so it showed up in "Все" but in neither
+# "Повторение" nor "Выученные", i.e. it looked lost. The invariant the
+# user actually wants is simpler: every word is either MASTERED or it
+# belongs in "Повторение" - so "review" here covers everything that
+# ISN'T mastered (or deleted): NEW, LEARNING, REVIEW, and PAUSED.
 FILTER_STATUSES: dict[str, list[str] | None] = {
     "all": None,  # None = every non-deleted status (handled by repo's exclude_deleted)
     "new": [WordStatus.NEW],
-    "review": [WordStatus.LEARNING, WordStatus.REVIEW],
+    "review": [WordStatus.NEW, WordStatus.LEARNING, WordStatus.REVIEW, WordStatus.PAUSED],
     "paused": [WordStatus.PAUSED],
     "mastered": [WordStatus.MASTERED],
 }
