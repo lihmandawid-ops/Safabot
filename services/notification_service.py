@@ -16,6 +16,7 @@ from telegram import InlineKeyboardMarkup
 
 from database.database import session_scope
 from database.models import UserWord
+from database.repositories import learning as learning_repo
 from database.repositories import notifications as notifications_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import users as users_repo
@@ -34,14 +35,18 @@ SLOT_AFTERNOON = "afternoon"
 SLOT_EVENING = "evening"
 SLOTS = (SLOT_MORNING, SLOT_AFTERNOON, SLOT_EVENING)
 
-# repetition-system stage section 9: at most 8 words in one automatic
-# reminder - matches keyboards.review_now's count picker's own cap so a
-# numbered emoji is always available.
-_NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣")
+# repetition-system stage section 9, raised by real user request: every
+# automatic reminder now covers at least 8 words - matches
+# NOTIFICATION_WORD_COUNT_OPTIONS' own top so a numbered emoji is always
+# available.
+_NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "11️⃣", "12️⃣")
 
 # repetition-system stage section 26: the ⚙️ Настройки → 📚 Настройки
-# повторения word-count picker's choices - default 4.
-NOTIFICATION_WORD_COUNT_OPTIONS: tuple[int, ...] = (4, 6, 8)
+# повторения word-count picker's choices. Real user request: every
+# repetition process must cover a MINIMUM of 8 words, so 4 and 6 are
+# gone - default (and floor) is now 8, with 10/12 for anyone who wants
+# more per reminder.
+NOTIFICATION_WORD_COUNT_OPTIONS: tuple[int, ...] = (8, 10, 12)
 
 # learning-methodology stage sections 1-3: the automatic morning
 # notification always tries for EXACTLY this many new words - a fixed
@@ -96,10 +101,23 @@ async def _select_review_words(session, user, slot: str, current, now: datetime)
     same status filter every other review path uses, so PAUSED/DELETED/
     MASTERED/NEW never appear here), preferring words that were not in
     the last reminder of this same slot when there is enough variety to
-    avoid repeating the exact same set."""
+    avoid repeating the exact same set.
+
+    Real user request: every repetition process must cover a MINIMUM of
+    `count` words, not just "up to `count`" - when fewer than `count`
+    are actually due yet, pad with the soonest-NOT-YET-due words (same
+    "upcoming" fallback tier learning_repo.get_words_for_old_review
+    already uses for the on-demand 🔁 Повторить flow). Never pads with
+    NEW-status words here - a reminder's job is to prompt review of
+    words already in progress, not silently start new ones; the morning
+    slot handles new words separately via MORNING_NEW_WORD_COUNT."""
     due = await learning_service.get_due_reviews(session, user_id=user.id, language_code=current.language_code, now=now)
     count = user.notification_word_count
-    if len(due) <= count:
+    if len(due) < count:
+        return await learning_repo.get_words_for_old_review(
+            session, user_id=user.id, language_code=current.language_code, limit=count, now=now,
+        )
+    if len(due) == count:
         return due
 
     recent = await notifications_repo.get_recent_word_ids(session, user_id=user.id, notification_type=slot, limit=1)
@@ -126,7 +144,7 @@ def _review_reminder_content(words: list[UserWord], translation_language: str, l
     in the scheduler's hot path, once per due user per poll tick, and
     must never block on (or fail because of) an AI request. A word with
     nothing cached yet simply keeps its plain "word — translation" line,
-    same as before; the 4-8 word count and one-message-per-slot shape are
+    same as before; the word count and one-message-per-slot shape are
     both unchanged."""
     lines = [t("notification.review_list.header", language), ""]
     for i, uw in enumerate(words):

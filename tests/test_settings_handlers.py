@@ -245,7 +245,7 @@ async def test_review_settings_home_shows_defaults(handler_db):
     q.edit_message_text.assert_awaited_once()
     markup = q.edit_message_text.call_args.kwargs["reply_markup"]
     labels = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert "✅ 4" in labels  # notification_word_count defaults to 4
+    assert "✅ 8" in labels  # notification_word_count defaults to 8 (real user request: minimum 8 per reminder)
     assert any(label.startswith("☑️") and "Утро" in label for label in labels)
     assert any(label.startswith("✅") and "спрашивать" in label for label in labels)  # review_mode defaults to None
 

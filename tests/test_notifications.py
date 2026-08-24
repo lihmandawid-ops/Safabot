@@ -474,6 +474,65 @@ async def test_notification_word_count_caps_the_word_list(notif_db):
     assert len(word_ids) == 6
 
 
+async def test_notification_word_count_pads_up_to_the_minimum_with_upcoming_words(notif_db):
+    """Real user request: every repetition process must cover a MINIMUM
+    of notification_word_count words (default 8 now), not just "up to"
+    that many - a user with only 2 words genuinely due right now, but
+    more active words overall, must still get a full reminder padded
+    with the soonest-not-yet-due ones."""
+    from database.database import session_scope
+    from database.repositories import notifications as notifications_repo
+    from database.repositories import user_words as user_words_repo
+    from services import notification_service, word_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        assert user.notification_word_count == 8  # new default (was 4)
+        await _add_due_word(s, user.id, word="due-one")
+        await _add_due_word(s, user.id, word="due-two")
+        for i in range(6):
+            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"upcoming-{i}")
+            uw = await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")
+            uw.status = WordStatus.REVIEW
+            uw.next_review_at = datetime(2030, 1, 1)  # not due yet, but active
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    async with session_scope() as s:
+        word_ids = await notifications_repo.get_word_ids_for(
+            s, user_id=user.id, notification_type="morning", scheduled_date=MORNING_UTC.date()
+        )
+    assert len(word_ids) == 8
+
+
+async def test_notification_word_count_never_pads_with_new_status_words(notif_db):
+    """Padding must stop at "not-yet-due but already in progress" - a
+    NEW (never-studied) word must never sneak into an automatic
+    reminder just to hit the minimum count; that's what the morning
+    slot's own separate new-word feature is for."""
+    from database.database import session_scope
+    from database.repositories import notifications as notifications_repo
+    from database.repositories import user_words as user_words_repo
+    from services import notification_service, word_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id, word="due-one")
+        for i in range(6):
+            w, _ = await word_service.get_or_create_word(s, language_code="en", word=f"brand-new-{i}")
+            await user_words_repo.add_word(s, user_id=user.id, word_id=w.id, language_code="en")  # status=NEW
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    async with session_scope() as s:
+        word_ids = await notifications_repo.get_word_ids_for(
+            s, user_id=user.id, notification_type="morning", scheduled_date=MORNING_UTC.date()
+        )
+    assert len(word_ids) == 1
+
+
 async def test_slot_can_be_individually_disabled(notif_db):
     """Repetition-system stage section 13: morning/afternoon/evening can
     each be toggled independently of the master notifications_enabled

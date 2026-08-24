@@ -167,12 +167,14 @@ class User(Base):
     evening_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # 📚 Настройки повторения (repetition-system stage sections 9, 26):
-    # how many words go in one automatic reminder message (4/6/8), and
-    # which mode manual review defaults to. review_mode=None means
-    # "always ask" - the on-demand 🔁 Повторить flow's mode picker is
-    # shown every time; once set to "flashcard"/"quiz"/"mixed" that
-    # picker is skipped and the saved mode is used directly.
-    notification_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    # how many words go in one automatic reminder message (8/10/12 - real
+    # user request: every repetition process, automatic reminders
+    # included, must cover at least 8 words), and which mode manual
+    # review defaults to. review_mode=None means "always ask" - the
+    # on-demand 🔁 Повторить flow's mode picker is shown every time; once
+    # set to "flashcard"/"quiz"/"mixed" that picker is skipped and the
+    # saved mode is used directly.
+    notification_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
     review_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     trial_start: Mapped[date | None] = mapped_column(Date, nullable=True)
