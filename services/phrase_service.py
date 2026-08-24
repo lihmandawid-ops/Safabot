@@ -123,6 +123,7 @@ class _CombinedEntry:
     phrase: str
     pronunciation: str
     category: str | None
+    level: str | None  # None = shown to every level (static seed set, or a legacy pre-level row)
 
 
 async def _combined_popular_entries(session: AsyncSession, *, language_code: str) -> list[_CombinedEntry]:
@@ -133,20 +134,26 @@ async def _combined_popular_entries(session: AsyncSession, *, language_code: str
     row, in ascending id (insertion) order. This combined order must stay
     stable forever - PopularPhraseTranslation's cache keys a translation
     to a position in exactly this list, so a new phrase must only ever
-    be appended at the end, never inserted earlier."""
+    be appended at the end, never inserted earlier.
+
+    This is deliberately the UNFILTERED full pool, regardless of any
+    viewer's level - get_translated_popular_phrases() is what applies
+    the per-level filter, and only AFTER computing each entry's position
+    here, so a position's meaning (and its translation cache row) never
+    depends on which level is asking."""
     static = [
-        _CombinedEntry(phrase=e.phrase, pronunciation=e.pronunciation, category=e.situation)
+        _CombinedEntry(phrase=e.phrase, pronunciation=e.pronunciation, category=e.situation, level=None)
         for e in get_popular_phrases(language_code)
     ]
     generated = [
-        _CombinedEntry(phrase=row.phrase, pronunciation=row.pronunciation or "", category=row.category)
+        _CombinedEntry(phrase=row.phrase, pronunciation=row.pronunciation or "", category=row.category, level=row.level)
         for row in await popular_phrases_repo.list_by_language(session, language_code=language_code)
     ]
     return static + generated
 
 
 async def get_translated_popular_phrases(
-    session: AsyncSession, *, language_code: str, translation_language: str, user_id: int,
+    session: AsyncSession, *, language_code: str, translation_language: str, user_id: int, level: str | None = None,
 ) -> list[TranslatedPopularPhrase]:
     """Root-cause fix for the 🔥 Популярные фразы pronunciation bug: the
     old flow called AIService.analyze_text() live, on every card open,
@@ -163,7 +170,15 @@ async def get_translated_popular_phrases(
     popular_phrase_translations) - so browsing, re-opening, and paging
     through the list all read from the DB, never calling AI again once a
     language pair has been translated once.
-    """
+
+    `level` (real user feedback: "подбор новых фраз должен строго
+    учитывать уровень пользователя") filters the RETURNED list to the
+    viewer's own CEFR level - an entry with no level (the static seed
+    set, or a legacy pre-level PopularPhrase row) always passes through.
+    Every entry is still translated and cached by its position in the
+    FULL, unfiltered pool below, so filtering here never shifts any
+    other viewer's cached indices - see _combined_popular_entries's
+    docstring."""
     entries = await _combined_popular_entries(session, language_code=language_code)
     if not entries:
         return []
@@ -199,6 +214,7 @@ async def get_translated_popular_phrases(
             translation=cached.get(i, ""), situation=entry.category or "",
         )
         for i, entry in enumerate(entries)
+        if level is None or entry.level is None or entry.level == level
     ]
 
 
@@ -259,7 +275,7 @@ async def generate_more_popular_phrases(
 
             row = await popular_phrases_repo.add(
                 session, language_code=language_code, phrase=entry.phrase,
-                pronunciation=entry.pronunciation, category=entry.category,
+                pronunciation=entry.pronunciation, category=entry.category, level=user_language.level,
             )
             index = next_index
             next_index += 1

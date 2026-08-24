@@ -385,6 +385,104 @@ async def test_generate_more_popular_phrases_gives_up_after_max_attempts_of_only
     assert len(calls) == settings.max_generation_attempts  # bounded, never an infinite loop
 
 
+async def test_generate_more_popular_phrases_persists_the_generating_users_level(session, monkeypatch):
+    """Real user feedback: "подбор новых фраз должен строго учитывать
+    уровень пользователя" - the AI prompt already asked for this level,
+    but the row itself never remembered it, so every level saw every
+    generated phrase. The new row must carry the generating user's own
+    UserLanguage.level."""
+    user, ul = await _create_user_and_language(session, level="advanced")
+    await session.commit()
+
+    fake_ai, _ = _fake_batch_generator([
+        [("Could you give me a hand?", "Не могли бы вы мне помочь?", "kud yu giv mi a hand?", "work")],
+    ])
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    await phrase_service.generate_more_popular_phrases(session, user=user, user_language=ul, amount=1)
+
+    from database.repositories import popular_phrases as popular_phrases_repo
+
+    saved = await popular_phrases_repo.list_by_language(session, language_code="en")
+    assert saved[0].level == "advanced"
+
+
+async def test_get_translated_popular_phrases_filters_generated_rows_by_level(session, monkeypatch):
+    """The core of the fix: an advanced-level generated phrase must not
+    show up for a beginner viewer, and vice versa - only the static seed
+    set (level=None) and same-level rows are returned."""
+    from database.repositories import popular_phrases as popular_phrases_repo
+
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"tr-{p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    await popular_phrases_repo.add(
+        session, language_code="en", phrase="Beginner phrase.", pronunciation="x", category=None, level="a1",
+    )
+    await popular_phrases_repo.add(
+        session, language_code="en", phrase="Advanced phrase.", pronunciation="x", category=None, level="c1",
+    )
+    await session.commit()
+
+    a1_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1, level="a1",
+    )
+    a1_phrases = {e.phrase for e in a1_view}
+    assert "Beginner phrase." in a1_phrases
+    assert "Advanced phrase." not in a1_phrases
+
+    c1_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1, level="c1",
+    )
+    c1_phrases = {e.phrase for e in c1_view}
+    assert "Advanced phrase." in c1_phrases
+    assert "Beginner phrase." not in c1_phrases
+
+    # No level passed at all (e.g. an internal caller that still wants
+    # everything) - unfiltered, backward-compatible default.
+    unfiltered = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    unfiltered_phrases = {e.phrase for e in unfiltered}
+    assert {"Beginner phrase.", "Advanced phrase."} <= unfiltered_phrases
+
+
+async def test_get_translated_popular_phrases_keeps_stable_indices_across_levels(session, monkeypatch):
+    """The translation cache (PopularPhraseTranslation) keys a phrase's
+    translation to its POSITION in the full, unfiltered pool - filtering
+    by level must never renumber a phrase depending on who's asking, or
+    the cache would silently serve the wrong phrase's translation."""
+    from database.repositories import popular_phrases as popular_phrases_repo
+
+    async def _fake_translate(phrases, *, language_code, translation_language, user_id):
+        return [f"tr-{p}" for p in phrases]
+
+    fake_ai = type("FakeAI", (), {"translate_phrases": staticmethod(_fake_translate)})()
+    monkeypatch.setattr("services.phrase_service.get_ai_service", lambda: fake_ai)
+
+    await popular_phrases_repo.add(
+        session, language_code="en", phrase="Beginner phrase.", pronunciation="x", category=None, level="a1",
+    )
+    await popular_phrases_repo.add(
+        session, language_code="en", phrase="Advanced phrase.", pronunciation="x", category=None, level="c1",
+    )
+    await session.commit()
+
+    unfiltered = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1,
+    )
+    stable_index = next(e.index for e in unfiltered if e.phrase == "Advanced phrase.")
+
+    c1_view = await phrase_service.get_translated_popular_phrases(
+        session, language_code="en", translation_language="ru", user_id=1, level="c1",
+    )
+    filtered_entry = next(e for e in c1_view if e.phrase == "Advanced phrase.")
+    assert filtered_entry.index == stable_index
+
+
 async def test_generate_more_popular_phrases_passes_personalization(session, monkeypatch):
     user, ul = await _create_user_and_language(
         session, level="advanced", learning_goal="work", work_industry="construction",

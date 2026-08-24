@@ -614,6 +614,16 @@ class PopularPhrase(Base):
     their fixed tuple order, then every PopularPhrase row in ascending id
     order) - see PopularPhraseTranslation below for why that combined
     ordering has to stay stable forever.
+
+    `level` (real user feedback: "подбор новых фраз должен строго
+    учитывать уровень пользователя") is the CEFR code of whichever
+    UserLanguage.level generated this row (services.phrase_service.
+    generate_more_popular_phrases already asked the AI for phrases AT
+    that level - only the pool this row lands in ignored it). NULL only
+    for rows created before this column existed; phrase_service filters
+    the 🔥 Популярные фразы list to the viewer's own level, always
+    letting NULL-level (legacy) rows and the static seed set (which has
+    no level either - deliberately basic, shown to everyone) through.
     """
 
     __tablename__ = "popular_phrases"
@@ -627,6 +637,7 @@ class PopularPhrase(Base):
     normalized_phrase: Mapped[str] = mapped_column(String(500), nullable=False)
     pronunciation: Mapped[str | None] = mapped_column(String(500), nullable=True)
     category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    level: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

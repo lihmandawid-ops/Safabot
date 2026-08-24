@@ -45,7 +45,6 @@ from services.phrase_service import POPULAR_PHRASES_PAGE_SIZE
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
 from utils.phrase_situations import MAX_CUSTOM_SITUATION_LENGTH, PRESET_SITUATIONS
-from utils.popular_phrases import get_popular_phrases
 from utils.telegram_helpers import safe_edit_message_text
 
 _NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
@@ -116,7 +115,7 @@ async def _render_popular_page(edit, session, user, current, page: int) -> None:
     before this is ever called."""
     all_entries = await phrase_service.get_translated_popular_phrases(
         session, language_code=current.language_code, translation_language=current.translation_language,
-        user_id=user.id,
+        user_id=user.id, level=current.level,
     )
     if not all_entries:
         await edit(t("phrases.popular.empty", get_current_language()), reply_markup=phrases_menu_keyboard())
@@ -380,28 +379,36 @@ async def handle_phrases_callback(update: Update, context: ContextTypes.DEFAULT_
 
         elif data.startswith("phr:popularopen:"):
             index = int(data.removeprefix("phr:popularopen:"))
-            entries = get_popular_phrases(current.language_code)
-            if index < 0 or index >= len(entries):
-                await query.answer()
-                return
             await query.answer()
             # Cached-only (bugfix stage section 10/15): the translation
             # cache was already filled by whichever _render_popular_page
             # call got here first - opening a specific phrase never makes
             # its own AI call, and pronunciation never has, since it's
             # always the static seed data's own Latin transcription.
+            #
+            # Real user feedback (level filtering): `translated` is now
+            # the VIEWER's own level-filtered list, so its entries' own
+            # .index values (stable positions in the full, unfiltered
+            # pool - see phrase_service docstrings) have gaps and can't
+            # be used as plain list positions any more. Look the tapped
+            # phrase up by its .index instead of indexing the list
+            # directly, and compute back_page from its POSITION within
+            # this filtered, paginated list, not from the raw .index.
             translated = await phrase_service.get_translated_popular_phrases(
                 session, language_code=current.language_code, translation_language=current.translation_language,
-                user_id=user.id,
+                user_id=user.id, level=current.level,
             )
-            entry = translated[index]
+            position = next((pos for pos, e in enumerate(translated) if e.index == index), None)
+            if position is None:
+                return
+            entry = translated[position]
             translation = entry.translation or t("phrases.popular.translation_unavailable", get_current_language())
 
             context.user_data["phrase_popular"] = {
                 "phrase": entry.phrase, "translation": translation, "pronunciation": entry.pronunciation,
                 "situation": entry.situation,
             }
-            back_page = entry.index // POPULAR_PHRASES_PAGE_SIZE
+            back_page = position // POPULAR_PHRASES_PAGE_SIZE
             await edit(
                 _render_card(
                     language_code=current.language_code, phrase_text=entry.phrase,

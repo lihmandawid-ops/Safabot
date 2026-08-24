@@ -23,10 +23,11 @@ async def list_by_language(session: AsyncSession, *, language_code: str) -> list
 
 async def add(
     session: AsyncSession, *, language_code: str, phrase: str, pronunciation: str | None, category: str | None,
+    level: str | None = None,
 ) -> PopularPhrase:
     row = PopularPhrase(
         language_code=language_code, phrase=phrase, normalized_phrase=normalize_word(phrase),
-        pronunciation=pronunciation, category=category,
+        pronunciation=pronunciation, category=category, level=level,
     )
     session.add(row)
     await session.flush()
