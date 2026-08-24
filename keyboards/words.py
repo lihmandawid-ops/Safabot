@@ -47,7 +47,7 @@ def list_keyboard(*, has_previous: bool, has_next: bool) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(rows)
 
 
-def single_word_keyboard(user_word_id: int, status: str | None = None) -> InlineKeyboardMarkup:
+def single_word_keyboard(user_word_id: int, status: str | None = None, *, filter_code: str | None = None) -> InlineKeyboardMarkup:
     """Manual repetition control (settings-improvements stage section 3):
     the action row reflects the word's ACTUAL current status instead of
     always offering both "add to review" and "pause" - a word that's
@@ -55,13 +55,29 @@ def single_word_keyboard(user_word_id: int, status: str | None = None) -> Inline
     review" tap, and a PAUSED or MASTERED word has no use for "pause".
     `status` is optional only so old code paths that don't have it yet
     keep working; omitting it falls back to the previous always-show-both
-    behaviour."""
+    behaviour.
+
+    `filter_code` (real user feedback) is which "Мои слова" section the
+    word was opened from - the manage screen's ⏸ pause action means
+    something different depending on that section:
+    - "review" (📚 Повторение, LEARNING/REVIEW words only): pressing it
+      must move the word straight to выученные, same as the flashcard
+      review's 🏆 Уже выучено, not just pause it out of the schedule.
+    - "all" (📋 Все): the pause action is dropped from this screen
+      entirely - it stays reachable from the word's own "Повторение"
+      listing instead of duplicating a control here.
+    Any other section (or no filter context, e.g. reached via search)
+    keeps the original ⏸ pause behaviour."""
     rows = []
     if status == WordStatus.PAUSED or status == WordStatus.MASTERED:
         rows.append([InlineKeyboardButton(t("words.button.review", get_current_language()), callback_data=f"uw:review:{user_word_id}")])
     elif status is None:
         rows.append([InlineKeyboardButton(t("words.button.review", get_current_language()), callback_data=f"uw:review:{user_word_id}")])
         rows.append([InlineKeyboardButton(t("words.button.pause", get_current_language()), callback_data=f"uw:pause:{user_word_id}")])
+    elif filter_code == "all":
+        pass
+    elif filter_code == "review":
+        rows.append([InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data=f"uw:mastered:{user_word_id}")])
     else:
         rows.append([InlineKeyboardButton(t("words.button.pause", get_current_language()), callback_data=f"uw:pause:{user_word_id}")])
     rows.append([InlineKeyboardButton(t("words.button.delete", get_current_language()), callback_data=f"uw:delete:{user_word_id}")])

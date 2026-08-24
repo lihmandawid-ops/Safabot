@@ -510,3 +510,79 @@ async def test_my_words_list_backfills_translation_after_interface_language_chan
     assert "тихий" not in text
 
     get_ai_service.cache_clear()
+
+
+async def test_manage_screen_from_review_section_moves_word_to_mastered(handler_db):
+    """Real user feedback: in the 🔄 Повторение section, "⏸ Убрать из
+    повторения" isn't a pause anymore - tapping it must move the word
+    straight to выученные."""
+    from database.database import session_scope
+    from database.models import WordStatus
+    from database.repositories import users as users_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import words as words_repo
+    from handlers import words as words_handler
+    from services import word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="testword")
+        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="тестовое слово")
+        uw = await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw_id = uw.id
+
+    context = SimpleNamespace(user_data={})
+
+    filter_update = _query("words:filter:review")
+    await words_handler.handle_words_callback(filter_update, context)
+    assert context.user_data["words_list"]["filter"] == "review"
+
+    manage_update = _message("1")
+    await words_handler.handle_text_input(manage_update, context, "1")
+    manage_markup = manage_update.message.reply_text.call_args[1]["reply_markup"]
+    manage_callbacks = [b.callback_data for row in manage_markup.inline_keyboard for b in row]
+    assert f"uw:mastered:{uw_id}" in manage_callbacks
+    assert f"uw:pause:{uw_id}" not in manage_callbacks
+
+    mastered_update = _query(f"uw:mastered:{uw_id}")
+    await words_handler.handle_words_callback(mastered_update, context)
+    assert mastered_update.callback_query.answer.call_count == 1
+
+    async with session_scope() as s:
+        uw2 = await user_words_repo.get_by_id(s, uw_id)
+        assert uw2.status == WordStatus.MASTERED
+
+
+async def test_manage_screen_from_all_section_hides_the_pause_button(handler_db):
+    """Real user feedback: the 📚 Все section must not offer "⏸ Убрать из
+    повторения" from the per-word screen at all."""
+    from database.database import session_scope
+    from database.models import WordStatus
+    from database.repositories import users as users_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import words as words_repo
+    from handlers import words as words_handler
+    from services import word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="anotherword")
+        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="другое слово")
+        uw = await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+        uw.status = WordStatus.REVIEW
+        uw_id = uw.id
+
+    context = SimpleNamespace(user_data={})
+
+    filter_update = _query("words:filter:all")
+    await words_handler.handle_words_callback(filter_update, context)
+    assert context.user_data["words_list"]["filter"] == "all"
+
+    number = context.user_data["words_list"]["ids"].index(uw_id) + 1
+    manage_update = _message(str(number))
+    await words_handler.handle_text_input(manage_update, context, str(number))
+    manage_markup = manage_update.message.reply_text.call_args[1]["reply_markup"]
+    manage_callbacks = [b.callback_data for row in manage_markup.inline_keyboard for b in row]
+    assert f"uw:pause:{uw_id}" not in manage_callbacks
+    assert f"uw:mastered:{uw_id}" not in manage_callbacks

@@ -174,6 +174,33 @@ def test_single_word_keyboard_offers_review_button_for_mastered_word():
     assert "uw:pause:1" not in callbacks
 
 
+def test_single_word_keyboard_offers_mastered_button_in_review_section():
+    """Real user feedback: inside the 📚 Повторение section (filter_code
+    "review"), the pause action must move the word straight to выученные
+    instead of just pausing it - so the manage screen offers uw:mastered,
+    never uw:pause, there."""
+    from database.models import WordStatus
+    from keyboards.words import single_word_keyboard
+
+    markup = single_word_keyboard(1, WordStatus.REVIEW, filter_code="review")
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "uw:mastered:1" in callbacks
+    assert "uw:pause:1" not in callbacks
+
+
+def test_single_word_keyboard_hides_pause_button_in_all_section():
+    """Real user feedback: the 📋 Все section must not offer ⏸ "Убрать из
+    повторения" at all from the per-word screen - the action stays
+    reachable from the word's own 📚 Повторение listing instead."""
+    from database.models import WordStatus
+    from keyboards.words import single_word_keyboard
+
+    markup = single_word_keyboard(1, WordStatus.REVIEW, filter_code="all")
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "uw:pause:1" not in callbacks
+    assert "uw:mastered:1" not in callbacks
+
+
 @pytest_asyncio.fixture
 async def handler_db(monkeypatch):
     fd, path = tempfile.mkstemp(suffix=".db")

@@ -185,7 +185,8 @@ async def _refresh_list(send, session, context, *, user_id: int) -> None:
 
 
 async def _render_manage_screen(
-    send, session, user_word_id: int, translation_language: str, *, user_id: int, number: int | None = None
+    send, session, user_word_id: int, translation_language: str, *, user_id: int,
+    number: int | None = None, filter_code: str | None = None,
 ) -> None:
     user_word = await user_words_repo.get_by_id(session, user_word_id)
     if user_word is None:
@@ -208,7 +209,7 @@ async def _render_manage_screen(
         t("words.manage_status", get_current_language(), status=status_label(user_word.status)),
         _format_next_review(user_word.next_review_at),
     ]
-    await send("\n".join(lines), reply_markup=single_word_keyboard(user_word.id, user_word.status))
+    await send("\n".join(lines), reply_markup=single_word_keyboard(user_word.id, user_word.status, filter_code=filter_code))
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -254,7 +255,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             user_word_id = ids[numbers[0] - 1]
             await _render_manage_screen(
                 update.message.reply_text, session, user_word_id, cache["translation_language"],
-                user_id=user.id, number=numbers[0],
+                user_id=user.id, number=numbers[0], filter_code=cache.get("filter"),
             )
             return
 
@@ -282,6 +283,8 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         async def edit(text, reply_markup=None):
             await safe_edit_message_text(query, text, reply_markup=reply_markup)
+
+        manage_filter_code = (context.user_data.get("words_list") or {}).get("filter")
 
         if data == "words:filters":
             context.user_data.pop("words_list", None)
@@ -338,7 +341,9 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.resume_word(session, user_word)
                 await query.answer(t("words.resumed_single", get_current_language()))
-                await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
+                await _render_manage_screen(
+                    edit, session, uw_id, current.translation_language, user_id=user.id, filter_code=manage_filter_code
+                )
 
         elif data.startswith("uw:pause:"):
             uw_id = int(data.removeprefix("uw:pause:"))
@@ -346,7 +351,24 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
             if user_word is not None and user_word.user_id == user.id:
                 await user_word_service.pause_word(session, user_word)
                 await query.answer(t("words.paused_single", get_current_language()))
-                await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
+                await _render_manage_screen(
+                    edit, session, uw_id, current.translation_language, user_id=user.id, filter_code=manage_filter_code
+                )
+
+        elif data.startswith("uw:mastered:"):
+            # real user feedback: in the 📚 Повторение section, ⏸ "Убрать
+            # из повторения" isn't a pause anymore - it moves the word
+            # straight to выученные, same as revnow's 🏆 Уже выучено. Only
+            # single_word_keyboard(..., filter_code="review") ever renders
+            # this callback (see its docstring).
+            uw_id = int(data.removeprefix("uw:mastered:"))
+            user_word = await user_words_repo.get_by_id(session, uw_id)
+            if user_word is not None and user_word.user_id == user.id:
+                await user_word_service.mark_mastered(session, user_word)
+                await query.answer(t("revnow.mastered_confirmed", get_current_language()))
+                await _render_manage_screen(
+                    edit, session, uw_id, current.translation_language, user_id=user.id, filter_code=manage_filter_code
+                )
 
         elif data.startswith("uw:delete:"):
             uw_id = int(data.removeprefix("uw:delete:"))
@@ -369,7 +391,9 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         elif data.startswith("uw:delete_cancel:"):
             uw_id = int(data.removeprefix("uw:delete_cancel:"))
             await query.answer()
-            await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
+            await _render_manage_screen(
+                edit, session, uw_id, current.translation_language, user_id=user.id, filter_code=manage_filter_code
+            )
 
         elif data.startswith("uw:card:"):
             uw_id = int(data.removeprefix("uw:card:"))
@@ -401,7 +425,9 @@ async def handle_words_callback(update: Update, context: ContextTypes.DEFAULT_TY
         elif data.startswith("uw:card_back:"):
             uw_id = int(data.removeprefix("uw:card_back:"))
             await query.answer()
-            await _render_manage_screen(edit, session, uw_id, current.translation_language, user_id=user.id)
+            await _render_manage_screen(
+                edit, session, uw_id, current.translation_language, user_id=user.id, filter_code=manage_filter_code
+            )
 
         elif data in ("bulk:review", "bulk:pause"):
             ids = context.user_data.get("bulk_selection") or []
