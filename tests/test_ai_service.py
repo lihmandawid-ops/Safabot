@@ -421,6 +421,10 @@ async def test_not_configured_service_raises_configuration_error_for_every_metho
         await svc.translate_phrases(["hi"], language_code="en", translation_language="ru", user_id=1)
     with pytest.raises(AIConfigurationError):
         await svc.generate_popular_phrases(language_code="en", translation_language="ru", level="beginner", user_id=1)
+    with pytest.raises(AIConfigurationError):
+        await svc.generate_placement_test(language_code="en", translation_language="ru", user_id=1)
+    with pytest.raises(AIConfigurationError):
+        await svc.grade_placement_test(language_code="en", translation_language="ru", transcript=[], user_id=1)
 
 
 # --- 15. translate_phrases (🔥 Популярные фразы batch translation cache) ---
@@ -513,6 +517,83 @@ async def test_generate_popular_phrases_prompt_includes_amount_known_phrases_and
     assert "construction" in provider.last_user
     assert "business" in provider.last_user
     assert "work" in provider.last_user
+
+
+# --- 17. generate_placement_test / grade_placement_test (🤖 Узнать мой уровень) ---
+
+GOOD_PLACEMENT_TEST_JSON = (
+    '{"questions": ['
+    '{"level": "a1", "kind": "word", "prompt": "hello"}, '
+    '{"level": "a2", "kind": "translate", "prompt": "I go to school every day."}, '
+    '{"level": "b1", "kind": "word", "prompt": "nevertheless"}, '
+    '{"level": "b2", "kind": "translate", "prompt": "Despite the rain, we decided to go for a walk."}, '
+    '{"level": "c1", "kind": "word", "prompt": "ubiquitous"}, '
+    '{"level": "c2", "kind": "translate", "prompt": "The committee decision, though contentious, was upheld."}'
+    ']}'
+)
+
+BAD_ORDER_PLACEMENT_TEST_JSON = (
+    '{"questions": ['
+    '{"level": "a2", "kind": "word", "prompt": "hello"}, '
+    '{"level": "a1", "kind": "translate", "prompt": "I go to school every day."}, '
+    '{"level": "b1", "kind": "word", "prompt": "nevertheless"}, '
+    '{"level": "b2", "kind": "translate", "prompt": "Despite the rain, we decided to go for a walk."}, '
+    '{"level": "c1", "kind": "word", "prompt": "ubiquitous"}, '
+    '{"level": "c2", "kind": "translate", "prompt": "The committee decision, though contentious, was upheld."}'
+    ']}'
+)
+
+
+async def test_generate_placement_test_returns_six_questions_in_cefr_order():
+    svc, provider = _service([GOOD_PLACEMENT_TEST_JSON])
+    result = await svc.generate_placement_test(language_code="en", translation_language="ru", user_id=1)
+    assert [q.level for q in result.questions] == ["a1", "a2", "b1", "b2", "c1", "c2"]
+    assert [q.kind for q in result.questions] == ["word", "translate", "word", "translate", "word", "translate"]
+    assert result.questions[0].prompt == "hello"
+    assert result.questions[1].prompt == "I go to school every day."
+    assert "placement test" in provider.last_system.lower()
+
+
+async def test_generate_placement_test_rejects_out_of_order_levels_and_retries():
+    """Real user feedback flow depends on exactly 6 items in a1..c2
+    order - handlers/settings.py renders them one at a time by that
+    order, so a response that reorders a level must be treated as
+    invalid (feeding the normal bounded retry), never silently
+    reshuffled or trimmed."""
+    svc, provider = _service([BAD_ORDER_PLACEMENT_TEST_JSON, GOOD_PLACEMENT_TEST_JSON])
+    result = await svc.generate_placement_test(language_code="en", translation_language="ru", user_id=1)
+    assert provider.calls == 2
+    assert [q.level for q in result.questions] == ["a1", "a2", "b1", "b2", "c1", "c2"]
+
+
+async def test_generate_placement_test_gives_up_after_retries_exhausted():
+    svc, _ = _service([BAD_ORDER_PLACEMENT_TEST_JSON, BAD_ORDER_PLACEMENT_TEST_JSON, BAD_ORDER_PLACEMENT_TEST_JSON], max_retries=2)
+    with pytest.raises(AIInvalidResponseError):
+        await svc.generate_placement_test(language_code="en", translation_language="ru", user_id=1)
+
+
+async def test_grade_placement_test_returns_validated_level():
+    svc, provider = _service(['{"level": "b1"}'])
+    transcript = [
+        {"level": "a1", "kind": "word", "prompt": "hello", "answer": "yes"},
+        {"level": "a2", "kind": "translate", "prompt": "I go to school.", "answer": "no"},
+    ]
+    result = await svc.grade_placement_test(
+        language_code="en", translation_language="ru", transcript=transcript, user_id=1,
+    )
+    assert result.level == "b1"
+    assert "hello" in provider.last_user
+    assert "yes" in provider.last_user
+    assert "I go to school." in provider.last_user
+
+
+async def test_grade_placement_test_rejects_an_invalid_level_code():
+    svc, provider = _service(['{"level": "z9"}', '{"level": "c2"}'])
+    result = await svc.grade_placement_test(
+        language_code="en", translation_language="ru", transcript=[], user_id=1,
+    )
+    assert provider.calls == 2
+    assert result.level == "c2"
 
 
 def test_get_ai_service_factory_respects_ai_enabled_and_api_key(monkeypatch):

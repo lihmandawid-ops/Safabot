@@ -153,6 +153,26 @@ class AIService(ABC):
         check in database.repositories.popular_phrases, since this list
         is only ever a bounded sample, never the whole table."""
 
+    @abstractmethod
+    async def generate_placement_test(
+        self, *, language_code: str, translation_language: str, user_id: int,
+    ) -> ai_models.PlacementTestResult:
+        """🤖 Узнать мой уровень (real user request): 6 items, one per
+        CEFR tier a1..c2 in order, alternating self-report word-
+        recognition and sentence-translation questions - see
+        ai_models.PlacementQuestion for the exact shape each item takes."""
+
+    @abstractmethod
+    async def grade_placement_test(
+        self, *, language_code: str, translation_language: str,
+        transcript: list[dict[str, str]], user_id: int,
+    ) -> ai_models.PlacementLevelResult:
+        """Reads the full placement-test transcript (one dict per
+        question: level/kind/prompt/answer, same order as generated) and
+        returns the AI's own best-estimate CEFR level - the single
+        source of truth for where the learner actually lands, not a
+        locally-computed score."""
+
 
 class NotConfiguredAIService(AIService):
     """Used whenever AI isn't usable: AI_ENABLED=false, or no AI_API_KEY
@@ -189,6 +209,12 @@ class NotConfiguredAIService(AIService):
         raise AIConfigurationError()
 
     async def generate_popular_phrases(self, *, language_code, translation_language, level, amount=8, category=None, industry=None, topics=None, known_phrases=None, user_id):
+        raise AIConfigurationError()
+
+    async def generate_placement_test(self, *, language_code, translation_language, user_id):
+        raise AIConfigurationError()
+
+    async def grade_placement_test(self, *, language_code, translation_language, transcript, user_id):
         raise AIConfigurationError()
 
 
@@ -457,6 +483,51 @@ _POPULAR_PHRASES_SYSTEM = (
 )
 
 
+_PLACEMENT_TEST_SYSTEM = (
+    "You create a short placement test for a language-learning app, used to estimate a "
+    "learner's CEFR level (A1-C2) in the language they are learning. Respond with ONLY a JSON "
+    'object: {"questions": [{"level": str, "kind": str, "prompt": str}, ...]}. Generate EXACTLY '
+    "6 questions, one for each CEFR level in this exact order: a1, a2, b1, b2, c1, c2 - "
+    '"level" must be that lowercase CEFR code. Alternate "kind" between "word" and "translate", '
+    "starting with \"word\" for a1 (so a1=word, a2=translate, b1=word, b2=translate, c1=word, "
+    "c2=translate). "
+    "\n\n"
+    'For a "word" question, "prompt" is a single common word or short common expression in the '
+    "target language typical of that CEFR level (increasingly rare, abstract, or complex as the "
+    "level rises) - just the word/expression itself, nothing else, no translation, no example "
+    "sentence. "
+    "\n\n"
+    'For a "translate" question, "prompt" is ONE natural, self-contained sentence written in the '
+    "target language, typical in length and grammatical complexity of that CEFR level, that the "
+    "learner will be asked to translate into their own language - never include the translation "
+    "itself, never a question about the sentence, just the sentence."
+)
+
+_GRADE_PLACEMENT_TEST_SYSTEM = (
+    "You are grading a short placement test for a language-learning app, used to determine a "
+    "learner's CEFR level (A1-C2) in the language they are learning. You will see a numbered "
+    'list of items, each as "N. [level] (kind): prompt -> learner\'s answer". '
+    '"word" items are self-reports: the learner said whether they already know that word/'
+    'expression ("yes" or "no"). "translate" items asked the learner to translate a sentence '
+    "from the target language into their own language; their answer is either a translation "
+    "attempt or a statement that they could not do it. "
+    "\n\n"
+    "Judge translation attempts for genuine comprehension of the sentence's actual meaning, not "
+    "perfect grammar or spelling in the learner's own language - a translation that gets the "
+    "core meaning across counts as understood even if imperfect; an empty answer, 'no'/'don't "
+    "know'/similar, or a translation that is clearly wrong or unrelated to the sentence's actual "
+    "meaning counts as not understood. "
+    "\n\n"
+    "Weigh every item together and estimate the learner's overall CEFR level as the highest "
+    "level at which they show reliably solid understanding - do not over-credit a single lucky "
+    "guess at a much higher level than the surrounding pattern supports, and do not under-credit "
+    "a learner who understood everything up to some level and only struggled beyond it. "
+    "\n\n"
+    'Respond with ONLY a JSON object: {"level": str} where level is exactly one of: a1, a2, b1, '
+    "b2, c1, c2."
+)
+
+
 def _strip_markdown_fence(raw: str) -> str:
     """Some models occasionally wrap JSON-mode output in a ```json ... ```
     fence despite being told not to - cheap enough to always check for and
@@ -569,6 +640,34 @@ def _parse_popular_phrases_response(raw: str) -> ai_models.PopularPhraseBatchRes
             # valid batch, same as _parse_generate_words_response above.
             continue
     return ai_models.PopularPhraseBatchResult(phrases=phrases)
+
+
+_EXPECTED_PLACEMENT_LEVELS = ("a1", "a2", "b1", "b2", "c1", "c2")
+
+
+def _parse_placement_test_response(raw: str) -> ai_models.PlacementTestResult:
+    payload = _parse_json(raw)
+    try:
+        result = ai_models.PlacementTestResult.model_validate(payload)
+    except ValidationError as exc:
+        raise AIInvalidResponseError("AI response did not match the expected placement-test schema") from exc
+    # Unlike a phrase/word batch, a partial or out-of-order placement
+    # test is useless - the handler renders exactly 6 questions in this
+    # exact level sequence, so treat any deviation as an invalid
+    # response and let it feed the same bounded retry _complete already
+    # runs for malformed JSON, rather than silently dropping items.
+    levels = tuple(q.level for q in result.questions)
+    if levels != _EXPECTED_PLACEMENT_LEVELS:
+        raise AIInvalidResponseError("AI placement test did not cover exactly a1..c2 in order")
+    return result
+
+
+def _parse_placement_level_response(raw: str) -> ai_models.PlacementLevelResult:
+    payload = _parse_json(raw)
+    try:
+        return ai_models.PlacementLevelResult.model_validate(payload)
+    except ValidationError as exc:
+        raise AIInvalidResponseError("AI response did not match the expected placement-level schema") from exc
 
 
 class LiveAIService(AIService):
@@ -732,6 +831,30 @@ class LiveAIService(AIService):
         )
         return await self._complete(
             "generate_popular_phrases", user_id, _POPULAR_PHRASES_SYSTEM, user, _parse_popular_phrases_response
+        )
+
+    async def generate_placement_test(self, *, language_code, translation_language, user_id):
+        user = (
+            f"Target language the learner is learning (ISO 639-1): {language_code}\n"
+            f"Learner's own language (ISO 639-1) - the 'translate' questions ask them to "
+            f"translate INTO this language: {translation_language}\n"
+        )
+        return await self._complete(
+            "generate_placement_test", user_id, _PLACEMENT_TEST_SYSTEM, user, _parse_placement_test_response
+        )
+
+    async def grade_placement_test(self, *, language_code, translation_language, transcript, user_id):
+        lines = "\n".join(
+            f"{i}. [{item['level']}] ({item['kind']}): {item['prompt']} -> {item['answer']}"
+            for i, item in enumerate(transcript, start=1)
+        )
+        user = (
+            f"Target language the learner is learning (ISO 639-1): {language_code}\n"
+            f"Learner's own language (ISO 639-1): {translation_language}\n"
+            f"Placement test items and the learner's answers:\n{lines}\n"
+        )
+        return await self._complete(
+            "grade_placement_test", user_id, _GRADE_PLACEMENT_TEST_SYSTEM, user, _parse_placement_level_response
         )
 
     async def _complete(self, operation: str, user_id: int, system: str, user: str, parse: Callable[[str], T]) -> T:

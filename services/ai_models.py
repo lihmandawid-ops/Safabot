@@ -484,3 +484,77 @@ class GeneratedPopularPhrase(BaseModel):
 
 class PopularPhraseBatchResult(BaseModel):
     phrases: list[GeneratedPopularPhrase] = Field(default_factory=list)
+
+
+_PLACEMENT_QUESTION_KINDS = {"word", "translate"}
+
+
+class PlacementQuestion(BaseModel):
+    """One item of a 🤖 Узнать мой уровень placement test (real user
+    request: replaces the old "Автоматически" difficulty setting with an
+    actual short AI-graded test instead of a passive auto-tracked
+    estimate). `level` is the CEFR tier this item targets, not
+    necessarily the learner's own level. `kind="word"` means `prompt` is
+    a single word/expression the learner self-reports knowing or not;
+    `kind="translate"` means `prompt` is a sentence in the learning
+    language the learner attempts to translate (or admits they can't)."""
+
+    level: str
+    kind: str
+    prompt: str
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _clean_level(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("level")
+    @classmethod
+    def _valid_level(cls, value: str) -> str:
+        if value not in LEVEL_CODES:
+            raise ValueError("level must be a valid CEFR code")
+        return value
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _clean_kind(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("kind")
+    @classmethod
+    def _valid_kind(cls, value: str) -> str:
+        if value not in _PLACEMENT_QUESTION_KINDS:
+            raise ValueError('kind must be "word" or "translate"')
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class PlacementTestResult(BaseModel):
+    questions: list[PlacementQuestion] = Field(default_factory=list)
+
+
+class PlacementLevelResult(BaseModel):
+    """The AI's own conclusion after reading the full placement-test
+    transcript (services.ai_service.LiveAIService.grade_placement_test) -
+    the single CEFR code that becomes UserLanguage.learning_difficulty."""
+
+    level: str
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _clean_level(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("level")
+    @classmethod
+    def _valid_level(cls, value: str) -> str:
+        if value not in LEVEL_CODES:
+            raise ValueError("level must be a valid CEFR code")
+        return value

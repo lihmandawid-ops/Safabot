@@ -34,6 +34,8 @@ from keyboards.settings import (
     language_switch_keyboard,
     notification_slot_keyboard,
     notification_time_keyboard,
+    placement_translate_keyboard,
+    placement_word_keyboard,
     review_settings_keyboard,
     settings_home_keyboard,
     timezone_pick_keyboard,
@@ -41,7 +43,8 @@ from keyboards.settings import (
     topics_keyboard,
 )
 from keyboards.main_menu import main_menu_keyboard
-from services import subscription_service
+from services import level_placement_service, subscription_service
+from services.ai_errors import AIConfigurationError, AIError
 from services.learning_service import REVIEW_MODE_CHOICES
 from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.i18n import get_current_language, set_current_language, t
@@ -153,6 +156,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if submode == "industry_custom":
         await _handle_custom_industry_input(update, context, text)
         return
+    if submode == "placement_answer":
+        await _handle_placement_answer_input(update, context, text)
+        return
 
     matches = search_timezones(text)
     if not matches:
@@ -207,6 +213,34 @@ async def _handle_custom_industry_input(update: Update, context: ContextTypes.DE
         await update.message.reply_text(t("settings.industry_updated", get_current_language()))
 
 
+async def _handle_placement_answer_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    """The free-text half of 🤖 Узнать мой уровень's flow - only a
+    "translate"-kind question ever puts settings_submode into this
+    state (see _render_placement_question); a "word" question is
+    answered via ✅/❌ buttons instead, in handle_settings_callback."""
+    state = context.user_data.get("placement_test")
+    if state is None:
+        context.user_data.pop("settings_submode", None)
+        context.user_data.pop("mode", None)
+        await update.message.reply_text(t("settings.placement.expired", get_current_language()))
+        return
+
+    answer = text.strip()
+    if not answer:
+        return
+    state["answers"].append(answer)
+    state["index"] += 1
+
+    async with session_scope() as session:
+        user = await _get_user_or_warn_message(session, update)
+        if user is None:
+            return
+        if state["index"] >= len(state["questions"]):
+            await _finish_placement_test(update.message.reply_text, context, session, user, state)
+        else:
+            await _render_placement_question(update.message.reply_text, context, state)
+
+
 async def _get_user_or_warn_message(session, update: Update) -> object | None:
     user = await users_repo.get_by_telegram_id(session, update.effective_user.id)
     if user is None:
@@ -230,6 +264,60 @@ async def _render_home(query, session, user) -> None:
     await safe_edit_message_text(query, summary, reply_markup=settings_home_keyboard())
 
 
+async def _render_placement_question(send, context: ContextTypes.DEFAULT_TYPE, state: dict) -> None:
+    """🤖 Узнать мой уровень (real user request): renders whichever of
+    the 6 placement-test questions state["index"] currently points at.
+    "word" questions are answered by tapping ✅/❌ (no free text needed);
+    "translate" questions switch context.user_data into settings.py's
+    own free-text mode so the next message the user sends is treated as
+    their translation attempt (or their "нет") - handle_text_input's
+    "placement_answer" submode routes it back here."""
+    question = state["questions"][state["index"]]
+    header = t(
+        "settings.placement.question_header", get_current_language(),
+        current=state["index"] + 1, total=len(state["questions"]),
+    )
+    if question["kind"] == "word":
+        context.user_data.pop("mode", None)
+        context.user_data.pop("settings_submode", None)
+        text = f"{header}\n\n" + t("settings.placement.word_prompt", get_current_language(), word=question["prompt"])
+        await send(text, reply_markup=placement_word_keyboard())
+    else:
+        context.user_data["mode"] = MODE
+        context.user_data["settings_submode"] = "placement_answer"
+        text = f"{header}\n\n" + t("settings.placement.translate_prompt", get_current_language(), sentence=question["prompt"])
+        await send(text, reply_markup=placement_translate_keyboard())
+
+
+async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, session, user, state: dict) -> None:
+    context.user_data.pop("placement_test", None)
+    context.user_data.pop("mode", None)
+    context.user_data.pop("settings_submode", None)
+
+    current = await user_languages_repo.get_current_language(session, user.id)
+    if current is None:
+        await send(t("card.no_language", get_current_language()), reply_markup=difficulty_pick_keyboard())
+        return
+
+    await send(t("settings.placement.grading", get_current_language()))
+    try:
+        level = await level_placement_service.grade_placement_test(
+            current, state["questions"], state["answers"], user_id=user.id,
+        )
+    except AIConfigurationError:
+        await send(t("ai.not_configured", get_current_language()), reply_markup=difficulty_pick_keyboard())
+        return
+    except AIError:
+        await send(t("ai.generic_error", get_current_language()), reply_markup=difficulty_pick_keyboard())
+        return
+
+    await user_languages_repo.set_manual_difficulty(session, current, level=level)
+    await send(
+        t("settings.placement.result", get_current_language(), level=t(f"level.{level}", get_current_language())),
+        reply_markup=difficulty_pick_keyboard(),
+    )
+
+
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Every branch below answers the callback query exactly once - never
     unconditionally up front AND again with a toast message, since
@@ -240,6 +328,9 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
     words/notification changes)."""
     query = update.callback_query
     data = query.data
+
+    async def edit(text: str, reply_markup=None) -> None:
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
 
     async with session_scope() as session:
         user = await _get_user_or_warn(session, query)
@@ -545,6 +636,9 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:difficulty:list":
             await query.answer()
+            context.user_data.pop("placement_test", None)
+            context.user_data.pop("mode", None)
+            context.user_data.pop("settings_submode", None)
             await safe_edit_message_text(query,
                 t("settings.pick_difficulty", get_current_language()), reply_markup=difficulty_pick_keyboard()
             )
@@ -567,6 +661,45 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await user_languages_repo.set_automatic_difficulty(session, current)
             await query.answer(t("settings.difficulty_auto_updated", get_current_language()))
             await _render_home(query, session, user)
+
+        elif data == "set:difficulty:placement:start":
+            current = await user_languages_repo.get_current_language(session, user.id)
+            if current is None:
+                await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+                return
+            await query.answer()
+            await edit(t("settings.placement.generating", get_current_language()))
+            try:
+                questions = await level_placement_service.start_placement_test(current, user_id=user.id)
+            except AIConfigurationError:
+                await edit(t("ai.not_configured", get_current_language()), reply_markup=difficulty_pick_keyboard())
+                return
+            except AIError:
+                await edit(t("ai.generic_error", get_current_language()), reply_markup=difficulty_pick_keyboard())
+                return
+            context.user_data["placement_test"] = {"questions": questions, "index": 0, "answers": []}
+            await _render_placement_question(edit, context, context.user_data["placement_test"])
+
+        elif data.startswith("set:placement:answer:"):
+            state = context.user_data.get("placement_test")
+            if state is None:
+                await query.answer(t("settings.placement.expired", get_current_language()), show_alert=True)
+                return
+            await query.answer()
+            answer = data.removeprefix("set:placement:answer:")
+            state["answers"].append(answer)
+            state["index"] += 1
+            if state["index"] >= len(state["questions"]):
+                await _finish_placement_test(edit, context, session, user, state)
+            else:
+                await _render_placement_question(edit, context, state)
+
+        elif data == "set:placement:cancel":
+            await query.answer()
+            context.user_data.pop("placement_test", None)
+            context.user_data.pop("mode", None)
+            context.user_data.pop("settings_submode", None)
+            await edit(t("settings.placement.cancelled", get_current_language()), reply_markup=difficulty_pick_keyboard())
 
         elif data == "set:tz:list":
             await query.answer()

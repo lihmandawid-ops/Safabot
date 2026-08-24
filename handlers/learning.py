@@ -239,24 +239,36 @@ def _render_candidate_summary(state: dict) -> str:
     return "\n".join(lines)
 
 
-async def _show_candidate_summary(edit, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _show_candidate_summary(edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current) -> None:
     state = context.user_data.get("new_words_candidates")
     if state is None:
         await edit(t("learning.session_gone", get_current_language()))
         return
     remaining = [i for i, known in enumerate(state["known"]) if not known]
     if not remaining:
-        # study-flow-rework stage section 10: both candidates were marked
-        # "already know" before study even started - nothing left to add,
-        # but never a dead end (section 11/20-21's "no dead ends" theme).
+        # Real user feedback ("Бот должен сразу подбегать следующий
+        # партию пока не найдут новые слова"): marking every candidate in
+        # a batch "already know" must never dead-end on a "nothing to
+        # add" screen - word_generation_service.reject_word already
+        # excluded each one from future batches (see
+        # _handle_candidate_known), so the bot immediately fetches a
+        # fresh batch instead of waiting for the learner to tap anything,
+        # repeating for as long as the AI keeps finding words they
+        # haven't already flagged. No extra cap needed here beyond
+        # generate_candidates' own bounded retry - once it genuinely
+        # can't produce anything new (max_generation_attempts exhausted
+        # with nothing left unrejected), _start_candidate_flow already
+        # falls through to the "generation failed" screen below, which
+        # is where this naturally terminates.
+        topics = state.get("topics")
         context.user_data.pop("new_words_candidates", None)
-        await edit(t("learning.all_candidates_known", get_current_language()), reply_markup=post_study_keyboard())
+        await _start_candidate_flow(edit, session, context, user=user, current=current, topics=topics)
         return
     await edit(_render_candidate_summary(state), reply_markup=candidate_summary_keyboard(remaining))
 
 
 async def _start_candidate_flow(
-    edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, topics: list[str] | None
+    edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current, topics: list[str] | None,
 ) -> None:
     """🆕 Получить новые слова / 🎯 Получить слова по теме (study-flow-
     rework stage sections 1-13, 27, 40): ALWAYS exactly 2 candidates, one
@@ -286,8 +298,9 @@ async def _start_candidate_flow(
         "known": [False] * len(entries),
         "language_code": current.language_code,
         "translation_language": current.translation_language,
+        "topics": topics,
     }
-    await _show_candidate_summary(edit, context)
+    await _show_candidate_summary(edit, session, context, user=user, current=current)
 
 
 async def _handle_candidate_known(
@@ -300,14 +313,14 @@ async def _handle_candidate_known(
     state = context.user_data.get("new_words_candidates")
     if state is None or index >= len(state["entries"]) or state["known"][index]:
         await query.answer()
-        await _show_candidate_summary(edit, context)
+        await _show_candidate_summary(edit, session, context, user=user, current=current)
         return
 
     entry = state["entries"][index]
     await word_generation_service.reject_word(session, user=user, user_language=current, word=entry.word)
     state["known"][index] = True
     await query.answer(t("learning.candidate_known_confirm", get_current_language()))
-    await _show_candidate_summary(edit, context)
+    await _show_candidate_summary(edit, session, context, user=user, current=current)
 
 
 async def _show_candidate_card(edit, session, context: ContextTypes.DEFAULT_TYPE, *, user, current) -> None:

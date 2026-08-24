@@ -713,7 +713,10 @@ async def test_candidate_known_excludes_from_future_batches_without_adding(handl
     class _FakeAI:
         async def generate_words(self, **kwargs):
             return ai_models.GenerateWordsResult(
-                words=[ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")])]
+                words=[
+                    ai_models.GeneratedWord(word="aiword", translations=[ai_models.TranslationResult(translation="ии-слово")]),
+                    ai_models.GeneratedWord(word="otherword", translations=[ai_models.TranslationResult(translation="другое-слово")]),
+                ]
             )
 
     monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
@@ -733,13 +736,119 @@ async def test_candidate_known_excludes_from_future_batches_without_adding(handl
         rejected = await rejected_words_repo.list_words(s, user_id=user.id, language_code="en")
     assert "aiword" in rejected
 
-    # The only candidate was just marked known - nothing left to study,
-    # so this lands straight on the "all known" post-study screen.
+    # Only index 0 was marked known - the other candidate (index 1) is
+    # still there, so this stays on the summary screen (never touches
+    # the new all-known auto-continue branch, covered separately below).
     text = q2.callback_query.edit_message_text.call_args[0][0]
+    assert "otherword" in text
     markup = q2.callback_query.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert callbacks == ["revnow:menu", "learn:newwords", "revnow:mainmenu"]
+    assert "learn:candidate:known:0" not in callbacks  # already-known candidate has no button anymore
+    assert "learn:candidate:known:1" in callbacks
+    assert context.user_data["new_words_candidates"]["known"] == [True, False]
+
+
+async def test_marking_the_whole_batch_known_auto_fetches_a_fresh_one(handler_db, monkeypatch):
+    """Real user request: "если пользователь отмечает что оба слова он
+    уже знает Бот должен сразу подбегать следующий партию пока не
+    найдут новые слова" - marking every candidate in a batch "already
+    know" must never dead-end; the bot immediately generates a new
+    batch on its own, with no extra tap required."""
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        """Batch 1 offers "known1"/"known2" (both get marked known by the
+        test); batch 2 offers "fresh1"/"fresh2" - simulating a real
+        AIProvider honoring the exclusion list generate_candidates sends
+        it after the rejections."""
+
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, **kwargs):
+            self.calls += 1
+            pair = ("known1", "known2") if self.calls == 1 else ("fresh1", "fresh2")
+            return ai_models.GenerateWordsResult(
+                words=[
+                    ai_models.GeneratedWord(word=w, translations=[ai_models.TranslationResult(translation=f"{w}-tr")])
+                    for w in pair
+                ]
+            )
+
+    fake_ai = _FakeAI()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake_ai)
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+    assert [e.word for e in context.user_data["new_words_candidates"]["entries"]] == ["known1", "known2"]
+
+    await learning_handler.handle_learning_callback(_query("learn:candidate:known:0"), context)
+    q_last = _query("learn:candidate:known:1")
+    await learning_handler.handle_learning_callback(q_last, context)
+
+    # No dead end, no extra tap - the second (auto-continued) AI call
+    # already happened, and the state now holds the FRESH batch.
+    assert fake_ai.calls == 2
+    state = context.user_data["new_words_candidates"]
+    assert [e.word for e in state["entries"]] == ["fresh1", "fresh2"]
+    assert state["known"] == [False, False]
+
+    text = q_last.callback_query.edit_message_text.call_args[0][0]
+    assert "fresh1" in text and "fresh2" in text
+
+
+async def test_repeated_all_known_batches_eventually_stop_without_hanging(handler_db, monkeypatch):
+    """The auto-continue above still terminates on its own - it relies on
+    word_generation_service.generate_candidates' own existing bounded
+    retry (max_generation_attempts) rather than a second cap of its own:
+    once every candidate the AI can think of has already been rejected,
+    that call comes back empty and _start_candidate_flow's pre-existing
+    "generation failed" fallback takes over, so a learner (or a stubborn
+    AI that can never produce anything actually new) still lands on a
+    real screen instead of an endless loop of AI calls."""
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    class _FakeAI:
+        """Always offers the exact same word - the client-side dedup in
+        generate_candidates filters it out once it's already been
+        accepted (batch 1) or rejected (batch 2), so batch 1 still gets
+        exactly one usable candidate (accepted before the dedup kicks
+        in), but batch 2 - the auto-continue - comes back with nothing."""
+
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, **kwargs):
+            self.calls += 1
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="stuckword", translations=[ai_models.TranslationResult(translation="tr")])]
+            )
+
+    fake_ai = _FakeAI()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake_ai)
+
+    context = SimpleNamespace(user_data={})
+    await learning_handler.handle_learning_callback(_query("learn:newwords"), context)
+    assert len(context.user_data["new_words_candidates"]["entries"]) == 1
+
+    q_last = _query("learn:candidate:known:0")
+    await learning_handler.handle_learning_callback(q_last, context)
+
+    import config
+
+    settings = config.get_settings()
+    # Bounded: not literally infinite AI calls (2 batches x
+    # max_generation_attempts each, at most), and the flow ends on the
+    # real "AI has nothing more" screen rather than hanging.
+    assert fake_ai.calls <= 2 * settings.max_generation_attempts
     assert "new_words_candidates" not in context.user_data
+    markup = q_last.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == [
+        "learn:oldwords", "quiz:start", "learn:intro", "learn:menu", "learn:extra", "learn:mywords", "learn:dictionary",
+    ]
 
 
 async def test_topics_button_shows_topic_picker(handler_db):

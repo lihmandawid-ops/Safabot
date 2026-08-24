@@ -185,11 +185,14 @@ def review_settings_keyboard(user) -> InlineKeyboardMarkup:
 
 def difficulty_pick_keyboard() -> InlineKeyboardMarkup:
     """"Уровень сложности изучения языка" (level-and-difficulty stage,
-    replaces the old "Мой уровень"): A1-C2 manual picks plus
-    🤖 Автоматически, which switches UserLanguage.difficulty_mode back to
-    "automatic" so word generation uses the auto-tracked estimated level
-    instead - never the other way around (picking a manual level never
-    touches that estimate, see services.level_progress_service)."""
+    replaces the old "Мой уровень"): A1-C2 manual picks, plus
+    🤖 Узнать мой уровень (real user request - replaces the old
+    "Автоматически" button, which just switched UserLanguage.
+    difficulty_mode to a passive auto-tracked estimate). The new button
+    starts an AI-graded placement test instead
+    (handlers/settings.py's set:difficulty:placement:start) - its result
+    still lands as a manual pick (set_manual_difficulty), same as
+    tapping a level below directly."""
     # study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
     # button here too, not a new level value - same callback_data as the
     # A1 button below, so picking either stores the a1 manual difficulty.
@@ -198,9 +201,33 @@ def difficulty_pick_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(t(f"level.{code}", get_current_language()), callback_data=f"set:difficulty:pick:{code}")]
         for code in LEVEL_CODES
     ]
-    rows.append([InlineKeyboardButton(t("settings.difficulty.automatic", get_current_language()), callback_data="set:difficulty:auto")])
+    rows.append([InlineKeyboardButton(t("settings.difficulty.find_my_level", get_current_language()), callback_data="set:difficulty:placement:start")])
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
+
+
+def placement_word_keyboard() -> InlineKeyboardMarkup:
+    """🤖 Узнать мой уровень's "word" question: a plain self-report
+    yes/no, plus a cancel escape hatch back to the difficulty screen -
+    any multi-step AI flow needs a way out mid-flight."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(t("settings.placement.yes", get_current_language()), callback_data="set:placement:answer:yes"),
+                InlineKeyboardButton(t("settings.placement.no", get_current_language()), callback_data="set:placement:answer:no"),
+            ],
+            [InlineKeyboardButton(t("settings.placement.cancel", get_current_language()), callback_data="set:placement:cancel")],
+        ]
+    )
+
+
+def placement_translate_keyboard() -> InlineKeyboardMarkup:
+    """🤖 Узнать мой уровень's "translate" question: the answer itself
+    comes in as free text (context.user_data["settings_submode"] ==
+    "placement_answer"), so this is just the cancel escape hatch."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t("settings.placement.cancel", get_current_language()), callback_data="set:placement:cancel")]]
+    )
 
 
 def timezone_pick_keyboard() -> InlineKeyboardMarkup:
