@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import User, UserLanguage, UserWord, WordSource
+from database.models import User, UserLanguage, UserWord, WordSource, WordStatus
 from database.repositories import rejected_words as rejected_words_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import word_generation_logs as generation_logs_repo
@@ -59,17 +59,24 @@ async def generate_new_words(
     user_language: UserLanguage,
     amount: int,
     trigger: str = "daily_quota",
+    status: str = WordStatus.NEW,
 ) -> list[UserWord]:
-    """Adds up to `amount` new UserWord rows (status NEW, source
-    GENERATED) for user_language, local words first, AI fallback for the
-    shortfall. Returns however many it actually managed - 0 is a valid,
-    non-error result (empty local pool + no/failing AI).
+    """Adds up to `amount` new UserWord rows (status NEW by default,
+    source GENERATED) for user_language, local words first, AI fallback
+    for the shortfall. Returns however many it actually managed - 0 is a
+    valid, non-error result (empty local pool + no/failing AI).
 
     `trigger` only affects what gets written to WordGenerationLog - it
     doesn't change the algorithm - so generate_extra_words() and the
     "🤔 Я это уже знаю" replacement flow reuse this exact function instead
     of a second local-pool/AI-fallback implementation.
-    """
+
+    `status` defaults to NEW so services.learning_service.
+    get_new_words_for_today's local-pool rediscovery (get_new_word_
+    candidates' status==NEW query) keeps working - generate_extra_words
+    (➕ Ещё новые слова, a LIVE user action) passes status=WordStatus.
+    LEARNING instead, per user_word_service.add_word_to_learning's
+    docstring."""
     if amount <= 0:
         return []
 
@@ -87,7 +94,7 @@ async def generate_new_words(
     )
     for word in local_candidates:
         added = await user_word_service.add_word_to_learning(
-            session, user_id=user.id, word_id=word.id, language_code=user_language.language_code
+            session, user_id=user.id, word_id=word.id, language_code=user_language.language_code, status=status
         )
         if added.outcome in _ADD_OUTCOMES_COUNTED:
             added.user_word.source = WordSource.GENERATED
@@ -95,7 +102,9 @@ async def generate_new_words(
 
     provider = "local"
     if len(created) < amount:
-        provider = await _top_up_via_ai(session, user=user, user_language=user_language, amount=amount, created=created)
+        provider = await _top_up_via_ai(
+            session, user=user, user_language=user_language, amount=amount, created=created, status=status
+        )
 
     await generation_logs_repo.log(
         session,
@@ -130,6 +139,12 @@ async def generate_extra_words(
     can't drive unbounded DeepSeek usage. Reuses generate_new_words for
     the actual local-pool/AI-fallback/dedup work - only the quota check is
     new here.
+
+    Real user request: this is a LIVE, user-initiated add (unlike
+    get_new_words_for_today's own internal shortfall top-up), so it
+    explicitly opts these words into status=LEARNING - they must enter
+    repetition immediately instead of sitting as an untouched NEW
+    candidate.
     """
     from config import get_settings
 
@@ -147,7 +162,8 @@ async def generate_extra_words(
 
     bounded_amount = min(amount, available)
     created = await generate_new_words(
-        session, user=user, user_language=user_language, amount=bounded_amount, trigger="extra_request"
+        session, user=user, user_language=user_language, amount=bounded_amount, trigger="extra_request",
+        status=WordStatus.LEARNING,
     )
     return ExtraWordsResult(words=created, limit_reached=False, remaining_today=max(0, available - len(created)))
 
@@ -300,10 +316,17 @@ async def add_candidate_to_learning(
     """➕ Добавить в обучение on a candidate from generate_candidates - the
     ONLY point a candidate actually becomes a UserWord row. Reuses the
     exact same persist-then-add path _persist_and_add already validated
-    (get_or_create_word + add_word_to_learning, status NEW, source
-    GENERATED) so an added candidate is indistinguishable from any other
-    generated word once it's in the learner's list."""
-    return await _persist_and_add(session, entry=entry, user=user, user_language=user_language)
+    (get_or_create_word + add_word_to_learning, source GENERATED) so an
+    added candidate is indistinguishable from any other generated word
+    once it's in the learner's list.
+
+    Real user request: both callers of this function (📚 Учить слова's
+    candidate cards, and generate_and_add_morning_words' auto-added
+    morning words) are LIVE additions the learner has already seen in
+    full - status=WordStatus.LEARNING so the word enters repetition right
+    away instead of sitting as an untouched NEW candidate only the (now
+    unreachable) daily-quota flow would ever pick up."""
+    return await _persist_and_add(session, entry=entry, user=user, user_language=user_language, status=WordStatus.LEARNING)
 
 
 async def generate_and_add_morning_words(
@@ -386,7 +409,7 @@ def _industry_hint(user_language: UserLanguage) -> str | None:
 
 async def _top_up_via_ai(
     session: AsyncSession, *, user: User, user_language: UserLanguage, amount: int, created: list[UserWord],
-    topics_override: list[str] | None = None,
+    topics_override: list[str] | None = None, status: str = WordStatus.NEW,
 ) -> str:
     """Asks AI for the shortfall, retrying up to MAX_GENERATION_ATTEMPTS
     times if what came back was entirely (or partly) duplicates of
@@ -428,7 +451,7 @@ async def _top_up_via_ai(
         for entry in entries:
             if len(created) >= amount:
                 break
-            user_word = await _persist_and_add(session, entry=entry, user=user, user_language=user_language)
+            user_word = await _persist_and_add(session, entry=entry, user=user, user_language=user_language, status=status)
             if user_word is not None:
                 created.append(user_word)
                 known_words.append(entry.word)
@@ -446,7 +469,8 @@ async def _recent_known_words(session: AsyncSession, *, user: User, user_languag
 
 
 async def _persist_and_add(
-    session: AsyncSession, *, entry: ai_models.GeneratedWord, user: User, user_language: UserLanguage
+    session: AsyncSession, *, entry: ai_models.GeneratedWord, user: User, user_language: UserLanguage,
+    status: str = WordStatus.NEW,
 ) -> UserWord | None:
     from services.level_progress_service import effective_difficulty
 
@@ -486,7 +510,7 @@ async def _persist_and_add(
         )
 
     added = await user_word_service.add_word_to_learning(
-        session, user_id=user.id, word_id=word.id, language_code=user_language.language_code
+        session, user_id=user.id, word_id=word.id, language_code=user_language.language_code, status=status
     )
     if added.outcome not in _ADD_OUTCOMES_COUNTED:
         # Already known to this user under a different status (e.g. AI

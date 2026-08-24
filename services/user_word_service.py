@@ -42,20 +42,31 @@ class AddWordResult:
 
 
 async def add_word_to_learning(
-    session: AsyncSession, *, user_id: int, word_id: int, language_code: str
+    session: AsyncSession, *, user_id: int, word_id: int, language_code: str, status: str = WordStatus.NEW
 ) -> AddWordResult:
     """Section 6's add flow: create if new, restore if DELETED, offer to
-    resume if PAUSED, otherwise report it's already in the dictionary."""
+    resume if PAUSED, otherwise report it's already in the dictionary.
+
+    `status` defaults to NEW (the daily-quota flow's "not yet touched,
+    local pool candidate" pool - services.learning_service.
+    get_new_words_for_today discovers it via exactly that status). Real
+    user request: a word added through a LIVE, user-facing action (📖
+    Словарь/➕ Добавить слово, 📚 Учить слова's candidate cards, the
+    auto-added morning words, ➕ Ещё новые слова) must enter repetition
+    immediately instead of sitting invisible to every review queue until
+    some other mechanism happens to touch it - those callers pass
+    status=WordStatus.LEARNING explicitly instead of relying on this
+    default."""
     existing = await user_words_repo.get_user_word(session, user_id=user_id, word_id=word_id)
 
     if existing is None:
         created = await user_words_repo.add_word(
-            session, user_id=user_id, word_id=word_id, language_code=language_code
+            session, user_id=user_id, word_id=word_id, language_code=language_code, status=status
         )
         return AddWordResult(created, "created")
 
     if existing.status == WordStatus.DELETED:
-        restored = await user_words_repo.restore_word(session, existing)
+        restored = await user_words_repo.restore_word(session, existing, status=status)
         return AddWordResult(restored, "restored_from_deleted")
 
     if existing.status == WordStatus.PAUSED:
@@ -72,8 +83,10 @@ async def pause_word(session: AsyncSession, user_word: UserWord) -> UserWord:
 
 async def resume_word(session: AsyncSession, user_word: UserWord) -> UserWord:
     """Section 12: bring a PAUSED word back - REVIEW if it had already
-    made progress on the repetition ladder, otherwise back to NEW."""
-    target_status = WordStatus.REVIEW if user_word.repetition_stage > 0 else WordStatus.NEW
+    made progress on the repetition ladder, otherwise LEARNING (real user
+    request: a word the learner explicitly asks to resume must re-enter
+    repetition immediately, not sit as an untouched NEW candidate)."""
+    target_status = WordStatus.REVIEW if user_word.repetition_stage > 0 else WordStatus.LEARNING
     return await user_words_repo.resume_word(session, user_word, status=target_status)
 
 

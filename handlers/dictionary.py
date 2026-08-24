@@ -14,7 +14,7 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from database.database import session_scope
-from database.models import WordSource
+from database.models import WordSource, WordStatus
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
@@ -144,8 +144,12 @@ async def add_word_batch(send, session, *, user, current, raw_words: list[str], 
             continue
 
         word = results[0]
+        # Real user request: a word added here is a LIVE, user-facing
+        # add - it must enter repetition immediately, not sit as an
+        # untouched NEW candidate only the (now unreachable) daily-quota
+        # flow would ever pick up.
         result = await user_word_service.add_word_to_learning(
-            session, user_id=user.id, word_id=word.id, language_code=current.language_code
+            session, user_id=user.id, word_id=word.id, language_code=current.language_code, status=WordStatus.LEARNING
         )
         translation = word.translations[0].translation if word.translations else ""
 
@@ -252,8 +256,10 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
 
         elif data.startswith("card:add:"):
             word_id = int(data.removeprefix("card:add:"))
+            # Real user request: same as the batch-add path above - a
+            # live add must enter repetition immediately.
             result = await user_word_service.add_word_to_learning(
-                session, user_id=user.id, word_id=word_id, language_code=current.language_code
+                session, user_id=user.id, word_id=word_id, language_code=current.language_code, status=WordStatus.LEARNING
             )
             if result.outcome == "created":
                 result.user_word.source = _word_source(_entry_source(context))

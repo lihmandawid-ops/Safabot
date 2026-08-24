@@ -122,7 +122,8 @@ async def test_manual_add_confirm_button_creates_user_word_with_manual_source(ha
 
     user_word = await _fetch_user_word("go")
     assert user_word is not None
-    assert user_word.status == WordStatus.NEW
+    # Real user request: a live add enters repetition immediately.
+    assert user_word.status == WordStatus.LEARNING
     assert user_word.source == WordSource.MANUAL
 
 
@@ -164,7 +165,10 @@ async def test_adding_the_same_word_twice_shows_real_status_not_generic_message(
 
     second.callback_query.answer.assert_awaited_once()
     call_args = second.callback_query.answer.call_args
-    assert "🆕" in call_args[0][0] or "Новое" in call_args[0][0]  # real status shown, not a generic message
+    # Real user request: a live add now enters repetition immediately
+    # (status=LEARNING, not NEW) - the duplicate-add message must show
+    # that real status, not a generic one.
+    assert "📖" in call_args[0][0] or "Изучается" in call_args[0][0]
 
     # still exactly one UserWord row - no duplicate created
     from database.repositories import user_words as user_words_repo

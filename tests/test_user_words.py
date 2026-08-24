@@ -98,7 +98,9 @@ async def test_pause_word_sets_status_and_flag(session):
     assert added.user_word.is_paused is True
 
 
-async def test_resume_word_from_new_progress_goes_to_new(session):
+async def test_resume_word_from_no_progress_goes_to_learning(session):
+    """Real user request: resuming must re-enter repetition immediately,
+    never leave the word sitting as an untouched NEW candidate."""
     user = await _create_user(session, telegram_id=905)
     word = await _create_word(session)
     added = await user_word_service.add_word_to_learning(session, user_id=user.id, word_id=word.id, language_code="en")
@@ -106,7 +108,7 @@ async def test_resume_word_from_new_progress_goes_to_new(session):
 
     await user_word_service.resume_word(session, added.user_word)
 
-    assert added.user_word.status == WordStatus.NEW
+    assert added.user_word.status == WordStatus.LEARNING
     assert added.user_word.is_paused is False
 
 

@@ -6,6 +6,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from utils.i18n import get_current_language, t
 
+# Matches services.notification_service.SLOT_MORNING's value - a bare
+# string rather than importing it, since notification_service imports
+# notification_keyboard from this module and importing back would be
+# circular.
+_SLOT_MORNING = "morning"
+
 
 def review_pool_keyboard() -> InlineKeyboardMarkup:
     """🔄 Повторить (bugfix stage sections 38-42): exactly two options,
@@ -63,15 +69,25 @@ def empty_keyboard() -> InlineKeyboardMarkup:
 
 def notification_keyboard(slot: str) -> InlineKeyboardMarkup:
     """🔔 Быстрое повторение (repetition-system stage sections 10, 16-17):
-    both buttons reuse the on-demand review launcher
+    the flashcard button reuses the on-demand review launcher
     (handlers/review_now.py's "revnow:notif:" branch), which re-reads the
     exact word list this notification was logged with
     (NotificationLog.word_ids) rather than re-selecting - so what the user
-    taps into is exactly what they were shown."""
+    taps into is exactly what they were shown.
+
+    Real user request ("утром после полученных двух новых слов должна
+    проходить викторина для повторения всех слов" - in the morning, after
+    the two new words, a quiz should run to review ALL words): the
+    morning slot's quiz button is the one exception - it launches
+    quiz:start (handlers/quiz.py), the SAME "review everything" quiz
+    reachable from the main menu, rather than a quiz scoped to just this
+    notification's small selected word list. Afternoon/evening keep the
+    notification-scoped quiz, since those slots don't add new words."""
+    quiz_callback = "quiz:start" if slot == _SLOT_MORNING else f"revnow:notif:{slot}:quiz"
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t("revnow.button.start_now", get_current_language()), callback_data=f"revnow:notif:{slot}:flashcard")],
-            [InlineKeyboardButton(t("revnow.button.quiz_mode", get_current_language()), callback_data=f"revnow:notif:{slot}:quiz")],
+            [InlineKeyboardButton(t("revnow.button.quiz_mode", get_current_language()), callback_data=quiz_callback)],
             [InlineKeyboardButton(t("revnow.button.skip", get_current_language()), callback_data="revnow:skip")],
         ]
     )

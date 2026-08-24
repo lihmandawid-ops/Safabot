@@ -45,13 +45,13 @@ async def get_by_id(session: AsyncSession, user_word_id: int) -> UserWord | None
 
 
 async def add_word(
-    session: AsyncSession, *, user_id: int, word_id: int, language_code: str
+    session: AsyncSession, *, user_id: int, word_id: int, language_code: str, status: str = WordStatus.NEW
 ) -> UserWord:
     user_word = UserWord(
         user_id=user_id,
         word_id=word_id,
         language_code=language_code,
-        status=WordStatus.NEW,
+        status=status,
         next_review_at=utc_now(),
     )
     session.add(user_word)
@@ -90,9 +90,13 @@ async def delete_word(session: AsyncSession, user_word: UserWord) -> UserWord:
     return user_word
 
 
-async def restore_word(session: AsyncSession, user_word: UserWord) -> UserWord:
-    user_word.status = WordStatus.NEW
+async def restore_word(session: AsyncSession, user_word: UserWord, *, status: str = WordStatus.NEW) -> UserWord:
+    # Same reasoning as resume_word above: a restored word must be
+    # immediately due again, not stuck on whatever next_review_at it had
+    # (if any) from before it was deleted.
+    user_word.status = status
     user_word.is_paused = False
+    user_word.next_review_at = utc_now()
     await session.flush()
     return user_word
 

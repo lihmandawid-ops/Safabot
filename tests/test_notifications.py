@@ -135,6 +135,50 @@ async def test_morning_notification_includes_quiz_button(notif_db):
     assert any("🧠" in label for label in labels)
 
 
+async def test_morning_quiz_button_reviews_all_words_not_just_the_notification_batch(notif_db):
+    """Real user request ("утром после полученных двух новых слов должна
+    проходить викторина для повторения всех слов" - in the morning, after
+    the two new words, a quiz should run to review ALL words): the
+    morning slot's 🧠 Викторина button must launch the same "review
+    everything" quiz reachable from the main menu (quiz:start), not one
+    scoped to just this notification's small selected word list."""
+    from database.database import session_scope
+    from services import notification_service
+
+    async with session_scope() as s:
+        user, _ = await _create_user(s)
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "morning", now=MORNING_UTC)
+
+    markup = bot.send_message.await_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "quiz:start" in callbacks
+    assert not any(cb.startswith("revnow:notif:morning:quiz") for cb in callbacks)
+
+
+async def test_afternoon_quiz_button_stays_scoped_to_the_notification_batch(notif_db):
+    """Only the morning slot gets the "review all words" quiz - afternoon/
+    evening don't add new words, so their 🧠 Викторина keeps launching a
+    quiz over exactly the words this specific reminder selected."""
+    from database.database import session_scope
+    from services import notification_service
+
+    afternoon_utc = datetime(2026, 6, 15, 14, 0, 0)
+    async with session_scope() as s:
+        user, _ = await _create_user(s, afternoon=time(14, 0))
+        await _add_due_word(s, user.id)
+
+    bot = AsyncMock()
+    await notification_service.send_for_slot(bot, "afternoon", now=afternoon_utc)
+
+    markup = bot.send_message.await_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "revnow:notif:afternoon:quiz" in callbacks
+    assert "quiz:start" not in callbacks
+
+
 async def test_morning_notification_shows_exactly_two_ai_generated_new_words(notif_db, monkeypatch):
     """Learning-methodology stage sections 1-3, 24, 27: the morning
     message shows exactly MORNING_NEW_WORD_COUNT (2) freshly AI-generated

@@ -358,7 +358,9 @@ async def test_generate_extra_words_adds_words_beyond_the_daily_new_words_quota(
 
     assert len(result.words) == 4
     assert result.limit_reached is False
-    assert all(uw.status == WordStatus.NEW for uw in result.words)
+    # Real user request: ➕ Ещё новые слова is a live add - it must enter
+    # repetition immediately.
+    assert all(uw.status == WordStatus.LEARNING for uw in result.words)
 
     logs = (
         await session.execute(select(WordGenerationLog).where(WordGenerationLog.user_id == user.id))
@@ -411,15 +413,16 @@ async def test_generate_extra_words_bounds_amount_to_whats_left_of_the_cap(sessi
     config.get_settings.cache_clear()
 
 
-async def test_get_new_words_for_today_reaches_extra_words_added_today(session):
-    """services/learning_service.py's get_new_words_for_today must widen
-    its search so words added via ➕ Ещё новые слова are actually reachable
-    in today's session, without disturbing the daily_new_words display cap
-    for users who never request extras (bugfix spec sections 9-11). This
-    checks the realistic order of events: the main daily portion is
-    already started (so it no longer counts as "new pool" candidates -
-    apply_review_result moves it off WordStatus.NEW) before the user asks
-    for extras, same as a real Telegram session."""
+async def test_get_new_words_for_today_never_double_counts_extra_words_added_today(session):
+    """Real user request superseded the old "➕ Ещё новые слова words are
+    reachable in today's session" behavior this test used to check: extras
+    now enter repetition immediately (status=LEARNING, not NEW - see
+    generate_extra_words), so they're no longer sitting in the local "not
+    yet started" NEW pool get_new_word_candidates searches (the daily-
+    quota flow this feeds is itself unreachable from any live button, but
+    the query itself is still real code). A later same-day call for the
+    main daily portion must top up from what's left of the local seed
+    pool instead of re-surfacing the same 4 extra words a second time."""
     from services.repetition_service import ReviewGrade
 
     user, ul = await _create_user(session, telegram_id=5018, daily_new_words=2)
@@ -438,10 +441,12 @@ async def test_get_new_words_for_today_reaches_extra_words_added_today(session):
     extra = await word_generation_service.generate_extra_words(session, user=user, user_language=ul, amount=4)
     await session.commit()
     assert len(extra.words) == 4
+    assert all(uw.status == WordStatus.LEARNING for uw in extra.words)
 
     result = await learning_service.get_new_words_for_today(session, user=user, user_language=ul)
-    assert len(result.words) == 4  # the day's main portion is used up; the 4 extras are reachable
-    assert {uw.id for uw in result.words} == {uw.id for uw in extra.words}
+    assert len(result.words) == 2  # tops up from the remaining local pool
+    extra_ids = {uw.id for uw in extra.words}
+    assert extra_ids.isdisjoint({uw.id for uw in result.words})
 
 
 async def test_generation_is_isolated_between_languages_for_the_same_user(session):
@@ -654,7 +659,10 @@ async def test_generate_candidates_topics_override_scopes_a_single_call(session,
     assert fake.last_category == "travel"
 
 
-async def test_add_candidate_to_learning_persists_as_new_status(session, monkeypatch):
+async def test_add_candidate_to_learning_persists_as_learning_status(session, monkeypatch):
+    """Real user request: a candidate the learner just accepted is a LIVE
+    add - it must enter repetition immediately, not sit as an untouched
+    NEW candidate."""
     user, ul = await _create_user(session, telegram_id=5034)
     fake = _FakeAIService([_generated("candword")])
     monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
@@ -663,7 +671,7 @@ async def test_add_candidate_to_learning_persists_as_new_status(session, monkeyp
     added = await word_generation_service.add_candidate_to_learning(session, entry=candidates[0], user=user, user_language=ul)
 
     assert added is not None
-    assert added.status == WordStatus.NEW
+    assert added.status == WordStatus.LEARNING
     words = await user_words_repo.get_user_words(session, user_id=user.id, language_code="en")
     assert [uw.word.word for uw in words] == ["candword"]
 

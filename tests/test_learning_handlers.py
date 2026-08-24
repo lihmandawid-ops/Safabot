@@ -106,7 +106,9 @@ async def test_extra_amount_adds_words_and_confirms(handler_db):
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
         words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
-    assert sum(1 for w in words if w.status == WordStatus.NEW) == 4
+    # Real user request: ➕ Ещё новые слова is a live add - it must enter
+    # repetition immediately (status=LEARNING, not NEW).
+    assert sum(1 for w in words if w.status == WordStatus.LEARNING) == 4
 
 
 async def test_extra_amount_reports_limit_reached(handler_db, monkeypatch):
@@ -562,7 +564,9 @@ async def test_two_distinct_candidates_walk_through_cards_sequentially(handler_d
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
         words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
-    assert any(uw.word.word == "firstword" and uw.status == _WordStatus.NEW for uw in words)
+    # Real user request: an accepted candidate is a live add - it must
+    # enter repetition immediately (status=LEARNING, not NEW).
+    assert any(uw.word.word == "firstword" and uw.status == _WordStatus.LEARNING for uw in words)
     assert not any(uw.word.word == "secondword" for uw in words)
 
     q_next = _query("learn:candidate:next")
@@ -577,7 +581,7 @@ async def test_two_distinct_candidates_walk_through_cards_sequentially(handler_d
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
         words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
-    assert any(uw.word.word == "secondword" and uw.status == _WordStatus.NEW for uw in words)
+    assert any(uw.word.word == "secondword" and uw.status == _WordStatus.LEARNING for uw in words)
 
 
 async def test_candidate_study_persists_word_and_shows_full_card(handler_db, monkeypatch):
@@ -609,7 +613,7 @@ async def test_candidate_study_persists_word_and_shows_full_card(handler_db, mon
         words = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
     added = [uw for uw in words if uw.word.word == "aiword"]
     assert len(added) == 1
-    assert added[0].status == _WordStatus.NEW
+    assert added[0].status == _WordStatus.LEARNING
 
     # Only one candidate survived the dedup, so its card is also the LAST
     # one - the post-study menu is attached directly, and the state is
