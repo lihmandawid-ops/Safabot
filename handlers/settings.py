@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import time
 
-from telegram import Update
+from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from config import get_settings
@@ -36,6 +36,7 @@ from keyboards.settings import (
     notification_time_keyboard,
     placement_translate_keyboard,
     placement_word_keyboard,
+    reset_confirm_keyboard,
     review_settings_keyboard,
     settings_home_keyboard,
     timezone_pick_keyboard,
@@ -741,6 +742,29 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await safe_edit_message_text(
                 query, support_message(get_current_language()), reply_markup=back_to_settings_keyboard()
             )
+
+        elif data == "set:reset:confirm":
+            await query.answer()
+            await safe_edit_message_text(
+                query, t("settings.reset.warning", get_current_language()), reply_markup=reset_confirm_keyboard()
+            )
+
+        elif data == "set:reset:cancel":
+            await query.answer()
+            await _render_home(query, session, user)
+
+        elif data == "set:reset:do":
+            # 🗑 Сброс бота (real user request): irreversible, so answer
+            # BEFORE the delete - same reasoning as every other slow/
+            # destructive action in this codebase (never risk a too-late
+            # callback-query answer once the row is already gone).
+            await query.answer()
+            await users_repo.delete_user(session, user)
+            await safe_edit_message_text(query, t("settings.reset.done", get_current_language()))
+            await query.message.reply_text(
+                t("settings.reset.restart_hint", get_current_language()), reply_markup=ReplyKeyboardRemove()
+            )
+            context.user_data.clear()
 
         else:
             await query.answer()

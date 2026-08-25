@@ -311,3 +311,61 @@ async def test_review_settings_mode_pick_saves_and_can_be_cleared(handler_db):
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
     assert user.review_mode is None
+
+
+async def test_reset_confirm_shows_warning_never_deletes_yet(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:reset:confirm")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    markup = q.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "set:reset:do" in callbacks
+    assert "set:reset:cancel" in callbacks
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is not None
+
+
+async def test_reset_cancel_returns_home_without_deleting(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:reset:cancel")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()  # _render_home actually ran
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is not None
+
+
+async def test_reset_do_wipes_the_user_and_every_related_row(handler_db):
+    """🗑 Сброс бота (real user request): a full, irreversible account
+    wipe - the user row and everything hanging off it (here: their one
+    UserLanguage and one UserWord) must all be gone afterwards, and the
+    reply keyboard must be removed so a stale main-menu button doesn't
+    linger for a user who no longer exists."""
+    from telegram import ReplyKeyboardRemove
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from services import word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="hello")
+        await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+
+    q = await _run("set:reset:do")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    q.message.reply_text.assert_awaited_once()
+    assert isinstance(q.message.reply_text.call_args[1]["reply_markup"], ReplyKeyboardRemove)
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is None
+        assert await user_languages_repo.get_user_languages(s, user.id) == []
+        assert await user_words_repo.get_user_words(s, user_id=user.id, language_code="en") == []

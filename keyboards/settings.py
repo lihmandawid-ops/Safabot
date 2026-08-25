@@ -40,6 +40,7 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(t("settings.menu.goal", get_current_language()), callback_data="set:goal:list")],
             [InlineKeyboardButton(t("settings.menu.subscription", get_current_language()), callback_data="set:sub")],
             [InlineKeyboardButton(t("settings.menu.support", get_current_language()), callback_data="set:support")],
+            [InlineKeyboardButton(t("settings.menu.reset", get_current_language()), callback_data="set:reset:confirm")],
         ]
     )
 
@@ -47,6 +48,18 @@ def settings_home_keyboard() -> InlineKeyboardMarkup:
 def back_to_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")]]
+    )
+
+
+def reset_confirm_keyboard() -> InlineKeyboardMarkup:
+    """🗑 Сброс бота (real user request): a full, irreversible account
+    wipe - always a two-step confirm, same as ⭐ Мои слова's own
+    delete_confirm_keyboard, never a single tap."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t("settings.reset.confirm_button", get_current_language()), callback_data="set:reset:do")],
+            [InlineKeyboardButton(t("words.button.cancel", get_current_language()), callback_data="set:reset:cancel")],
+        ]
     )
 
 

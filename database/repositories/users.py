@@ -60,6 +60,20 @@ async def get_notifiable_users(session: AsyncSession) -> list[User]:
     return list(result.scalars().all())
 
 
+async def delete_user(session: AsyncSession, user: User) -> None:
+    """🗑 Сброс бота (real user request): a full account wipe - every
+    table with a user_id foreign key (UserLanguage, UserWord,
+    LearningSession + its items, NotificationLog, UserPhrase,
+    WordGenerationLog, RejectedWord) is declared `ondelete="CASCADE"` in
+    database/models.py, and SQLite's FK enforcement is explicitly turned
+    on (see database/database.py's PRAGMA foreign_keys=ON), so deleting
+    just this row is enough - no manual per-table cleanup needed. The
+    next /start then sees no user row at all and re-onboards from
+    scratch, same as a brand-new Telegram user."""
+    await session.delete(user)
+    await session.flush()
+
+
 async def update_user(session: AsyncSession, user: User, **fields: Any) -> User:
     """Set arbitrary column values on `user` and flush.
 
