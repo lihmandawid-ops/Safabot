@@ -1,11 +1,12 @@
 """Telegram language_code auto-detection at /start (repetition-system-
-audit stage sections 1-2): real bug found - the very first onboarding
-message always rendered in a hardcoded "ru", regardless of the Telegram
-user's own language_code, so e.g. a Hebrew-speaking user's first message
-was in Russian. _detect_interface_language() only picks a starting point
-for that first message and for interface_language_keyboard()'s own
-button labels - the user still explicitly confirms/picks their interface
-language via the buttons that follow, exactly like before.
+audit stage sections 1-2; real user request): real bug found - the very
+first onboarding message always rendered in a hardcoded "ru", regardless
+of the Telegram user's own language_code, so e.g. a Hebrew-speaking
+user's first message was in Russian. _detect_interface_language() is now
+the DEFINITIVE interface_language (and, by extension,
+translation_language, which always equals it) - never a separate
+onboarding question the learner confirms via buttons the way it used to
+be; they can still change it later via ⚙️ Настройки.
 """
 from __future__ import annotations
 
@@ -104,9 +105,13 @@ async def test_brand_new_user_with_unsupported_language_code_gets_english(handle
 
 
 async def test_welcome_keyboard_labels_also_follow_the_detected_language(handler_db):
-    """Not just the message text - interface_language_keyboard()'s own
+    """Not just the message text - the learning-language keyboard's own
     button labels (language names) must match too, since they're built
-    from utils.i18n.get_current_language() right after start() sets it."""
+    from utils.i18n.get_current_language() right after start() sets it -
+    the very first screen a German-detected user sees is now "which
+    language do you want to learn", not a redundant interface-language
+    confirmation, but its German-language option must still read
+    "Deutsch" either way."""
     from handlers.start import start
 
     update = _start_update(9003, "de")

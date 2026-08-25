@@ -41,7 +41,9 @@ async def test_start_placement_test_returns_plain_dicts_in_order(session, monkey
     fake_ai = type("FakeAI", (), {"generate_placement_test": staticmethod(_fake_generate)})()
     monkeypatch.setattr("services.level_placement_service.get_ai_service", lambda: fake_ai)
 
-    result = await level_placement_service.start_placement_test(ul, user_id=user.id)
+    result = await level_placement_service.start_placement_test(
+        language_code=ul.language_code, translation_language=ul.translation_language, user_id=user.id,
+    )
     assert result == [
         {"level": "a1", "kind": "word", "prompt": "hello"},
         {"level": "a2", "kind": "translate", "prompt": "I go home."},
@@ -69,7 +71,10 @@ async def test_grade_placement_test_builds_transcript_and_returns_level(session,
     ]
     answers = ["yes", "no"]
 
-    level = await level_placement_service.grade_placement_test(ul, questions, answers, user_id=user.id)
+    level = await level_placement_service.grade_placement_test(
+        language_code=ul.language_code, translation_language=ul.translation_language,
+        questions=questions, answers=answers, user_id=user.id,
+    )
 
     assert level == "b1"
     assert captured["language_code"] == "en"

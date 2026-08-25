@@ -302,7 +302,8 @@ async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, sessi
     await send(t("settings.placement.grading", get_current_language()))
     try:
         level = await level_placement_service.grade_placement_test(
-            current, state["questions"], state["answers"], user_id=user.id,
+            language_code=current.language_code, translation_language=current.translation_language,
+            questions=state["questions"], answers=state["answers"], user_id=user.id,
         )
     except AIConfigurationError:
         await send(t("ai.not_configured", get_current_language()), reply_markup=difficulty_pick_keyboard())
@@ -670,7 +671,9 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
             await edit(t("settings.placement.generating", get_current_language()))
             try:
-                questions = await level_placement_service.start_placement_test(current, user_id=user.id)
+                questions = await level_placement_service.start_placement_test(
+                    language_code=current.language_code, translation_language=current.translation_language, user_id=user.id,
+                )
             except AIConfigurationError:
                 await edit(t("ai.not_configured", get_current_language()), reply_markup=difficulty_pick_keyboard())
                 return

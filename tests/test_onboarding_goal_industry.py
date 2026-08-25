@@ -58,16 +58,18 @@ def _message(text: str, telegram_id: int = 900):
     return SimpleNamespace(effective_user=SimpleNamespace(id=telegram_id), message=msg)
 
 
-async def _drive_up_to_daily_words(context, telegram_id: int = 900):
-    """Runs the unrelated-to-this-stage steps (interface language ->
-    ... -> daily words) so each test starts right at the new goal step,
-    without re-testing behaviour already covered elsewhere."""
+async def _drive_up_to_goal_step(context, telegram_id: int = 900):
+    """Runs the unrelated-to-this-stage steps (learning language -> level)
+    so each test starts right at the new goal step, without re-testing
+    behaviour already covered elsewhere. Real user request: interface_
+    language is no longer a separate asked step (start() sets it from
+    Telegram's own language_code) - set directly here, same as start()
+    would, and daily-words is gone entirely."""
     from handlers import start as start_handler
 
-    await start_handler.choose_interface_language(_query(f"{start_handler.INTERFACE_LANGUAGE_PREFIX}ru", telegram_id), context)
+    context.user_data["interface_language"] = "ru"
     await start_handler.choose_learning_language(_query(f"{start_handler.LEARNING_LANGUAGE_PREFIX}en", telegram_id), context)
-    await start_handler.choose_level(_query(f"{start_handler.LEVEL_PREFIX}beginner", telegram_id), context)
-    await start_handler.choose_daily_words(_query(f"{start_handler.DAILY_WORDS_PREFIX}4", telegram_id), context)
+    await start_handler.choose_level(_query(start_handler.BEGINNER_LEVEL_CALLBACK, telegram_id), context)
 
 
 async def _fetch_user_language(telegram_id: int):
@@ -80,15 +82,13 @@ async def _fetch_user_language(telegram_id: int):
         return await user_languages_repo.get_current_language(s, user.id)
 
 
-async def test_goal_step_is_shown_after_daily_words(handler_db):
+async def test_goal_step_is_shown_after_level(handler_db):
     from handlers import start as start_handler
 
-    context = SimpleNamespace(user_data={})
-    query = _query(f"{start_handler.DAILY_WORDS_PREFIX}4", 901)
-    await start_handler.choose_interface_language(_query(f"{start_handler.INTERFACE_LANGUAGE_PREFIX}ru", 901), context)
+    context = SimpleNamespace(user_data={"interface_language": "ru"})
     await start_handler.choose_learning_language(_query(f"{start_handler.LEARNING_LANGUAGE_PREFIX}en", 901), context)
-    await start_handler.choose_level(_query(f"{start_handler.LEVEL_PREFIX}beginner", 901), context)
-    state = await start_handler.choose_daily_words(query, context)
+    query = _query(start_handler.BEGINNER_LEVEL_CALLBACK, 901)
+    state = await start_handler.choose_level(query, context)
 
     assert state == start_handler.CHOOSING_GOAL
     query.callback_query.message.reply_text.assert_awaited_once()
@@ -101,7 +101,7 @@ async def test_non_work_goal_skips_industry_and_saves_correctly(handler_db):
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 902)
+    await _drive_up_to_goal_step(context, 902)
 
     await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}travel", 902), context)
     assert context.user_data["learning_goal"] == "travel"
@@ -117,7 +117,7 @@ async def test_skipped_goal_saves_none(handler_db):
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 903)
+    await _drive_up_to_goal_step(context, 903)
 
     await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}skip", 903), context)
     assert context.user_data["learning_goal"] is None
@@ -133,7 +133,7 @@ async def test_work_goal_shows_industry_step_and_saves_preset_choice(handler_db)
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 904)
+    await _drive_up_to_goal_step(context, 904)
 
     result_state = await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}work", 904), context)
     assert result_state == start_handler.CHOOSING_INDUSTRY
@@ -152,7 +152,7 @@ async def test_work_goal_industry_skip_saves_none(handler_db):
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 905)
+    await _drive_up_to_goal_step(context, 905)
 
     await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}work", 905), context)
     await start_handler.choose_industry(_query(f"{start_handler.INDUSTRY_PREFIX}skip", 905), context)
@@ -169,7 +169,7 @@ async def test_work_goal_custom_industry_via_free_text(handler_db):
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 906)
+    await _drive_up_to_goal_step(context, 906)
 
     await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}work", 906), context)
     await start_handler.choose_industry(_query(f"{start_handler.INDUSTRY_PREFIX}other", 906), context)
@@ -191,7 +191,7 @@ async def test_non_work_goal_never_persists_a_leftover_industry(handler_db):
     from handlers import start as start_handler
 
     context = SimpleNamespace(user_data={})
-    await _drive_up_to_daily_words(context, 907)
+    await _drive_up_to_goal_step(context, 907)
     context.user_data["work_industry"] = "leftover"
 
     await start_handler.choose_goal(_query(f"{start_handler.GOAL_PREFIX}study", 907), context)
