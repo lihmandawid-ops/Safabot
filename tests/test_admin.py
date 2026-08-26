@@ -289,6 +289,82 @@ async def test_broadcast_confirm_sends_to_every_user(handler_db):
     assert "sent 2" in result_text
 
 
+async def test_admin_grant_pro_sets_status_and_end_date(handler_db):
+    from database.database import session_scope
+    from handlers import admin as admin_handler
+
+    update, q = _query(f"admin:grant:{NON_ADMIN_ID}:30", ADMIN_ID)
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.edit_message_text.assert_awaited_once()
+    text = q.edit_message_text.call_args[0][0]
+    assert "PRO granted" in text
+    assert str(NON_ADMIN_ID) in text
+
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        assert user.subscription_status == SubscriptionStatus.PRO
+        assert user.subscription_end is not None
+
+
+async def test_admin_grant_pro_blocks_non_admin(handler_db):
+    from database.database import session_scope
+    from handlers import admin as admin_handler
+
+    update, q = _query(f"admin:grant:{NON_ADMIN_ID}:30", NON_ADMIN_ID)
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.edit_message_text.assert_not_awaited()
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        assert user.subscription_status == SubscriptionStatus.FREE
+
+
+async def test_admin_grant_pro_reports_unknown_user(handler_db):
+    from handlers import admin as admin_handler
+
+    update, q = _query("admin:grant:999999:30", ADMIN_ID)
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.edit_message_text.assert_awaited_once()
+    assert "not found" in q.edit_message_text.call_args[0][0]
+
+
+async def test_admin_revoke_pro_sets_status_to_free(handler_db):
+    from database.database import session_scope
+    from handlers import admin as admin_handler
+
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        await subscriptions_repo.set_subscription_status(session, user, status=SubscriptionStatus.PRO)
+
+    update, q = _query(f"admin:revoke:{NON_ADMIN_ID}", ADMIN_ID)
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.edit_message_text.assert_awaited_once()
+    assert "revoked" in q.edit_message_text.call_args[0][0]
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        assert user.subscription_status == SubscriptionStatus.FREE
+
+
+async def test_admin_revoke_pro_blocks_non_admin(handler_db):
+    from database.database import session_scope
+    from handlers import admin as admin_handler
+
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        await subscriptions_repo.set_subscription_status(session, user, status=SubscriptionStatus.PRO)
+
+    update, q = _query(f"admin:revoke:{NON_ADMIN_ID}", NON_ADMIN_ID)
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.edit_message_text.assert_not_awaited()
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, NON_ADMIN_ID)
+        assert user.subscription_status == SubscriptionStatus.PRO
+
+
 async def test_broadcast_cancel_never_sends(handler_db):
     from handlers import admin as admin_handler
 

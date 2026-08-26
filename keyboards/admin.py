@@ -32,6 +32,23 @@ def back_to_admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin:home")]])
 
 
+def user_actions_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    """Shown under a 🔎 Search user result - lets the admin manually comp
+    PRO to a specific person (friends/testers/"limited free access" -
+    real operator request) or revoke it, without that person ever paying.
+    Every button carries the searched telegram_id so the resulting
+    "admin:grant:"/"admin:revoke:" callback acts on exactly that account,
+    not whatever was last searched."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🎁 Grant PRO — 30 days", callback_data=f"admin:grant:{telegram_id}:30")],
+            [InlineKeyboardButton("🎁 Grant PRO — 365 days", callback_data=f"admin:grant:{telegram_id}:365")],
+            [InlineKeyboardButton("❌ Revoke PRO → Free", callback_data=f"admin:revoke:{telegram_id}")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="admin:home")],
+        ]
+    )
+
+
 def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

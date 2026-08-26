@@ -20,11 +20,18 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 from database.database import session_scope
+from database.models import SubscriptionStatus
 from database.repositories import admin as admin_repo
+from database.repositories import subscriptions as subscriptions_repo
 from database.repositories import users as users_repo
-from keyboards.admin import admin_menu_keyboard, back_to_admin_menu_keyboard, broadcast_confirm_keyboard
+from keyboards.admin import (
+    admin_menu_keyboard,
+    back_to_admin_menu_keyboard,
+    broadcast_confirm_keyboard,
+    user_actions_keyboard,
+)
 from keyboards.main_menu import main_menu_keyboard
-from services import admin_service
+from services import admin_service, subscription_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.logging import get_logger
 from utils.telegram_helpers import safe_edit_message_text
@@ -181,6 +188,35 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await edit("Cancelled.", reply_markup=admin_menu_keyboard())
         return
 
+    if data.startswith("admin:grant:"):
+        await query.answer()
+        parts = data.removeprefix("admin:grant:").split(":")
+        target_id, days = int(parts[0]), int(parts[1])
+        async with session_scope() as session:
+            user = await users_repo.get_by_telegram_id(session, target_id)
+            if user is None:
+                await edit("User not found.", reply_markup=admin_menu_keyboard())
+                return
+            user = await subscription_service.activate_pro(session, user, duration_days=days)
+            subscription_end = user.subscription_end
+        await edit(
+            f"🎁 PRO granted to {target_id} until {subscription_end}.",
+            reply_markup=user_actions_keyboard(target_id),
+        )
+        return
+
+    if data.startswith("admin:revoke:"):
+        await query.answer()
+        target_id = int(data.removeprefix("admin:revoke:"))
+        async with session_scope() as session:
+            user = await users_repo.get_by_telegram_id(session, target_id)
+            if user is None:
+                await edit("User not found.", reply_markup=admin_menu_keyboard())
+                return
+            await subscriptions_repo.set_subscription_status(session, user, status=SubscriptionStatus.FREE)
+        await edit(f"❌ PRO revoked for {target_id} → Free.", reply_markup=user_actions_keyboard(target_id))
+        return
+
     if data == "admin:broadcast:confirm":
         await query.answer()
         text = context.user_data.pop("admin_broadcast_text", None)
@@ -241,7 +277,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         lines.append(f"Words in learning: {detail.total_words} (mastered: {detail.mastered_words})")
         lines.append(f"Total reviews: {detail.total_reviews_all_languages} ({detail.overall_accuracy:.0%} accuracy)")
         lines.append(f"Last activity: {detail.last_activity_at:%Y-%m-%d %H:%M} UTC" if detail.last_activity_at else "Last activity: never")
-        await update.message.reply_text("\n".join(lines), reply_markup=admin_menu_keyboard())
+        await update.message.reply_text("\n".join(lines), reply_markup=user_actions_keyboard(detail.telegram_id))
         return
 
     if submode == "broadcast":
