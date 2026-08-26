@@ -13,7 +13,7 @@ with no external calls, so failure is only ever a DB-layer issue.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,6 @@ from database.repositories import progress as progress_repo
 from services.level_progress_service import LevelProgress, get_level_progress
 from utils.time import local_day_bounds, utc_now
 
-_WEAK_STRONG_LIMIT = 5
 _TREND_WINDOW = 10  # spec sections 26-28: never judge a trend on fewer than this many results
 
 
@@ -53,8 +52,6 @@ class ProgressSnapshot:
     last_7_days: PeriodStats
     last_30_days: PeriodStats
     level_progress: LevelProgress
-    weak_words: list[str] = field(default_factory=list)
-    strong_words: list[str] = field(default_factory=list)
 
     @property
     def total_words(self) -> int:
@@ -92,13 +89,6 @@ async def build_snapshot(
 
     level_progress = await get_level_progress(session, user_language=user_language)
 
-    weak_words = await progress_repo.weakest_words(
-        session, user_id=user_id, language_code=language_code, limit=_WEAK_STRONG_LIMIT
-    )
-    strong_words = await progress_repo.strongest_words(
-        session, user_id=user_id, language_code=language_code, limit=_WEAK_STRONG_LIMIT
-    )
-
     return ProgressSnapshot(
         status_counts=status_counts,
         well_consolidated=buckets["well_consolidated"],
@@ -111,8 +101,6 @@ async def build_snapshot(
         last_7_days=last_7,
         last_30_days=last_30,
         level_progress=level_progress,
-        weak_words=weak_words,
-        strong_words=strong_words,
     )
 
 

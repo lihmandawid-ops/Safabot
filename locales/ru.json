@@ -470,8 +470,5 @@
   "progress.section.level": "🎯 Прогресс уровня",
   "progress.level.current": "Текущий уровень: {level}",
   "progress.level.next": "До уровня {level}: усвоено {mastered}/{required} слов, точность {accuracy} (нужно {required_accuracy})",
-  "progress.level.max": "Вы достигли максимального уровня 🎉",
-  "progress.section.words": "📝 Слова",
-  "progress.words.weak": "Сложные слова: {words}",
-  "progress.words.strong": "Уверенно усвоены: {words}"
+  "progress.level.max": "Вы достигли максимального уровня 🎉"
 }

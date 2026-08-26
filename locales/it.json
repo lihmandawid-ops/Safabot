@@ -470,8 +470,5 @@
   "progress.section.level": "🎯 Progresso di livello",
   "progress.level.current": "Livello attuale: {level}",
   "progress.level.next": "Al livello {level}: {mastered}/{required} parole padroneggiate, precisione {accuracy} (serve {required_accuracy})",
-  "progress.level.max": "Hai raggiunto il livello massimo 🎉",
-  "progress.section.words": "📝 Parole",
-  "progress.words.weak": "Parole difficili: {words}",
-  "progress.words.strong": "Padroneggiate con sicurezza: {words}"
+  "progress.level.max": "Hai raggiunto il livello massimo 🎉"
 }

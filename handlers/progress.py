@@ -64,10 +64,6 @@ def _percent(value: float) -> str:
     return f"{value:.0%}"
 
 
-def _word_list(words: list[str]) -> str:
-    return ", ".join(words)
-
-
 def _render_text(snapshot: ProgressSnapshot, *, language: str) -> str:
     lines = [t("progress.title", language), ""]
 
@@ -118,13 +114,5 @@ def _render_text(snapshot: ProgressSnapshot, *, language: str) -> str:
                 accuracy=_percent(lp.accuracy), required_accuracy=_percent(lp.accuracy_required),
             )
         )
-    lines.append("")
-
-    if snapshot.weak_words or snapshot.strong_words:
-        lines.append(t("progress.section.words", language))
-        if snapshot.weak_words:
-            lines.append(t("progress.words.weak", language, words=_word_list(snapshot.weak_words)))
-        if snapshot.strong_words:
-            lines.append(t("progress.words.strong", language, words=_word_list(snapshot.strong_words)))
 
     return "\n".join(lines).strip()

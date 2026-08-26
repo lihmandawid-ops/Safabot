@@ -470,8 +470,5 @@
   "progress.section.level": "🎯 Прогрес рівня",
   "progress.level.current": "Поточний рівень: {level}",
   "progress.level.next": "До рівня {level}: засвоєно {mastered}/{required} слів, точність {accuracy} (потрібно {required_accuracy})",
-  "progress.level.max": "Ви досягли максимального рівня 🎉",
-  "progress.section.words": "📝 Слова",
-  "progress.words.weak": "Складні слова: {words}",
-  "progress.words.strong": "Впевнено засвоєні: {words}"
+  "progress.level.max": "Ви досягли максимального рівня 🎉"
 }

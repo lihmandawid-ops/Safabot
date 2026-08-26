@@ -470,8 +470,5 @@
   "progress.section.level": "🎯 התקדמות ברמה",
   "progress.level.current": "רמה נוכחית: {level}",
   "progress.level.next": "לרמה {level}: נשלטו {mastered}/{required} מילים, דיוק {accuracy} (נדרש {required_accuracy})",
-  "progress.level.max": "הגעתם לרמה הגבוהה ביותר 🎉",
-  "progress.section.words": "📝 מילים",
-  "progress.words.weak": "מילים קשות: {words}",
-  "progress.words.strong": "נשלטות בביטחון: {words}"
+  "progress.level.max": "הגעתם לרמה הגבוהה ביותר 🎉"
 }
