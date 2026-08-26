@@ -284,22 +284,31 @@ async def test_route_main_menu_unknown_command_resends_a_fresh_keyboard(handler_
 
 
 async def test_route_main_menu_coming_soon_uses_interface_language(handler_db):
+    """statistics/progress stage: 📊 Мой прогресс is a real screen now
+    (handlers/progress.py), not a coming-soon placeholder - 💎 PRO is the
+    remaining button that still uses the coming-soon path, so it's what
+    this test exercises instead."""
     from handlers.menu import route_main_menu
 
-    update = _text_update("📊 My progress")
+    update = _text_update("💎 PRO")
     context = SimpleNamespace(user_data={})
     await route_main_menu(update, context)
 
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.call_args[0][0]
-    assert "My progress" in text
+    assert "PRO subscription" in text
     assert "still in development" in text
 
 
 async def test_route_main_menu_recognizes_button_regardless_of_stale_keyboard_language(handler_db):
     """A user who just switched interface language may still be looking at
     an old-language keyboard for one tap; resolve_menu_action must still
-    route it correctly (spec section 2)."""
+    route it correctly (spec section 2). statistics/progress stage: 📊 Мой
+    прогресс now routes to the real handlers/progress.py screen - this
+    fixture's user has no UserLanguage row, so the assertion checks for
+    the (English) "no active language" message rather than a coming-soon
+    placeholder, which is enough to prove the button reached the real
+    handler and not the "unknown command" fallback."""
     from handlers.menu import route_main_menu
 
     update = _text_update("📊 Мой прогресс")  # Russian label, but user.interface_language == "en"
@@ -308,4 +317,4 @@ async def test_route_main_menu_recognizes_button_regardless_of_stale_keyboard_la
 
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.call_args[0][0]
-    assert "My progress" in text
+    assert "choose the language you're learning" in text

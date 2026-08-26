@@ -29,6 +29,7 @@ from handlers import dictionary as dictionary_handler
 from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
 from handlers import phrases as phrases_handler
+from handlers import progress as progress_handler
 from handlers import review as review_handler
 from handlers import settings as settings_handler
 from handlers import text_analysis as text_analysis_handler
@@ -38,7 +39,6 @@ from keyboards.main_menu import main_menu_keyboard, resolve_menu_action
 from utils.i18n import set_current_language, t
 
 _COMING_SOON: dict[str, str] = {
-    main_menu.PROGRESS: "menu.feature.progress",
     main_menu.PRO: "menu.feature.pro",
 }
 
@@ -92,6 +92,11 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if action == main_menu.PHRASES:
         context.user_data.pop("mode", None)
         await phrases_handler.show_phrases_menu(update, context)
+        return
+
+    if action == main_menu.PROGRESS:
+        context.user_data.pop("mode", None)
+        await progress_handler.show_progress(update, context)
         return
 
     feature_key = _COMING_SOON.get(action) if action else None

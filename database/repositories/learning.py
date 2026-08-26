@@ -14,7 +14,7 @@ from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import UserWord, Word, WordStatus
+from database.models import ReviewLog, UserWord, Word, WordStatus
 from services.repetition_service import RepetitionResult, clamp_difficulty
 from utils.time import utc_now
 
@@ -169,5 +169,18 @@ async def apply_review_result(
     user_word.wrong_answers += result.wrong_delta
     user_word.difficulty_score = clamp_difficulty(user_word.difficulty_score + result.difficulty_delta)
     user_word.is_paused = False
+    # statistics/progress stage: one event per applied grade, in the same
+    # flush as the UserWord mutation above - see ReviewLog's docstring for
+    # why this is the single correct place to log it.
+    session.add(
+        ReviewLog(
+            user_id=user_word.user_id,
+            user_word_id=user_word.id,
+            language_code=user_word.language_code,
+            correct_delta=result.correct_delta,
+            wrong_delta=result.wrong_delta,
+            reviewed_at=now,
+        )
+    )
     await session.flush()
     return user_word

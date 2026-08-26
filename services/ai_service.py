@@ -62,7 +62,7 @@ class AIService(ABC):
     async def generate_words(
         self, *, language_code: str, translation_language: str, level: str, amount: int,
         category: str | None = None, industry: str | None = None, goal: str | None = None,
-        known_words: list[str] | None = None, user_id: int,
+        known_words: list[str] | None = None, performance_note: str | None = None, user_id: int,
     ) -> ai_models.GenerateWordsResult:
         """Up to `amount` new words the learner doesn't already know
         (WordGenerationService's AI fallback for the shortfall, and the
@@ -72,7 +72,12 @@ class AIService(ABC):
         обучения"); `industry` is only ever set when the user's
         learning_goal is "work" (section 20); `goal` is that same
         learning_goal itself (e.g. "travel", "work", "study") so the AI
-        can bias vocabulary toward it even outside the "work" case."""
+        can bias vocabulary toward it even outside the "work" case.
+        `performance_note` (statistics/progress stage, spec sections
+        29-30) is a short, pre-rendered summary of the learner's measured
+        accuracy/recent results/weak words - never a level for the AI to
+        invent on its own, only real numbers services/
+        learner_profile_service.py already computed."""
 
     @abstractmethod
     async def explain_word(
@@ -184,7 +189,7 @@ class NotConfiguredAIService(AIService):
     async def lookup_word(self, word, *, language_code, translation_language, user_level=None, user_id):
         raise AIConfigurationError()
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, user_id):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, performance_note=None, user_id):
         raise AIConfigurationError()
 
     async def explain_word(self, word, *, language_code, translation_language, level, interface_language, user_id):
@@ -329,7 +334,10 @@ _GENERATE_WORDS_SYSTEM = (
     "always attempt it too, for the same reason. "
     "\"translations\"/\"usage_note\"/\"definition\"/example \"translation\" must ALL be written in "
     "the translate-into language given below - never in English or Russian unless that IS the "
-    "translate-into language."
+    "translate-into language. "
+    "When the learner's measured performance is given, use it only to gently calibrate word "
+    "difficulty within the stated level (e.g. lean toward the easier or harder end of that level) - "
+    "never to override the stated level itself, and never to jump to a different CEFR level."
 )
 
 _EXPLAIN_SYSTEM = (
@@ -715,10 +723,11 @@ class LiveAIService(AIService):
 
         return await self._complete("lookup_word", user_id, _LOOKUP_WORD_SYSTEM, user, _parse)
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, user_id):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, performance_note=None, user_id):
         known = ", ".join((known_words or [])[:200])
         industry_line = f"Learner's work industry - bias vocabulary toward this field: {industry}\n" if industry else ""
         goal_line = f"Learner's goal for this language: {goal}\n" if goal else ""
+        performance_line = f"Learner's measured performance so far: {performance_note}\n" if performance_note else ""
         user = (
             f"Language being learned (ISO 639-1): {language_code}\n"
             f"Translate into language code: {translation_language}\n"
@@ -726,6 +735,7 @@ class LiveAIService(AIService):
             f"Category/topic: {category or 'any suitable for everyday use'}\n"
             f"{goal_line}"
             f"{industry_line}"
+            f"{performance_line}"
             f"Exact amount of new distinct words to return: {amount}\n"
             f"Words the learner already knows - never repeat any of these: {known or 'none'}\n"
         )

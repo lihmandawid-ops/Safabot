@@ -27,7 +27,7 @@ from database.repositories import rejected_words as rejected_words_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import word_generation_logs as generation_logs_repo
 from database.repositories import words as words_repo
-from services import ai_models, user_word_service, word_service
+from services import ai_models, learner_profile_service, user_word_service, word_service
 from services.ai_errors import AIError
 from services.ai_service import get_ai_service
 from utils.logging import get_logger
@@ -269,6 +269,7 @@ async def generate_candidates(
     category = _topic_hint(user_language, override=topics)
     industry = _industry_hint(user_language)
     goal = _goal_hint(user_language)
+    performance_note = await _performance_note(session, user_id=user.id, user_language=user_language)
 
     candidates: list[ai_models.GeneratedWord] = []
     attempts = 0
@@ -284,6 +285,7 @@ async def generate_candidates(
             industry=industry,
             goal=goal,
             known_words=excluded,
+            performance_note=performance_note,
             user_id=user.id,
         )
         if not entries:
@@ -429,6 +431,7 @@ async def _top_up_via_ai(
     category = _topic_hint(user_language, override=topics_override)
     industry = _industry_hint(user_language)
     goal = _goal_hint(user_language)
+    performance_note = await _performance_note(session, user_id=user.id, user_language=user_language)
 
     attempts = 0
     while len(created) < amount and attempts < settings.max_generation_attempts:
@@ -443,6 +446,7 @@ async def _top_up_via_ai(
             industry=industry,
             goal=goal,
             known_words=known_words,
+            performance_note=performance_note,
             user_id=user.id,
         )
         if not entries:
@@ -524,7 +528,7 @@ async def _persist_and_add(
 async def _generate_via_ai(
     *, language_code: str, translation_language: str, level: str, amount: int,
     category: str | None = None, industry: str | None = None, goal: str | None = None,
-    known_words: list[str], user_id: int,
+    known_words: list[str], performance_note: str | None = None, user_id: int,
 ) -> list[ai_models.GeneratedWord]:
     """Never raises: any AI failure (not configured, network error,
     invalid response) yields [] so the caller simply ends up with fewer
@@ -539,6 +543,7 @@ async def _generate_via_ai(
             industry=industry,
             goal=goal,
             known_words=known_words,
+            performance_note=performance_note,
             user_id=user_id,
         )
     except AIError as exc:
@@ -546,3 +551,31 @@ async def _generate_via_ai(
         return []
 
     return result.words
+
+
+async def _performance_note(session: AsyncSession, *, user_id: int, user_language: UserLanguage) -> str | None:
+    """Statistics/progress stage (spec sections 29-30): a short, plain-text
+    summary of the learner's measured profile for the AI prompt - never a
+    level for the AI to guess, only what services/learner_profile_service.py
+    already computed from real UserWord/ReviewLog data. Never raises -
+    word generation must keep working exactly as before if this fails."""
+    try:
+        profile = await learner_profile_service.build_learner_profile(
+            session, user_id=user_id, user_language=user_language
+        )
+    except Exception:
+        logger.exception("Learner profile build failed user_id=%s", user_id)
+        return None
+
+    parts = [
+        f"accuracy={profile.accuracy:.0%}",
+        f"recent_success_rate={profile.review_success_rate:.0%}",
+        f"trend={profile.recent_performance}",
+        f"active_words={profile.active_words}",
+        f"mastered_words={profile.learned_words}",
+    ]
+    if profile.weak_words:
+        parts.append(f"struggles with: {', '.join(profile.weak_words)}")
+    if profile.strong_words:
+        parts.append(f"has mastered: {', '.join(profile.strong_words)}")
+    return "; ".join(parts)

@@ -722,6 +722,42 @@ class WordGenerationLog(Base):
         )
 
 
+class ReviewLog(Base):
+    """One graded review event (statistics/progress stage: period-based
+    stats like "reviews in the last 7 days" or "accuracy over the last 30
+    days" cannot be computed from UserWord's cumulative all-time counters
+    alone - this table adds the missing per-event timestamp).
+
+    Written exactly once, inside database.repositories.learning.
+    apply_review_result - the single choke point every AGAIN/HARD/GOOD/
+    EASY grade Safabot writes already funnels through (on-demand review,
+    session-based review, and quiz wrong answers alike) - so this table is
+    guaranteed complete and never double-counted without touching any of
+    those call sites individually.
+
+    correct_delta/wrong_delta mirror services.repetition_service.
+    RepetitionResult exactly (never a new right/wrong categorization) -
+    HARD grades carry (0, 0), same as they already do on UserWord's own
+    counters.
+    """
+
+    __tablename__ = "review_logs"
+    __table_args__ = (
+        Index("ix_review_logs_user_reviewed_at", "user_id", "reviewed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_word_id: Mapped[int] = mapped_column(ForeignKey("user_words.id", ondelete="CASCADE"), nullable=False)
+    language_code: Mapped[str] = mapped_column(ForeignKey("languages.code"), nullable=False)
+    correct_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    wrong_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"ReviewLog(user_id={self.user_id}, user_word_id={self.user_word_id})"
+
+
 class RejectedWord(Base):
     """"❌ Я уже знаю это слово" on a freshly AI-generated candidate (AI-
     new-words stage sections 6-7): the user is saying "I already know

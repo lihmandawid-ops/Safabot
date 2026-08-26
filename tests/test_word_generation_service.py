@@ -56,13 +56,14 @@ class _FakeAIService:
         self._raises = raises
         self.calls = 0
 
-    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, user_id=None):
+    async def generate_words(self, *, language_code, translation_language, level, amount, category=None, industry=None, goal=None, known_words=None, performance_note=None, user_id=None):
         self.calls += 1
         self.last_category = category
         self.last_industry = industry
         self.last_goal = goal
         self.last_known_words = list(known_words) if known_words is not None else None
         self.last_level = level
+        self.last_performance_note = performance_note
         if self._raises is not None:
             raise self._raises
         return ai_models.GenerateWordsResult(words=self._words)
