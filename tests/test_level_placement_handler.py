@@ -227,6 +227,15 @@ async def test_full_add_language_placement_flow_creates_language_with_ai_result(
     await settings_handler.handle_text_input(update2, context, "Я иду домой")
     result_text = update2.message.reply_text.call_args_list[-1][0][0]
     assert "b1" in result_text.lower() or "B1" in result_text
+    # Real user request: the grading result leads into the same "Для чего
+    # вы изучаете этот язык?" question onboarding asks - the language
+    # isn't created until that's answered too.
+    goal_markup = update2.message.reply_text.call_args_list[-1][1]["reply_markup"]
+    goal_callbacks = [b.callback_data for row in goal_markup.inline_keyboard for b in row]
+    assert "set:addlang:goal:study" in goal_callbacks
+
+    goal = await _run_callback(settings_handler, "set:addlang:goal:study", context)
+    goal.callback_query.answer.assert_awaited_once()
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -234,6 +243,7 @@ async def test_full_add_language_placement_flow_creates_language_with_ai_result(
         de = next(ul for ul in languages if ul.language_code == "de")
         assert de.translation_language == "ru"
         assert de.level == "b1"
+        assert de.learning_goal == "study"
         assert de.is_current is True  # newly added language becomes active
 
     assert "placement_test" not in context.user_data

@@ -8,8 +8,7 @@ it needs no persistence to survive a bot restart - whatever is on screen
 next time is simply re-derived from the current row.
 
 "📚 Количество слов" edits the CURRENT language's UserLanguage.daily_new_words
-(spec section 8: stored per learning language). "👤 Мой уровень" edits the
-user-wide User.level (the profile-level default). "💎 Подписка" is read-only
+(spec section 8: stored per learning language). "💎 Подписка" is read-only
 here - buying/renewing PRO is Stage 13 (Telegram Stars).
 """
 from __future__ import annotations
@@ -26,6 +25,8 @@ from database.repositories import users as users_repo
 from keyboards.language import settings_add_learning_language_keyboard
 from keyboards.settings import (
     add_language_level_keyboard,
+    addlang_goal_pick_keyboard,
+    addlang_industry_pick_keyboard,
     back_to_settings_keyboard,
     difficulty_pick_keyboard,
     goal_pick_keyboard,
@@ -74,7 +75,6 @@ async def _build_summary(session, user) -> str:
             flag=interface_lang.flag if interface_lang else "",
             name=language_display_name(interface_lang) if interface_lang else user.interface_language,
         ),
-        t("settings.level", get_current_language(), level=t(f"level.{user.level}", get_current_language())),
         t("settings.timezone", get_current_language(), timezone=user.timezone),
     ]
     current_language = next((ul for ul in languages if ul.is_current), None)
@@ -156,6 +156,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if submode == "industry_custom":
         await _handle_custom_industry_input(update, context, text)
         return
+    if submode == "addlang_industry_custom":
+        await _handle_addlang_custom_industry_input(update, context, text)
+        return
     if submode == "placement_answer":
         await _handle_placement_answer_input(update, context, text)
         return
@@ -211,6 +214,35 @@ async def _handle_custom_industry_input(update: Update, context: ContextTypes.DE
             return
         await user_languages_repo.set_goal(session, current, learning_goal="work", work_industry=industry)
         await update.message.reply_text(t("settings.industry_updated", get_current_language()))
+
+
+async def _handle_addlang_custom_industry_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    """"✏️ Другое" answer to the add-language flow's work-industry
+    question (set:addlang:industry:other) - the free-text counterpart of
+    _handle_custom_industry_input, but creates the pending NEW language
+    instead of updating the current one."""
+    context.user_data.pop("settings_submode", None)
+    context.user_data.pop("mode", None)
+    pending = context.user_data.pop("addlang_pending", None)
+    industry = text.strip()[:MAX_CUSTOM_TOPIC_LENGTH]
+    if pending is None or not industry:
+        return
+
+    async with session_scope() as session:
+        user = await _get_user_or_warn_message(session, update)
+        if user is None:
+            return
+        new_language = await _create_pending_new_language(session, user, pending, goal="work", work_industry=industry)
+        if new_language is None:
+            await update.message.reply_text(
+                t("settings.add_language_duplicate", get_current_language()), reply_markup=settings_home_keyboard()
+            )
+            return
+        lang = LANGUAGE_BY_CODE[pending["learning_code"]]
+        await update.message.reply_text(
+            t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)),
+            reply_markup=settings_home_keyboard(),
+        )
 
 
 async def _handle_placement_answer_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -296,7 +328,7 @@ async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, sessi
 
     addlang = state.get("addlang")
     if addlang is not None:
-        await _finish_placement_test_for_new_language(send, session, user, state, addlang)
+        await _finish_placement_test_for_new_language(send, context, session, user, state, addlang)
         return
 
     current = await user_languages_repo.get_current_language(session, user.id)
@@ -324,11 +356,17 @@ async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, sessi
     )
 
 
-async def _finish_placement_test_for_new_language(send, session, user, state: dict, addlang: dict) -> None:
+async def _finish_placement_test_for_new_language(
+    send, context: ContextTypes.DEFAULT_TYPE, session, user, state: dict, addlang: dict
+) -> None:
     """The 🤖 Узнать мой уровень branch of adding a NEW language: unlike
     _finish_placement_test's original case there is no existing
-    UserLanguage row to update - the language is created fresh here,
-    with the graded level, once the test is done."""
+    UserLanguage row to update. The graded level doesn't create the row
+    either - same as the direct level-pick branch (set:addlang:level:),
+    it stashes the pending choice and asks the goal question next; the
+    row is only created once that's answered too (real user request:
+    the goal question must appear here exactly like it does at
+    onboarding, so both paths into this screen have to go through it)."""
     learning_code, translation_code = addlang["learning_code"], addlang["translation_code"]
     await send(t("settings.placement.grading", get_current_language()))
     try:
@@ -343,25 +381,33 @@ async def _finish_placement_test_for_new_language(send, session, user, state: di
         await send(t("ai.generic_error", get_current_language()), reply_markup=settings_home_keyboard())
         return
 
+    context.user_data["addlang_pending"] = {
+        "learning_code": learning_code, "translation_code": translation_code, "level": level,
+    }
+    await send(
+        t("settings.placement.level_then_goal", get_current_language(), level=t(f"level.{level}", get_current_language())),
+        reply_markup=addlang_goal_pick_keyboard(),
+    )
+
+
+async def _create_pending_new_language(session, user, pending: dict, *, goal: str | None, work_industry: str | None):
+    """Shared tail of the add-language flow (direct level pick, placement
+    test, and the goal/industry questions that now follow either one):
+    actually create the UserLanguage row once every question has been
+    answered. Returns None on a duplicate language+translation pair
+    instead of raising, so callers can show the existing duplicate
+    message without a try/except of their own."""
     try:
         new_language = await user_languages_repo.add_language(
-            session, user_id=user.id, language_code=learning_code,
-            translation_language=translation_code, level=level,
+            session, user_id=user.id, language_code=pending["learning_code"],
+            translation_language=pending["translation_code"], level=pending["level"],
             daily_new_words=get_settings().plan_limits.daily_new_words_options[0],
+            learning_goal=goal, work_industry=work_industry,
         )
     except user_languages_repo.DuplicateUserLanguageError:
-        await send(t("settings.add_language_duplicate", get_current_language()), reply_markup=settings_home_keyboard())
-        return
+        return None
     await user_languages_repo.set_active_language(session, user_id=user.id, user_language_id=new_language.id)
-
-    lang = LANGUAGE_BY_CODE[learning_code]
-    await send(
-        t(
-            "settings.placement.result_new_language", get_current_language(),
-            level=t(f"level.{level}", get_current_language()), flag=lang.flag, name=language_display_name(lang),
-        ),
-        reply_markup=settings_home_keyboard(),
-    )
+    return new_language
 
 
 async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -437,24 +483,18 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             # step here fed the retired auto-quota generator
             # (learning_service.get_new_words_for_today, unreachable from
             # any screen since "Учить слова" was reworked to always
-            # generate exactly 2 words on request). Adding a language now
-            # finishes right after the level pick, with no word
-            # suggestion of any kind - the learner goes to 📚 Учить слова
-            # themselves whenever they're ready.
+            # generate exactly 2 words on request).
+            # Real user request: onboarding already asks "Для чего вы
+            # изучаете этот язык?" (learning_goal, section 18) - adding a
+            # language later never did. The level pick no longer creates
+            # the row immediately; it stashes the pending choice and asks
+            # the same goal question next, exactly like onboarding does.
             learning_code, translation_code, level = data.removeprefix("set:addlang:level:").split(":")
-            try:
-                new_language = await user_languages_repo.add_language(
-                    session, user_id=user.id, language_code=learning_code,
-                    translation_language=translation_code, level=level,
-                    daily_new_words=get_settings().plan_limits.daily_new_words_options[0],
-                )
-            except user_languages_repo.DuplicateUserLanguageError:
-                await query.answer(t("settings.add_language_duplicate", get_current_language()), show_alert=True)
-                return
-            await user_languages_repo.set_active_language(session, user_id=user.id, user_language_id=new_language.id)
-            lang = LANGUAGE_BY_CODE[learning_code]
-            await query.answer(t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)))
-            await _render_home(query, session, user)
+            await query.answer()
+            context.user_data["addlang_pending"] = {
+                "learning_code": learning_code, "translation_code": translation_code, "level": level,
+            }
+            await edit(t("settings.pick_goal", get_current_language()), reply_markup=addlang_goal_pick_keyboard())
 
         elif data.startswith("set:addlang:placement:start:"):
             # 🤖 Узнать мой уровень when adding a NEW language (real user
@@ -483,6 +523,53 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
                 "addlang": {"learning_code": learning_code, "translation_code": translation_code},
             }
             await _render_placement_question(edit, context, context.user_data["placement_test"])
+
+        elif data.startswith("set:addlang:goal:"):
+            # Real user request: the "Для чего вы изучаете этот язык?"
+            # step (already asked at onboarding) is now also asked here,
+            # right after the level pick or placement test - see
+            # set:addlang:level: / _finish_placement_test_for_new_language
+            # for where "addlang_pending" gets set.
+            code = data.removeprefix("set:addlang:goal:")
+            pending = context.user_data.get("addlang_pending")
+            if pending is None:
+                await query.answer(t("settings.addlang.expired", get_current_language()), show_alert=True)
+                return
+            goal = None if code == "skip" else code
+            if goal == "work":
+                await query.answer()
+                await edit(t("settings.pick_industry", get_current_language()), reply_markup=addlang_industry_pick_keyboard())
+                return
+            context.user_data.pop("addlang_pending", None)
+            new_language = await _create_pending_new_language(session, user, pending, goal=goal, work_industry=None)
+            if new_language is None:
+                await query.answer(t("settings.add_language_duplicate", get_current_language()), show_alert=True)
+                return
+            lang = LANGUAGE_BY_CODE[pending["learning_code"]]
+            await query.answer(t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)))
+            await _render_home(query, session, user)
+
+        elif data.startswith("set:addlang:industry:"):
+            code = data.removeprefix("set:addlang:industry:")
+            pending = context.user_data.get("addlang_pending")
+            if pending is None:
+                await query.answer(t("settings.addlang.expired", get_current_language()), show_alert=True)
+                return
+            if code == "other":
+                context.user_data["mode"] = MODE
+                context.user_data["settings_submode"] = "addlang_industry_custom"
+                await query.answer()
+                await edit(t("onboarding.industry_custom_prompt", get_current_language()))
+                return
+            context.user_data.pop("addlang_pending", None)
+            industry = None if code == "skip" else code
+            new_language = await _create_pending_new_language(session, user, pending, goal="work", work_industry=industry)
+            if new_language is None:
+                await query.answer(t("settings.add_language_duplicate", get_current_language()), show_alert=True)
+                return
+            lang = LANGUAGE_BY_CODE[pending["learning_code"]]
+            await query.answer(t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)))
+            await _render_home(query, session, user)
 
         elif data.startswith("set:lang:pick:"):
             user_language_id = int(data.removeprefix("set:lang:pick:"))

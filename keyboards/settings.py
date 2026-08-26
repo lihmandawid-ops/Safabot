@@ -272,6 +272,37 @@ def industry_pick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def addlang_goal_pick_keyboard() -> InlineKeyboardMarkup:
+    """The same "Для чего вы изучаете этот язык?" question as
+    goal_pick_keyboard() above, but for the add-language flow
+    (set:addlang:goal:) instead of editing the CURRENT language
+    (set:goal:pick:) - a distinct callback prefix so the two never route
+    into each other's handler branch. Skippable, like onboarding's own
+    goal step (_goal_keyboard in handlers/start.py) - unlike
+    goal_pick_keyboard() there's no in-progress language to just "go
+    back" to yet, so a "⬅️ Назад" button wouldn't make sense here."""
+    rows = [
+        [InlineKeyboardButton(t(f"goal.{code}", get_current_language()), callback_data=f"set:addlang:goal:{code}")]
+        for code in GOAL_CODES
+    ]
+    rows.append([InlineKeyboardButton(t("onboarding.button.skip", get_current_language()), callback_data="set:addlang:goal:skip")])
+    return InlineKeyboardMarkup(rows)
+
+
+def addlang_industry_pick_keyboard() -> InlineKeyboardMarkup:
+    """The set:addlang:industry: counterpart of industry_pick_keyboard()
+    - see addlang_goal_pick_keyboard() for why this needs its own
+    callback prefix rather than reusing set:goal:industry:."""
+    buttons = [
+        InlineKeyboardButton(t(f"industry.{code}", get_current_language()), callback_data=f"set:addlang:industry:{code}")
+        for code in PRESET_INDUSTRIES
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(t("onboarding.button.other", get_current_language()), callback_data="set:addlang:industry:other")])
+    rows.append([InlineKeyboardButton(t("onboarding.button.skip", get_current_language()), callback_data="set:addlang:industry:skip")])
+    return InlineKeyboardMarkup(rows)
+
+
 def topics_keyboard(selected_topics: list[str]) -> InlineKeyboardMarkup:
     """One toggle button per preset topic (✅ prefix when selected), one
     remove button per already-selected custom topic (anything in

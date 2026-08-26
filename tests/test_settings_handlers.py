@@ -68,13 +68,20 @@ def _query(data: str):
     return SimpleNamespace(callback_query=q)
 
 
-async def _run(data: str):
+async def _run(data: str, context: SimpleNamespace | None = None):
     from handlers import settings as settings_handler
 
     update = _query(data)
-    context = SimpleNamespace(user_data={})
+    if context is None:
+        context = SimpleNamespace(user_data={})
     await settings_handler.handle_settings_callback(update, context)
     return update.callback_query
+
+
+def _message_update(telegram_id: int, text: str):
+    msg = AsyncMock()
+    msg.text = text
+    return SimpleNamespace(effective_user=SimpleNamespace(id=telegram_id), message=msg), msg
 
 
 async def test_notifications_toggle_answers_once_and_updates_screen(handler_db):
@@ -174,7 +181,9 @@ async def test_add_language_full_flow(handler_db):
         user = await users_repo.get_by_telegram_id(s, 42)
         await users_repo.update_user(s, user, subscription_status=SubscriptionStatus.PRO)
 
-    start = await _run("set:addlang:start")
+    context = SimpleNamespace(user_data={})
+
+    start = await _run("set:addlang:start", context)
     assert start.answer.call_count == 1
     start.edit_message_text.assert_awaited_once()
 
@@ -182,7 +191,7 @@ async def test_add_language_full_flow(handler_db):
     # step anymore - picking the learning language goes straight to the
     # level picker, with translation_language auto-derived as the user's
     # own interface_language ("ru" for this fixture user).
-    pick_learn = await _run("set:addlang:learn:de")
+    pick_learn = await _run("set:addlang:learn:de", context)
     assert pick_learn.answer.call_count == 1
     pick_learn.edit_message_text.assert_awaited_once()
 
@@ -203,10 +212,18 @@ async def test_add_language_full_flow(handler_db):
     assert labels[1] == "🤖 Узнать мой уровень"
 
     # study-flow-rework stage (real user feedback): the daily-words-count
-    # step is gone - picking a level now finishes the flow immediately.
-    pick_level = await _run("set:addlang:level:de:ru:advanced")
+    # step is gone - picking a level now moves straight to the goal
+    # question (real user request: onboarding already asks "Для чего вы
+    # изучаете этот язык?" - adding a language later must too).
+    pick_level = await _run("set:addlang:level:de:ru:advanced", context)
     assert pick_level.answer.call_count == 1
     pick_level.edit_message_text.assert_awaited_once()
+    goal_markup = pick_level.edit_message_text.call_args[1]["reply_markup"]
+    goal_callbacks = [b.callback_data for row in goal_markup.inline_keyboard for b in row]
+    assert "set:addlang:goal:travel" in goal_callbacks
+
+    pick_goal = await _run("set:addlang:goal:travel", context)
+    assert pick_goal.answer.call_count == 1
 
     async with session_scope() as s:
         user = await users_repo.get_by_telegram_id(s, 42)
@@ -215,11 +232,86 @@ async def test_add_language_full_flow(handler_db):
         assert de.translation_language == "ru"
         assert de.level == "advanced"
         assert de.daily_new_words == 2  # silently defaulted, no picker step anymore
+        assert de.learning_goal == "travel"
         assert de.is_current is True  # newly added language becomes active
 
 
+async def test_add_language_goal_work_asks_for_industry(handler_db):
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:de:ru:a1", context)
+
+    industry_prompt = await _run("set:addlang:goal:work", context)
+    assert industry_prompt.answer.call_count == 1
+    markup = industry_prompt.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "set:addlang:industry:it" in callbacks
+
+    q = await _run("set:addlang:industry:it", context)
+    assert q.answer.call_count == 1
+
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.learning_goal == "work"
+        assert de.work_industry == "it"
+
+
+async def test_add_language_goal_work_other_industry_uses_free_text(handler_db):
+    from handlers import settings as settings_handler
+
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:de:ru:a1", context)
+    await _run("set:addlang:goal:work", context)
+
+    other = await _run("set:addlang:industry:other", context)
+    assert other.answer.call_count == 1
+    assert context.user_data["settings_submode"] == "addlang_industry_custom"
+
+    text_update, msg = _message_update(42, "Marine biology")
+    await settings_handler.handle_text_input(text_update, context, "Marine biology")
+    msg.reply_text.assert_awaited_once()
+
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.learning_goal == "work"
+        assert de.work_industry == "Marine biology"
+    assert "addlang_pending" not in context.user_data
+    assert "settings_submode" not in context.user_data
+
+
+async def test_add_language_goal_expired_when_pending_state_is_lost(handler_db):
+    """set:addlang:goal:/set:addlang:industry: reached without a prior
+    set:addlang:level:/placement-test step (e.g. a stale button after a
+    restart that lost context.user_data) must not crash - it shows the
+    dedicated "session expired" alert instead of KeyError-ing on a
+    missing "addlang_pending"."""
+    context = SimpleNamespace(user_data={})
+    q = await _run("set:addlang:goal:travel", context)
+    assert q.answer.call_count == 1
+    args, kwargs = q.answer.call_args
+    assert kwargs.get("show_alert") is True
+
+    context2 = SimpleNamespace(user_data={})
+    q2 = await _run("set:addlang:industry:it", context2)
+    assert q2.answer.call_count == 1
+    assert q2.answer.call_args[1].get("show_alert") is True
+
+
 async def test_add_language_duplicate_shows_alert_without_crashing(handler_db):
-    q = await _run("set:addlang:level:en:ru:beginner")  # en/ru already exists from the fixture
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:en:ru:beginner", context)  # en/ru already exists from the fixture
+    q = await _run("set:addlang:goal:skip", context)
     assert q.answer.call_count == 1
     args, kwargs = q.answer.call_args
     assert kwargs.get("show_alert") is True
