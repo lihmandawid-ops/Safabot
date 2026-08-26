@@ -188,11 +188,19 @@ async def test_add_language_full_flow(handler_db):
 
     # study-flow-rework stage section 30: the add-language level picker
     # also gets the "🟢 Только начинаю" leading button, aliased onto a1.
+    # Real user request: this screen offers exactly two ways to set the
+    # level - "начинаю" or "узнать мой уровень" (AI placement test) -
+    # never the old flat list of all 6 CEFR buttons.
     markup = pick_learn.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert callbacks[0] == "set:addlang:level:de:ru:a1"
+    assert callbacks == [
+        "set:addlang:level:de:ru:a1",
+        "set:addlang:placement:start:de:ru",
+        "set:lang:list",
+    ]
     labels = [b.text for row in markup.inline_keyboard for b in row]
     assert labels[0] == "🟢 Только начинаю"
+    assert labels[1] == "🤖 Узнать мой уровень"
 
     # study-flow-rework stage (real user feedback): the daily-words-count
     # step is gone - picking a level now finishes the flow immediately.

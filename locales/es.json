@@ -96,6 +96,7 @@
   "settings.placement.translate_prompt": "Traduce esta frase a tu propio idioma.\nSi no puedes, escribe «no».\n\n💬 {sentence}",
   "settings.placement.cancelled": "Prueba cancelada.",
   "settings.placement.result": "🎉 ¡Listo! Tu nivel: {level}\n\nSe guardó como tu ajuste de «Nivel de dificultad».",
+  "settings.placement.result_new_language": "🎉 ¡Listo! Tu nivel: {level}\n\n✅ Nuevo idioma añadido: {flag} {name}. Ahora está activo.",
   "settings.placement.expired": "La sesión de la prueba caducó. Vuelve a empezar desde ⚙️ Ajustes → 🎚 Nivel de dificultad.",
   "settings.pick_notification_slot": "¿Qué hora de notificación quieres cambiar?",
   "settings.pick_notification_time": "Elige una nueva hora:",

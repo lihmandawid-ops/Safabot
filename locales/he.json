@@ -96,6 +96,7 @@
   "settings.placement.translate_prompt": "תרגם את המשפט הזה לשפה שלך.\nאם אינך יכול, כתוב \"לא\".\n\n💬 {sentence}",
   "settings.placement.cancelled": "המבחן בוטל.",
   "settings.placement.result": "🎉 סיימת! הרמה שלך: {level}\n\nהיא נשמרה כהגדרת \"רמת קושי הלמידה\".",
+  "settings.placement.result_new_language": "🎉 סיימת! הרמה שלך: {level}\n\n✅ נוספה שפה חדשה: {flag} {name}. היא כעת פעילה.",
   "settings.placement.expired": "פג תוקף המבחן. התחל מחדש מ-⚙️ הגדרות → 🎚 רמת קושי הלמידה.",
   "settings.pick_notification_slot": "איזו שעת התראה לשנות?",
   "settings.pick_notification_time": "בחר שעה חדשה:",

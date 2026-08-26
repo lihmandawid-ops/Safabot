@@ -96,6 +96,7 @@
   "settings.placement.translate_prompt": "Перекладіть це речення своєю мовою.\nЯкщо не можете — напишіть «ні».\n\n💬 {sentence}",
   "settings.placement.cancelled": "Тест скасовано.",
   "settings.placement.result": "🎉 Готово! Ваш рівень: {level}\n\nВін збережений як «Рівень складності вивчення мови».",
+  "settings.placement.result_new_language": "🎉 Готово! Ваш рівень: {level}\n\n✅ Додано нову мову: {flag} {name}. Тепер вона активна.",
   "settings.placement.expired": "Сесія тесту закінчилася. Почніть знову з ⚙️ Налаштування → 🎚 Рівень складності вивчення мови.",
   "settings.pick_notification_slot": "Який час сповіщень змінити?",
   "settings.pick_notification_time": "Оберіть новий час:",

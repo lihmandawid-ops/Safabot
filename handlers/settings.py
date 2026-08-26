@@ -294,6 +294,11 @@ async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, sessi
     context.user_data.pop("mode", None)
     context.user_data.pop("settings_submode", None)
 
+    addlang = state.get("addlang")
+    if addlang is not None:
+        await _finish_placement_test_for_new_language(send, session, user, state, addlang)
+        return
+
     current = await user_languages_repo.get_current_language(session, user.id)
     if current is None:
         await send(t("card.no_language", get_current_language()), reply_markup=difficulty_pick_keyboard())
@@ -316,6 +321,46 @@ async def _finish_placement_test(send, context: ContextTypes.DEFAULT_TYPE, sessi
     await send(
         t("settings.placement.result", get_current_language(), level=t(f"level.{level}", get_current_language())),
         reply_markup=difficulty_pick_keyboard(),
+    )
+
+
+async def _finish_placement_test_for_new_language(send, session, user, state: dict, addlang: dict) -> None:
+    """The 🤖 Узнать мой уровень branch of adding a NEW language: unlike
+    _finish_placement_test's original case there is no existing
+    UserLanguage row to update - the language is created fresh here,
+    with the graded level, once the test is done."""
+    learning_code, translation_code = addlang["learning_code"], addlang["translation_code"]
+    await send(t("settings.placement.grading", get_current_language()))
+    try:
+        level = await level_placement_service.grade_placement_test(
+            language_code=learning_code, translation_language=translation_code,
+            questions=state["questions"], answers=state["answers"], user_id=user.id,
+        )
+    except AIConfigurationError:
+        await send(t("ai.not_configured", get_current_language()), reply_markup=settings_home_keyboard())
+        return
+    except AIError:
+        await send(t("ai.generic_error", get_current_language()), reply_markup=settings_home_keyboard())
+        return
+
+    try:
+        new_language = await user_languages_repo.add_language(
+            session, user_id=user.id, language_code=learning_code,
+            translation_language=translation_code, level=level,
+            daily_new_words=get_settings().plan_limits.daily_new_words_options[0],
+        )
+    except user_languages_repo.DuplicateUserLanguageError:
+        await send(t("settings.add_language_duplicate", get_current_language()), reply_markup=settings_home_keyboard())
+        return
+    await user_languages_repo.set_active_language(session, user_id=user.id, user_language_id=new_language.id)
+
+    lang = LANGUAGE_BY_CODE[learning_code]
+    await send(
+        t(
+            "settings.placement.result_new_language", get_current_language(),
+            level=t(f"level.{level}", get_current_language()), flag=lang.flag, name=language_display_name(lang),
+        ),
+        reply_markup=settings_home_keyboard(),
     )
 
 
@@ -410,6 +455,34 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
             lang = LANGUAGE_BY_CODE[learning_code]
             await query.answer(t("settings.add_language_added", get_current_language(), flag=lang.flag, name=language_display_name(lang)))
             await _render_home(query, session, user)
+
+        elif data.startswith("set:addlang:placement:start:"):
+            # 🤖 Узнать мой уровень when adding a NEW language (real user
+            # request - this button used to only exist for changing the
+            # difficulty of a language already added). Reuses the exact
+            # same placement_test state/question-rendering machinery as
+            # ⚙️ Настройки → 🎚 Уровень сложности изучения языка; the
+            # "addlang" marker in the stored state is how
+            # _finish_placement_test tells the two flows apart, since the
+            # language doesn't exist as a UserLanguage row yet here.
+            learning_code, translation_code = data.removeprefix("set:addlang:placement:start:").split(":")
+            await query.answer()
+            await edit(t("settings.placement.generating", get_current_language()))
+            try:
+                questions = await level_placement_service.start_placement_test(
+                    language_code=learning_code, translation_language=translation_code, user_id=user.id,
+                )
+            except AIConfigurationError:
+                await edit(t("ai.not_configured", get_current_language()), reply_markup=add_language_level_keyboard(learning_code, translation_code))
+                return
+            except AIError:
+                await edit(t("ai.generic_error", get_current_language()), reply_markup=add_language_level_keyboard(learning_code, translation_code))
+                return
+            context.user_data["placement_test"] = {
+                "questions": questions, "index": 0, "answers": [],
+                "addlang": {"learning_code": learning_code, "translation_code": translation_code},
+            }
+            await _render_placement_question(edit, context, context.user_data["placement_test"])
 
         elif data.startswith("set:lang:pick:"):
             user_language_id = int(data.removeprefix("set:lang:pick:"))
@@ -688,10 +761,17 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:placement:cancel":
             await query.answer()
-            context.user_data.pop("placement_test", None)
+            state = context.user_data.pop("placement_test", None)
             context.user_data.pop("mode", None)
             context.user_data.pop("settings_submode", None)
-            await edit(t("settings.placement.cancelled", get_current_language()), reply_markup=difficulty_pick_keyboard())
+            addlang = state.get("addlang") if state else None
+            if addlang is not None:
+                await edit(
+                    t("settings.placement.cancelled", get_current_language()),
+                    reply_markup=add_language_level_keyboard(addlang["learning_code"], addlang["translation_code"]),
+                )
+            else:
+                await edit(t("settings.placement.cancelled", get_current_language()), reply_markup=difficulty_pick_keyboard())
 
         elif data == "set:tz:list":
             await query.answer()

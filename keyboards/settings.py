@@ -79,28 +79,28 @@ def language_switch_keyboard(user_languages, *, can_add_more: bool) -> InlineKey
 
 
 def add_language_level_keyboard(learning_language: str, translation_language: str) -> InlineKeyboardMarkup:
-    # study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
-    # button here too, not a new level value - same callback_data as the
-    # A1 button below, so picking either stores level="a1".
-    rows = [
+    """Real user request: exactly two ways to set the starting level for
+    a newly added language - "🟢 Только начинаю" (level=a1) or
+    "🤖 Узнать мой уровень" (the same AI placement test onboarding and
+    ⚙️ Настройки → 🎚 Уровень сложности изучения языка already offer) -
+    never the old flat list of all 6 CEFR buttons."""
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                t("level.beginner_button", get_current_language()),
-                callback_data=f"set:addlang:level:{learning_language}:{translation_language}:a1",
-            )
+            [
+                InlineKeyboardButton(
+                    t("level.beginner_button", get_current_language()),
+                    callback_data=f"set:addlang:level:{learning_language}:{translation_language}:a1",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("settings.difficulty.find_my_level", get_current_language()),
+                    callback_data=f"set:addlang:placement:start:{learning_language}:{translation_language}",
+                )
+            ],
+            [InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:lang:list")],
         ]
-    ]
-    rows += [
-        [
-            InlineKeyboardButton(
-                t(f"level.{code}", get_current_language()),
-                callback_data=f"set:addlang:level:{learning_language}:{translation_language}:{code}",
-            )
-        ]
-        for code in LEVEL_CODES
-    ]
-    rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:lang:list")])
-    return InlineKeyboardMarkup(rows)
+    )
 
 
 def interface_language_pick_keyboard() -> InlineKeyboardMarkup:

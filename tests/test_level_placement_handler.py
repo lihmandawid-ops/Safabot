@@ -189,3 +189,84 @@ async def _run_callback(settings_handler, data: str, context: SimpleNamespace):
     update = _query(data)
     await settings_handler.handle_settings_callback(update, context)
     return update
+
+
+# --------------------------------------------------------------------- #
+# 🤖 Узнать мой уровень while adding a NEW language (real user request -
+# this screen used to only offer the flat A1-C2 list, with no placement
+# test option at all). Same underlying placement_test state machine as
+# the difficulty-change flow above, disambiguated via the "addlang"
+# marker _finish_placement_test looks for.
+# --------------------------------------------------------------------- #
+
+async def test_full_add_language_placement_flow_creates_language_with_ai_result(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from handlers import settings as settings_handler
+
+    questions = [
+        ai_models.PlacementQuestion(level="a1", kind="word", prompt="hello"),
+        ai_models.PlacementQuestion(level="a2", kind="translate", prompt="I go home."),
+    ]
+    _install_fake_ai(monkeypatch, questions=questions, level="b1")
+
+    context = SimpleNamespace(user_data={})
+
+    start = await _run_callback(settings_handler, "set:addlang:placement:start:de:ru", context)
+    start.callback_query.answer.assert_awaited_once()
+    text1 = start.callback_query.edit_message_text.call_args[0][0]
+    assert "hello" in text1
+
+    answer1 = await _run_callback(settings_handler, "set:placement:answer:yes", context)
+    answer1.callback_query.answer.assert_awaited_once()
+    assert context.user_data["mode"] == settings_handler.MODE
+    assert context.user_data["settings_submode"] == "placement_answer"
+
+    update2 = _message("Я иду домой")
+    await settings_handler.handle_text_input(update2, context, "Я иду домой")
+    result_text = update2.message.reply_text.call_args_list[-1][0][0]
+    assert "b1" in result_text.lower() or "B1" in result_text
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.translation_language == "ru"
+        assert de.level == "b1"
+        assert de.is_current is True  # newly added language becomes active
+
+    assert "placement_test" not in context.user_data
+    assert "mode" not in context.user_data
+    assert "settings_submode" not in context.user_data
+
+
+async def test_add_language_placement_can_be_cancelled_mid_flow(handler_db, monkeypatch):
+    questions = [
+        ai_models.PlacementQuestion(level="a1", kind="word", prompt="hello"),
+        ai_models.PlacementQuestion(level="a2", kind="translate", prompt="I go home."),
+    ]
+    _install_fake_ai(monkeypatch, questions=questions, level="b2")
+    from handlers import settings as settings_handler
+
+    context = SimpleNamespace(user_data={})
+    await _run_callback(settings_handler, "set:addlang:placement:start:de:ru", context)
+
+    cancel = await _run_callback(settings_handler, "set:placement:cancel", context)
+    cancel.callback_query.answer.assert_awaited_once()
+    assert "placement_test" not in context.user_data
+    markup = cancel.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "set:addlang:placement:start:de:ru" in callbacks  # back on the add-language level screen
+
+
+async def test_add_language_placement_start_shows_not_configured_when_ai_is_unavailable(handler_db):
+    """Default test environment has AI forced unconfigured (conftest.py's
+    autouse fixture) - no monkeypatch needed here."""
+    from handlers import settings as settings_handler
+
+    context = SimpleNamespace(user_data={})
+    start = await _run_callback(settings_handler, "set:addlang:placement:start:de:ru", context)
+    text = start.callback_query.edit_message_text.call_args[0][0]
+    assert text  # some not-configured message was shown
+    assert "placement_test" not in context.user_data
