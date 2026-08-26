@@ -196,6 +196,71 @@ async def test_generate_new_words_retries_ai_up_to_max_attempts_on_duplicates(se
     config.get_settings.cache_clear()
 
 
+async def test_generate_new_words_keeps_retrying_after_an_empty_ai_response(session, monkeypatch):
+    """Real user report: a single AI hiccup (empty response - a timeout/
+    network blip already exhausted its own internal retries) used to
+    abort the whole outer retry loop immediately, instead of using the
+    remaining attempts MAX_GENERATION_ATTEMPTS budgeted. The loop must
+    keep trying until it either succeeds or genuinely runs out of
+    attempts."""
+    import config
+
+    monkeypatch.setenv("MAX_GENERATION_ATTEMPTS", "3")
+    config.get_settings.cache_clear()
+
+    class _FlakyThenWorks:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return ai_models.GenerateWordsResult(words=[])  # empty response, not an exception
+            return ai_models.GenerateWordsResult(words=[_generated("recovered")])
+
+    fake = _FlakyThenWorks()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    user, ul = await _create_user(session, telegram_id=5023)
+    created = await word_generation_service.generate_new_words(session, user=user, user_language=ul, amount=1)
+
+    assert len(created) == 1
+    assert created[0].word.word == "recovered"
+    assert fake.calls == 2  # first attempt empty, second attempt succeeded
+    config.get_settings.cache_clear()
+
+
+async def test_generate_candidates_keeps_retrying_after_ai_raises_once(session, monkeypatch):
+    """Same fix, for the 🆕/🎯 candidate-generation path (generate_
+    candidates) - a raised AIError on the first attempt must not prevent
+    a later attempt from succeeding."""
+    import config
+
+    monkeypatch.setenv("MAX_GENERATION_ATTEMPTS", "3")
+    config.get_settings.cache_clear()
+
+    class _FailsOnceThenWorks:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise AIUnavailableError("transient")
+            return ai_models.GenerateWordsResult(words=[_generated("recovered2")])
+
+    fake = _FailsOnceThenWorks()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    user, ul = await _create_user(session, telegram_id=5024)
+    candidates = await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+
+    assert len(candidates) == 1
+    assert candidates[0].word == "recovered2"
+    assert fake.calls == 2
+    config.get_settings.cache_clear()
+
+
 async def test_find_unknown_words_for_generation_prefers_level_match(session):
     user, ul = await _create_user(session, telegram_id=5008, level="advanced")
     await _seed_local_words(session, 3, prefix="beg", difficulty="beginner")

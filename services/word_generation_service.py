@@ -289,7 +289,14 @@ async def generate_candidates(
             user_id=user.id,
         )
         if not entries:
-            break
+            # Real user report: a single AI hiccup (timeout, transient
+            # network error, rate limit) used to abort the whole retry
+            # loop immediately here, wasting the remaining attempts the
+            # `while` condition above already budgeted - the loop must
+            # keep trying up to max_generation_attempts even when one
+            # attempt came back completely empty, not just when it came
+            # back with only duplicates.
+            continue
         for entry in entries:
             if len(candidates) >= amount:
                 break
@@ -450,7 +457,10 @@ async def _top_up_via_ai(
             user_id=user.id,
         )
         if not entries:
-            break
+            # Same fix as generate_candidates above: a single empty
+            # response (AI hiccup) must not abort the retry loop early -
+            # keep trying until max_generation_attempts is actually used up.
+            continue
 
         for entry in entries:
             if len(created) >= amount:
