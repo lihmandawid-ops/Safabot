@@ -36,17 +36,12 @@ SLOT_EVENING = "evening"
 SLOTS = (SLOT_MORNING, SLOT_AFTERNOON, SLOT_EVENING)
 
 # repetition-system stage section 9, raised by real user request: every
-# automatic reminder now covers at least 8 words - matches
-# NOTIFICATION_WORD_COUNT_OPTIONS' own top so a numbered emoji is always
-# available.
+# automatic reminder now covers at least 8 words (User.notification_
+# word_count's own default/floor - no longer user-configurable in
+# ⚙️ Настройки → 📚 Настройки повторения, per a later real user request,
+# but the column itself still sizes the reminder). 12 covers the highest
+# value that column has ever been set to.
 _NUMBER_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "11️⃣", "12️⃣")
-
-# repetition-system stage section 26: the ⚙️ Настройки → 📚 Настройки
-# повторения word-count picker's choices. Real user request: every
-# repetition process must cover a MINIMUM of 8 words, so 4 and 6 are
-# gone - default (and floor) is now 8, with 10/12 for anyone who wants
-# more per reminder.
-NOTIFICATION_WORD_COUNT_OPTIONS: tuple[int, ...] = (8, 10, 12)
 
 # learning-methodology stage sections 1-3: the automatic morning
 # notification always tries for EXACTLY this many new words - a fixed

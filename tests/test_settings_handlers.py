@@ -240,27 +240,18 @@ async def test_difficulty_picker_includes_beginner_button(handler_db):
 
 
 async def test_review_settings_home_shows_defaults(handler_db):
+    """Real user request: the automatic-reminder word-count picker (8/10/
+    12) is gone from this screen entirely - only the per-slot toggles and
+    review-mode picker remain."""
     q = await _run("set:revsettings:home")
     assert q.answer.call_count == 1
     q.edit_message_text.assert_awaited_once()
     markup = q.edit_message_text.call_args.kwargs["reply_markup"]
     labels = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert "✅ 8" in labels  # notification_word_count defaults to 8 (real user request: minimum 8 per reminder)
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert not any(cb.startswith("set:revsettings:count:") for cb in callbacks)
     assert any(label.startswith("☑️") and "Утро" in label for label in labels)
     assert any(label.startswith("✅") and "спрашивать" in label for label in labels)  # review_mode defaults to None
-
-
-async def test_review_settings_count_pick_updates_user_and_screen(handler_db):
-    from database.database import session_scope
-    from database.repositories import users as users_repo
-
-    q = await _run("set:revsettings:count:8")
-    assert q.answer.call_count == 1
-    q.edit_message_text.assert_awaited_once()
-
-    async with session_scope() as s:
-        user = await users_repo.get_by_telegram_id(s, 42)
-    assert user.notification_word_count == 8
 
 
 async def test_review_settings_slot_toggle_flips_and_persists(handler_db):

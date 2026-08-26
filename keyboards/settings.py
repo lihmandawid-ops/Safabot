@@ -11,7 +11,6 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from services.learning_service import REVIEW_MODE_CHOICES
-from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.goals import GOAL_CODES
 from utils.i18n import get_current_language, t
 from utils.industries import PRESET_INDUSTRIES
@@ -140,19 +139,16 @@ def notification_time_keyboard(slot: str) -> InlineKeyboardMarkup:
 
 def review_settings_keyboard(user) -> InlineKeyboardMarkup:
     """⚙️ Настройки → 📚 Настройки повторения (repetition-system stage
-    section 26): word count for automatic reminders, independent per-slot
-    enable/disable toggles, and the saved on-demand review-mode
-    preference - reuses User.notification_word_count/morning_enabled/
+    section 26): independent per-slot enable/disable toggles and the
+    saved on-demand review-mode preference - reuses User.morning_enabled/
     afternoon_enabled/evening_enabled/review_mode rather than introducing
-    a parallel settings store."""
-    count_row = [
-        InlineKeyboardButton(
-            f"{'✅ ' if n == user.notification_word_count else ''}{n}",
-            callback_data=f"set:revsettings:count:{n}",
-        )
-        for n in NOTIFICATION_WORD_COUNT_OPTIONS
-    ]
+    a parallel settings store.
 
+    Real user request: the automatic-reminder word-count picker (was
+    User.notification_word_count, 8/10/12) is gone from this screen -
+    notification_service.py still reads that column to size the reminder,
+    just no longer as a user-facing choice; it stays fixed at the column's
+    own default."""
     slot_fields = (
         ("morning", user.morning_enabled),
         ("afternoon", user.afternoon_enabled),
@@ -191,7 +187,7 @@ def review_settings_keyboard(user) -> InlineKeyboardMarkup:
         ]
     )
 
-    rows = [count_row, *slot_rows, *mode_rows]
+    rows = [*slot_rows, *mode_rows]
     rows.append([InlineKeyboardButton(t("settings.menu.back", get_current_language()), callback_data="set:home")])
     return InlineKeyboardMarkup(rows)
 

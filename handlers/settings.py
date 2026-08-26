@@ -47,7 +47,6 @@ from keyboards.main_menu import main_menu_keyboard
 from services import level_placement_service, subscription_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.learning_service import REVIEW_MODE_CHOICES
-from services.notification_service import NOTIFICATION_WORD_COUNT_OPTIONS
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE, language_display_name
 from utils.logging import get_logger
@@ -592,17 +591,6 @@ async def handle_settings_callback(update: Update, context: ContextTypes.DEFAULT
 
         elif data == "set:revsettings:home":
             await query.answer()
-            await safe_edit_message_text(query,
-                t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
-            )
-
-        elif data.startswith("set:revsettings:count:"):
-            count = int(data.removeprefix("set:revsettings:count:"))
-            if count not in NOTIFICATION_WORD_COUNT_OPTIONS:
-                await query.answer()
-                return
-            await users_repo.update_user(session, user, notification_word_count=count)
-            await query.answer(t("settings.review_settings.count_updated", get_current_language(), count=count))
             await safe_edit_message_text(query,
                 t("settings.review_settings.header", get_current_language()), reply_markup=review_settings_keyboard(user)
             )
