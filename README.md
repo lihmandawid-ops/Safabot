@@ -280,6 +280,66 @@ safabot/
 - SQLite-внешние ключи включены явно (`PRAGMA foreign_keys=ON` при каждом
   подключении) — без этого SQLite молча игнорирует нарушения FK.
 
+### Миграция production с SQLite на PostgreSQL
+
+Инструменты в `deploy/` переносят существующие данные на PostgreSQL без
+потери записей и без изменения схемы (та же цепочка Alembic-миграций
+применяется к обеим базам). Порядок действий на боевом VPS:
+
+1. **Backup.** Из директории приложения:
+
+   ```bash
+   .venv/bin/python deploy/backup_sqlite.py --source safabot.db --backups-dir /opt/safabot/backups
+   ```
+
+   Скрипт делает консистентный снимок через `sqlite3`'s backup API (безопасно,
+   даже пока бот продолжает писать в базу), проверяет, что файл открывается
+   и в нём есть данные, и сохраняет количество строк по каждой таблице в
+   `<backup>.counts.json` — эти числа понадобятся на шаге проверки.
+
+2. **Подготовьте PostgreSQL.** `deploy/setup_vps.sh` делает это автоматически
+   для НОВОЙ установки (роль `safabot_app`, база `safabot`, без прав
+   суперпользователя). Для уже работающего продакшена на SQLite — поднимите
+   PostgreSQL отдельно (тот же скрипт `apt-get install postgresql` + создание
+   роли/базы, но НЕ пересоздавая существующий `.env` — это отдельная,
+   осознанная операция, а не побочный эффект обновления кода).
+
+3. **Перенесите данные:**
+
+   ```bash
+   .venv/bin/python deploy/migrate_to_postgres.py \
+     --source-url "sqlite+aiosqlite:///$(ls -t /opt/safabot/backups/*.db | head -1)" \
+     --target-url "postgresql+asyncpg://safabot_app:PASSWORD@localhost:5432/safabot"
+   ```
+
+   Скрипт сам прогоняет `alembic upgrade head` на целевой базе (создавая
+   схему через существующую историю миграций, а не «с нуля»), затем копирует
+   каждую таблицу в порядке, диктуемом внешними ключами, сохраняя все
+   первичные ключи как есть, и сбрасывает PostgreSQL-последовательности,
+   чтобы следующая обычная запись не столкнулась с уже перенесённым id.
+   Таблица `languages` не копируется — она уже заполняется самой миграцией
+   `cc37901c0d0f` (фиксированный список из 8 языков).
+
+4. **Проверьте результат — обязательно, до переключения:**
+
+   ```bash
+   .venv/bin/python deploy/verify_migration.py \
+     --counts-file /opt/safabot/backups/<файл>.counts.json \
+     --target-url "postgresql+asyncpg://safabot_app:PASSWORD@localhost:5432/safabot"
+   ```
+
+   Сравнивает количество строк по каждой таблице и дополнительно проверяет:
+   уникальность `payments.telegram_charge_id` (идемпотентность Telegram
+   Stars), уникальность `users.telegram_id`, и что ограничение
+   `UNIQUE(user_id, notification_type, scheduled_date)` в `notification_logs`
+   не нарушено. Ненулевой код выхода = переключать production ещё нельзя.
+
+5. **Переключите production** только после чистого прохождения шага 4:
+   обновите `DATABASE_URL` в `.env` на `postgresql+asyncpg://...` и
+   `sudo systemctl restart safabot`. Файл SQLite-бэкапа **не удалять** —
+   он же служит планом отката: при проблеме верните старый `DATABASE_URL`
+   и перезапустите сервис, старая база никуда не делась.
+
 ## Слова: словарь, ручное добавление, автогенерация
 
 **Новый язык интерфейса/изучения** уже поддерживается архитектурно —

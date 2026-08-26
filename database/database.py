@@ -33,13 +33,30 @@ def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
 def get_engine():
     global _engine
     if _engine is None:
-        database_url = get_settings().database_url
-        _engine = create_async_engine(database_url, echo=False)
+        settings = get_settings()
+        database_url = settings.database_url
         if database_url.startswith("sqlite"):
+            _engine = create_async_engine(database_url, echo=False)
             # SQLite ignores foreign key constraints unless told otherwise per
             # connection - without this, User/UserLanguage rows could point
             # at a language code that doesn't exist in the languages table.
             event.listen(_engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
+        else:
+            # Postgres-migration stage: SQLite has no real connection pool
+            # (one file, effectively one writer) so pool sizing only means
+            # anything for a network database - pool_pre_ping guards
+            # against a connection PostgreSQL silently dropped while idle
+            # (a long-lived 24/7 process is exactly the case this matters
+            # for), never against a bad DATABASE_URL, which still fails
+            # loudly on first use either way.
+            _engine = create_async_engine(
+                database_url,
+                echo=False,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_timeout=settings.db_pool_timeout,
+                pool_pre_ping=True,
+            )
     return _engine
 
 

@@ -96,7 +96,13 @@ def upgrade() -> None:
             'is_active', new_column_name='active', existing_type=sa.Boolean()
         )
         batch_op.add_column(
-            sa.Column('is_current', sa.Boolean(), server_default=sa.text('0'), nullable=False)
+            # Postgres-migration stage: sa.text('0') is a SQLite-only
+            # convenience (SQLite has no real BOOLEAN type, so an integer
+            # literal default works there) - PostgreSQL's actual BOOLEAN
+            # column rejects an integer default expression outright
+            # ("column is of type boolean but default expression is of
+            # type integer"). sa.false() is valid on both.
+            sa.Column('is_current', sa.Boolean(), server_default=sa.false(), nullable=False)
         )
         batch_op.drop_constraint('uq_user_language', type_='unique')
         batch_op.create_unique_constraint(

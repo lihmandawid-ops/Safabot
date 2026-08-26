@@ -74,6 +74,14 @@ class PlanLimits:
 class Settings:
     bot_token: str
     database_url: str
+    # Postgres-migration stage: pool sizing only ever applies to a real
+    # network database (database/database.py skips it entirely for
+    # sqlite+aiosqlite, where pooling is meaningless) - conservative
+    # defaults so a fresh Postgres instance is never handed more
+    # concurrent connections than a small VPS-sized instance expects.
+    db_pool_size: int
+    db_max_overflow: int
+    db_pool_timeout: float
     log_level: str
     default_timezone: str
     trial_days: int
@@ -140,6 +148,9 @@ def get_settings() -> Settings:
         database_url=os.getenv(
             "DATABASE_URL", f"sqlite+aiosqlite:///{BASE_DIR / 'safabot.db'}"
         ),
+        db_pool_size=_get_int("DB_POOL_SIZE", 5),
+        db_max_overflow=_get_int("DB_MAX_OVERFLOW", 10),
+        db_pool_timeout=_get_float("DB_POOL_TIMEOUT", 30.0),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         default_timezone=os.getenv("DEFAULT_TIMEZONE", "UTC"),
         trial_days=_get_int("TRIAL_DAYS", 7),
