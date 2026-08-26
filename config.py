@@ -38,6 +38,15 @@ def _get_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def _get_int_tuple(name: str) -> tuple[int, ...]:
+    """Comma-separated Telegram user IDs (ADMIN_USER_IDS) - empty/unset
+    yields an empty tuple, never a crash on a missing .env entry."""
+    value = os.getenv(name)
+    if not value:
+        return ()
+    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
+
+
 @dataclass(frozen=True)
 class PlanLimits:
     """Feature limits per subscription plan (spec section 26).
@@ -52,6 +61,13 @@ class PlanLimits:
     pro_daily_new_words_max: int = 8
     pro_max_languages: int = 8
     free_ai_enabled: bool = False
+    # Commercial layer: 🆕/🎯 AI-first word generation (services.
+    # word_generation_service.generate_candidates) is Safabot's most
+    # resource-intensive feature (a live DeepSeek/Gemini call per request) -
+    # FREE users get a bounded number of AI-generated words per day,
+    # TRIAL and PRO (services.subscription_service.has_pro_access) are
+    # unlimited. None means unlimited for that tier.
+    free_daily_ai_generation_limit: int | None = 4
 
 
 @dataclass(frozen=True)
@@ -99,6 +115,15 @@ class Settings:
     max_extra_words_per_day: int
     max_text_length: int
     support_contact: str | None
+    # Commercial layer (Telegram Stars): the single source of truth for
+    # PRO's price/duration - handlers/payments.py must never hardcode
+    # either, so both can change without touching payment logic.
+    pro_price_stars: int
+    pro_duration_days: int
+    # Telegram user IDs allowed into the admin panel (handlers/admin.py) -
+    # never hardcoded in business logic, checked at the handler boundary
+    # on every admin action, not just to show/hide a button.
+    admin_user_ids: tuple[int, ...]
     plan_limits: PlanLimits = field(default_factory=PlanLimits)
 
 
@@ -207,4 +232,13 @@ def get_settings() -> Settings:
         # both screens degrade to a "not configured" message instead of
         # ever showing a blank or broken contact.
         support_contact=os.getenv("SUPPORT_CONTACT") or None,
+        # Commercial layer (Telegram Stars, spec section 8-9): a fixed
+        # whole-star price - Stars have no live currency conversion, so
+        # this is set once and only changes by editing the env var.
+        pro_price_stars=_get_int("PRO_PRICE_STARS", 100),
+        pro_duration_days=_get_int("PRO_DURATION_DAYS", 30),
+        admin_user_ids=_get_int_tuple("ADMIN_USER_IDS"),
+        plan_limits=PlanLimits(
+            free_daily_ai_generation_limit=_get_int("FREE_DAILY_AI_GENERATION_LIMIT", 4),
+        ),
     )

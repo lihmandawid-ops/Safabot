@@ -98,3 +98,54 @@ async def test_refresh_expired_trial_leaves_active_trial_untouched(session):
     )
 
     assert refreshed.subscription_status == SubscriptionStatus.TRIAL
+
+
+async def test_activate_pro_fresh_starts_from_today(session):
+    """A FREE (or never-subscribed) user buying PRO gets exactly
+    duration_days from today, not from any stale prior date."""
+    user = await _create_test_user(session, telegram_id=507)
+    today = date(2026, 1, 1)
+
+    activated = await subscription_service.activate_pro(session, user, duration_days=30, today=today)
+    await session.commit()
+
+    assert activated.subscription_status == SubscriptionStatus.PRO
+    assert activated.subscription_start == today
+    assert activated.subscription_end == today + timedelta(days=30)
+
+
+async def test_activate_pro_renewal_extends_from_current_end_not_today(session):
+    """Buying again while PRO is still active must never shorten what was
+    already paid for - the new period stacks onto the existing end date."""
+    user = await _create_test_user(session, telegram_id=508)
+    today = date(2026, 1, 1)
+    await subscription_service.activate_pro(session, user, duration_days=30, today=today)
+    await session.commit()
+    first_end = user.subscription_end
+    assert first_end == today + timedelta(days=30)
+
+    renewed = await subscription_service.activate_pro(
+        session, user, duration_days=30, today=today + timedelta(days=5)
+    )
+    await session.commit()
+
+    assert renewed.subscription_end == first_end + timedelta(days=30)
+    assert renewed.subscription_start == today  # unchanged - still the original purchase date
+
+
+async def test_activate_pro_after_lapse_starts_fresh_again(session):
+    """A user whose PRO already expired (or who never had it) gets a
+    fresh period starting today, not stacked onto a long-dead end date."""
+    user = await _create_test_user(session, telegram_id=509)
+    today = date(2026, 1, 1)
+    await subscription_service.activate_pro(session, user, duration_days=30, today=today)
+    await session.commit()
+
+    # Buy again long after the first period lapsed.
+    resubscribed = await subscription_service.activate_pro(
+        session, user, duration_days=30, today=today + timedelta(days=100)
+    )
+    await session.commit()
+
+    assert resubscribed.subscription_start == today + timedelta(days=100)
+    assert resubscribed.subscription_end == today + timedelta(days=130)

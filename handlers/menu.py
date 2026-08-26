@@ -28,6 +28,7 @@ from database.repositories import users as users_repo
 from handlers import dictionary as dictionary_handler
 from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
+from handlers import payments as payments_handler
 from handlers import phrases as phrases_handler
 from handlers import progress as progress_handler
 from handlers import review as review_handler
@@ -37,10 +38,6 @@ from handlers import words as words_handler
 from keyboards import main_menu
 from keyboards.main_menu import main_menu_keyboard, resolve_menu_action
 from utils.i18n import set_current_language, t
-
-_COMING_SOON: dict[str, str] = {
-    main_menu.PRO: "menu.feature.pro",
-}
 
 _LANG = "ru"
 
@@ -99,10 +96,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await progress_handler.show_progress(update, context)
         return
 
-    feature_key = _COMING_SOON.get(action) if action else None
-    if feature_key is not None:
+    if action == main_menu.PRO:
         context.user_data.pop("mode", None)
-        await update.message.reply_text(t("menu.coming_soon", language, feature=t(feature_key, language)))
+        await payments_handler.show_paywall(update, context)
         return
 
     mode = context.user_data.get("mode")

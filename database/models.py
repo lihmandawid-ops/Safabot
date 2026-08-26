@@ -788,3 +788,32 @@ class RejectedWord(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"RejectedWord(user_id={self.user_id}, language_code={self.language_code!r}, word={self.word!r})"
+
+
+class Payment(Base):
+    """One successful Telegram Stars payment (commercial layer).
+
+    `telegram_charge_id` (Telegram's own `SuccessfulPayment.
+    telegram_payment_charge_id`) is UNIQUE - this is the idempotency
+    guard: handlers/payments.py must look this up before granting PRO,
+    and never grant it twice for the same charge (Telegram can, in rare
+    cases, redeliver the same successful_payment update). Only a
+    genuinely successful, Telegram-confirmed payment is ever written here
+    - a cancelled/failed checkout never creates a row.
+    """
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    telegram_charge_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    amount_stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="XTR")
+    product: Mapped[str] = mapped_column(String(32), nullable=False, default="pro_subscription")
+    subscription_period_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"Payment(user_id={self.user_id}, telegram_charge_id={self.telegram_charge_id!r})"

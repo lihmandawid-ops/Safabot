@@ -468,5 +468,19 @@
   "progress.section.level": "🎯 Niveaufortschritt",
   "progress.level.current": "Aktuelles Niveau: {level}",
   "progress.level.next": "Bis Niveau {level}: {mastered}/{required} Wörter gemeistert, Genauigkeit {accuracy} (benötigt {required_accuracy})",
-  "progress.level.max": "Sie haben das höchste Niveau erreicht 🎉"
+  "progress.level.max": "Sie haben das höchste Niveau erreicht 🎉",
+  "pro.title": "⭐ Safabot PRO",
+  "pro.benefit.new_words": "✓ Mehr Wörter im Lernprozess",
+  "pro.benefit.ai_generation": "✓ Mehr KI-generierte neue Wörter",
+  "pro.benefit.review": "✓ Erweiterte Wiederholung",
+  "pro.benefit.stats": "✓ Erweiterte Statistik",
+  "pro.benefit.adaptation": "✓ Persönliche Schwierigkeitsanpassung",
+  "pro.price": "Preis: {price} ⭐ / Monat",
+  "pro.button.buy": "⭐ PRO kaufen",
+  "pro.invoice.title": "Safabot PRO — 1 Monat",
+  "pro.invoice.description": "Zugang zu den erweiterten Funktionen von Safabot für 30 Tage",
+  "pro.invoice.label": "Safabot PRO (1 Monat)",
+  "pro.payment.success": "🎉 PRO aktiviert! Gültig bis {date}.",
+  "limits.button.get_pro": "⭐ PRO holen",
+  "limits.ai_generation_reached": "Du hast dein kostenloses Tageslimit für KI-Wortgenerierung erreicht ({limit}). Hol dir PRO, um dieses Limit aufzuheben."
 }

@@ -45,6 +45,30 @@ def has_pro_access(user: User, *, today: date | None = None) -> bool:
     return is_trial_active(user, today=today) or is_subscription_active(user, today=today)
 
 
+async def activate_pro(
+    session: AsyncSession, user: User, *, duration_days: int, today: date | None = None
+) -> User:
+    """Grant PRO after a Telegram Stars payment has already been
+    confirmed and idempotency-checked by handlers/payments.py - this
+    function itself does no payment verification, it only writes the
+    resulting subscription state.
+
+    Renewal, not replacement: if the user already has PRO active with a
+    future end date (bought again before the current period ran out),
+    the new period is appended onto that end date rather than
+    overwriting it from today - a renewal must never shorten what was
+    already paid for. Otherwise (FREE/TRIAL/lapsed PRO) the period starts
+    fresh from today."""
+    today = today or date.today()
+    renewing = is_subscription_active(user, today=today) and user.subscription_end is not None
+    base = user.subscription_end if renewing else today
+    new_end = base + timedelta(days=duration_days)
+    new_start = user.subscription_start if renewing else today
+    return await subscriptions_repo.set_subscription_status(
+        session, user, status=SubscriptionStatus.PRO, start_date=new_start, end_date=new_end
+    )
+
+
 async def refresh_expired_trial(session: AsyncSession, user: User, *, today: date | None = None) -> User:
     """If a TRIAL user's trial has lapsed, downgrade them to FREE.
 

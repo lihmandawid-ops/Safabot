@@ -10,7 +10,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, PicklePersistence
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    PicklePersistence,
+    PreCheckoutQueryHandler,
+    filters,
+)
 
 from config import BASE_DIR, get_settings
 from database.database import init_models, session_scope
@@ -21,6 +29,11 @@ from handlers.dictionary import dictionary_callback_handler
 from handlers.help import help_command
 from handlers.learning import learning_callback_handler
 from handlers.menu import main_menu_handler
+from handlers.payments import (
+    handle_pre_checkout_query,
+    handle_successful_payment,
+    payments_callback_handler,
+)
 from handlers.phrases import phrases_callback_handler
 from handlers.quiz import quiz_callback_handler
 from handlers.review_now import review_now_callback_handler
@@ -108,6 +121,9 @@ def build_application() -> Application:
     application.add_handler(review_now_callback_handler)
     application.add_handler(text_analysis_callback_handler)
     application.add_handler(phrases_callback_handler)
+    application.add_handler(payments_callback_handler)
+    application.add_handler(PreCheckoutQueryHandler(handle_pre_checkout_query))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, handle_successful_payment))
     application.add_handler(main_menu_handler)
     application.add_error_handler(on_error)
 

@@ -40,9 +40,10 @@ from keyboards.learning import (
 )
 from handlers import dictionary as dictionary_handler
 from handlers.words import MODE as WORDS_MODE
+from keyboards.payments import limit_reached_keyboard
 from keyboards.settings import topic_picker_keyboard
 from keyboards.words import filter_keyboard
-from services import learning_service, pronunciation_service, user_word_service, word_generation_service, word_service
+from services import learning_service, limits_service, pronunciation_service, user_word_service, word_generation_service, word_service
 from services.repetition_service import ReviewGrade
 from utils.i18n import get_current_language, set_current_language, t
 from utils.languages import LANGUAGE_BY_CODE
@@ -285,7 +286,23 @@ async def _start_candidate_flow(
     "⏳ Подбираем слова..." placeholder first so the screen never just
     sits frozen on the old content with no feedback while the request is
     in flight (real user report: "долгая загрузка бота... как будто
-    завис")."""
+    завис").
+
+    Commercial layer: this is the single choke point every 🆕/🎯 request
+    passes through regardless of caller, so it's also the one place the
+    FREE-tier daily AI-generation limit (services.limits_service) is
+    checked - never a separate check duplicated per call site. TRIAL/PRO
+    users never hit this (services.subscription_service.has_pro_access)."""
+    limit_check = await limits_service.check_ai_generation_limit(
+        session, user=user, language_code=current.language_code
+    )
+    if not limit_check.allowed:
+        await edit(
+            t("limits.ai_generation_reached", get_current_language(), limit=limit_check.limit),
+            reply_markup=limit_reached_keyboard(),
+        )
+        return
+
     await edit(t("learning.generating", get_current_language()))
     entries = await word_generation_service.generate_candidates(
         session, user=user, user_language=current, amount=2, topics=topics,

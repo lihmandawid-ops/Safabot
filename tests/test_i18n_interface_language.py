@@ -283,11 +283,10 @@ async def test_route_main_menu_unknown_command_resends_a_fresh_keyboard(handler_
     assert kwargs["reply_markup"] is not None
 
 
-async def test_route_main_menu_coming_soon_uses_interface_language(handler_db):
-    """statistics/progress stage: 📊 Мой прогресс is a real screen now
-    (handlers/progress.py), not a coming-soon placeholder - 💎 PRO is the
-    remaining button that still uses the coming-soon path, so it's what
-    this test exercises instead."""
+async def test_route_main_menu_pro_button_shows_the_real_paywall_in_interface_language(handler_db):
+    """Commercial layer: 💎 PRO is a real screen now (handlers/payments.py),
+    not a coming-soon placeholder - the _COMING_SOON dict in handlers/
+    menu.py is empty again (every button it once covered is implemented)."""
     from handlers.menu import route_main_menu
 
     update = _text_update("💎 PRO")
@@ -296,8 +295,8 @@ async def test_route_main_menu_coming_soon_uses_interface_language(handler_db):
 
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.call_args[0][0]
-    assert "PRO subscription" in text
-    assert "still in development" in text
+    assert "Safabot PRO" in text
+    assert "100" in text  # default PRO_PRICE_STARS
 
 
 async def test_route_main_menu_recognizes_button_regardless_of_stale_keyboard_language(handler_db):

@@ -468,5 +468,19 @@
   "progress.section.level": "🎯 התקדמות ברמה",
   "progress.level.current": "רמה נוכחית: {level}",
   "progress.level.next": "לרמה {level}: נשלטו {mastered}/{required} מילים, דיוק {accuracy} (נדרש {required_accuracy})",
-  "progress.level.max": "הגעתם לרמה הגבוהה ביותר 🎉"
+  "progress.level.max": "הגעתם לרמה הגבוהה ביותר 🎉",
+  "pro.title": "⭐ Safabot PRO",
+  "pro.benefit.new_words": "✓ יותר מילים בלמידה",
+  "pro.benefit.ai_generation": "✓ יותר מילים חדשות שנבחרו על ידי AI",
+  "pro.benefit.review": "✓ חזרה מורחבת",
+  "pro.benefit.stats": "✓ סטטיסטיקה מורחבת",
+  "pro.benefit.adaptation": "✓ התאמה אישית של רמת הקושי",
+  "pro.price": "מחיר: {price} ⭐ / חודש",
+  "pro.button.buy": "⭐ רכישת PRO",
+  "pro.invoice.title": "Safabot PRO — חודש אחד",
+  "pro.invoice.description": "גישה ליכולות המורחבות של Safabot למשך 30 יום",
+  "pro.invoice.label": "Safabot PRO (חודש אחד)",
+  "pro.payment.success": "🎉 PRO הופעל! בתוקף עד {date}.",
+  "limits.button.get_pro": "⭐ קבלת PRO",
+  "limits.ai_generation_reached": "ניצלת את המכסה החינמית היומית ליצירת מילים חדשות ב-AI ({limit}). קבלו PRO כדי להסיר את המגבלה הזו."
 }

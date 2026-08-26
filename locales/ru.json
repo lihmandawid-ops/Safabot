@@ -468,5 +468,19 @@
   "progress.section.level": "🎯 Прогресс уровня",
   "progress.level.current": "Текущий уровень: {level}",
   "progress.level.next": "До уровня {level}: усвоено {mastered}/{required} слов, точность {accuracy} (нужно {required_accuracy})",
-  "progress.level.max": "Вы достигли максимального уровня 🎉"
+  "progress.level.max": "Вы достигли максимального уровня 🎉",
+  "pro.title": "⭐ Safabot PRO",
+  "pro.benefit.new_words": "✓ Больше слов в изучении",
+  "pro.benefit.ai_generation": "✓ Больше AI-подбора новых слов",
+  "pro.benefit.review": "✓ Расширенное повторение",
+  "pro.benefit.stats": "✓ Расширенная статистика",
+  "pro.benefit.adaptation": "✓ Персональная адаптация сложности",
+  "pro.price": "Цена: {price} ⭐ / месяц",
+  "pro.button.buy": "⭐ Купить PRO",
+  "pro.invoice.title": "Safabot PRO — 1 месяц",
+  "pro.invoice.description": "Доступ к расширенным возможностям Safabot на 30 дней",
+  "pro.invoice.label": "Safabot PRO (1 месяц)",
+  "pro.payment.success": "🎉 PRO активирован! Действует до {date}.",
+  "limits.button.get_pro": "⭐ Получить PRO",
+  "limits.ai_generation_reached": "Вы использовали бесплатный лимит подбора новых слов на сегодня ({limit}). Оформите PRO, чтобы снять это ограничение."
 }

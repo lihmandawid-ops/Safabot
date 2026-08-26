@@ -524,6 +524,87 @@ async def test_newwords_with_working_ai_shows_a_summary_screen_not_yet_added(han
     assert not any(uw.word.word == "aiword" for uw in words)
 
 
+async def test_newwords_blocked_for_free_user_over_daily_ai_limit_shows_paywall_cta(handler_db, monkeypatch):
+    """Commercial layer: a FREE user who already used up today's AI-
+    generation quota (services/limits_service.py) must see a friendly
+    limit message with a ⭐ Получить PRO button - never the technical
+    "generation failed" message, and the AI must never even be called."""
+    import config
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+    from database.repositories import word_generation_logs as generation_logs_repo
+    from handlers import learning as learning_handler
+    from services import word_generation_service
+
+    monkeypatch.setenv("FREE_DAILY_AI_GENERATION_LIMIT", "2")
+    config.get_settings.cache_clear()
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        current = await user_languages_repo.get_current_language(s, user.id)
+        await generation_logs_repo.log(
+            s, user_id=user.id, language_code=current.language_code, requested_amount=2,
+            generated_amount=2, provider="deepseek", trigger="explicit_new_words",
+        )
+
+    def _fail_if_called():
+        raise AssertionError("AI must not be called once the FREE daily limit is reached")
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", _fail_if_called)
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:newwords")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "2" in text  # the configured limit, shown to the user
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "pay:paywall" in callbacks
+
+    config.get_settings.cache_clear()
+
+
+async def test_newwords_never_blocked_for_trial_user_regardless_of_usage(handler_db, monkeypatch):
+    """TRIAL gets full PRO-level access (services.subscription_service.
+    has_pro_access) - the daily AI-generation limit must never apply."""
+    import config
+    from datetime import date, timedelta
+
+    from database.database import session_scope
+    from database.repositories import subscriptions as subscriptions_repo
+    from database.repositories import users as users_repo
+    from database.models import SubscriptionStatus
+    from handlers import learning as learning_handler
+    from services import ai_models, word_generation_service
+
+    monkeypatch.setenv("FREE_DAILY_AI_GENERATION_LIMIT", "0")
+    config.get_settings.cache_clear()
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        await subscriptions_repo.set_subscription_status(s, user, status=SubscriptionStatus.TRIAL)
+        user.trial_end = date.today() + timedelta(days=5)
+
+    class _FakeAI:
+        async def generate_words(self, **kwargs):
+            return ai_models.GenerateWordsResult(
+                words=[ai_models.GeneratedWord(word="trialword", translations=[ai_models.TranslationResult(translation="слово")])]
+            )
+
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: _FakeAI())
+
+    context = SimpleNamespace(user_data={})
+    q = _query("learn:newwords")
+    await learning_handler.handle_learning_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "trialword" in text  # reached the real candidate summary, not the limit message
+
+    config.get_settings.cache_clear()
+
+
 async def test_two_distinct_candidates_walk_through_cards_sequentially(handler_db, monkeypatch):
     """study-flow-rework stage sections 7, 9, 11: with two genuinely
     distinct candidates, ▶️ Начнём изучать persists and shows the FIRST

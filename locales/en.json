@@ -468,5 +468,19 @@
   "progress.section.level": "🎯 Level progress",
   "progress.level.current": "Current level: {level}",
   "progress.level.next": "To level {level}: {mastered}/{required} words mastered, accuracy {accuracy} (need {required_accuracy})",
-  "progress.level.max": "You've reached the top level 🎉"
+  "progress.level.max": "You've reached the top level 🎉",
+  "pro.title": "⭐ Safabot PRO",
+  "pro.benefit.new_words": "✓ More words in learning",
+  "pro.benefit.ai_generation": "✓ More AI-picked new words",
+  "pro.benefit.review": "✓ Extended review",
+  "pro.benefit.stats": "✓ Extended statistics",
+  "pro.benefit.adaptation": "✓ Personal difficulty adaptation",
+  "pro.price": "Price: {price} ⭐ / month",
+  "pro.button.buy": "⭐ Buy PRO",
+  "pro.invoice.title": "Safabot PRO — 1 month",
+  "pro.invoice.description": "Access to Safabot's extended features for 30 days",
+  "pro.invoice.label": "Safabot PRO (1 month)",
+  "pro.payment.success": "🎉 PRO activated! Valid until {date}.",
+  "limits.button.get_pro": "⭐ Get PRO",
+  "limits.ai_generation_reached": "You've used today's free limit for AI word generation ({limit}). Get PRO to remove this limit."
 }

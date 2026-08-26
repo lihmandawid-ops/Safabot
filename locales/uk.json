@@ -468,5 +468,19 @@
   "progress.section.level": "🎯 Прогрес рівня",
   "progress.level.current": "Поточний рівень: {level}",
   "progress.level.next": "До рівня {level}: засвоєно {mastered}/{required} слів, точність {accuracy} (потрібно {required_accuracy})",
-  "progress.level.max": "Ви досягли максимального рівня 🎉"
+  "progress.level.max": "Ви досягли максимального рівня 🎉",
+  "pro.title": "⭐ Safabot PRO",
+  "pro.benefit.new_words": "✓ Більше слів у вивченні",
+  "pro.benefit.ai_generation": "✓ Більше нових слів від AI",
+  "pro.benefit.review": "✓ Розширене повторення",
+  "pro.benefit.stats": "✓ Розширена статистика",
+  "pro.benefit.adaptation": "✓ Персональна адаптація складності",
+  "pro.price": "Ціна: {price} ⭐ / місяць",
+  "pro.button.buy": "⭐ Купити PRO",
+  "pro.invoice.title": "Safabot PRO — 1 місяць",
+  "pro.invoice.description": "Доступ до розширених можливостей Safabot на 30 днів",
+  "pro.invoice.label": "Safabot PRO (1 місяць)",
+  "pro.payment.success": "🎉 PRO активовано! Діє до {date}.",
+  "limits.button.get_pro": "⭐ Отримати PRO",
+  "limits.ai_generation_reached": "Ви використали безкоштовний денний ліміт підбору нових слів ({limit}). Оформіть PRO, щоб зняти це обмеження."
 }
