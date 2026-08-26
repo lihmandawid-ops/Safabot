@@ -117,7 +117,7 @@ async def test_quiz_start_builds_a_question_with_four_options(handler_db):
     markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
     buttons = [b for row in markup.inline_keyboard for b in row]
     assert len(buttons) == 4
-    assert {b.callback_data for b in buttons} == {"quiz:answer:0", "quiz:answer:1", "quiz:answer:2", "quiz:answer:3"}
+    assert {b.callback_data for b in buttons} == {"quiz:answer:0:0", "quiz:answer:0:1", "quiz:answer:0:2", "quiz:answer:0:3"}
 
 
 async def test_quiz_question_screen_shows_the_word_never_the_flashcard_reveal_button(handler_db):
@@ -173,7 +173,7 @@ async def test_quiz_correct_answer_shows_correct_feedback(handler_db):
     q0 = state["questions"][0]
     correct_index = q0["options"].index(q0["correct_answer"])
 
-    q = _query(f"quiz:answer:{correct_index}")
+    q = _query(f"quiz:answer:0:{correct_index}")
     await quiz_handler.handle_quiz_callback(q, context)
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "Правильно" in text
@@ -197,7 +197,7 @@ async def test_quiz_wrong_answer_shows_wrong_feedback_and_updates_repetition(han
         uw = await user_words_repo.get_by_id(s, uw_id)
         old_wrong = uw.wrong_answers
 
-    q = _query(f"quiz:answer:{wrong_index}")
+    q = _query(f"quiz:answer:0:{wrong_index}")
     await quiz_handler.handle_quiz_callback(q, context)
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "Неправильно" in text
@@ -210,6 +210,70 @@ async def test_quiz_wrong_answer_shows_wrong_feedback_and_updates_repetition(han
     assert uw.wrong_answers == old_wrong + 1  # fed into the real repetition system
 
 
+async def test_double_tap_on_a_stale_answer_button_is_a_silent_no_op(handler_db):
+    """Real user report: a slow response invites an impatient second tap
+    on the same still-visible answer button. By the time that stale
+    second tap is processed, the quiz has already moved past that
+    question (position changed via quiz:next) - it must not be re-graded,
+    double-count the score, or raise (which would surface as the bot's
+    generic "⚠️ Что-то пошло не так" error message)."""
+    from database.database import session_scope
+    from database.repositories import user_words as user_words_repo
+    from handlers import quiz as quiz_handler
+
+    context = SimpleNamespace(user_data={})
+    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+    if len(state["questions"]) < 2:
+        return  # not enough words in this run to guarantee a second question
+
+    q0 = state["questions"][0]
+    correct_index = q0["options"].index(q0["correct_answer"])
+    uw_id = q0["user_word_id"]
+
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:0:{correct_index}"), context)
+    await quiz_handler.handle_quiz_callback(_query("quiz:next:0"), context)
+    assert context.user_data["quiz"]["position"] == 1
+
+    # The stale second tap on question 0's (already-answered) button -
+    # its own callback still carries position 0, but the quiz has moved on.
+    stale = _query(f"quiz:answer:0:{correct_index}")
+    await quiz_handler.handle_quiz_callback(stale, context)
+
+    stale.callback_query.answer.assert_awaited_once()  # spinner stops on the client
+    stale.callback_query.edit_message_text.assert_not_awaited()  # no re-render, no crash
+    assert context.user_data["quiz"]["correct"] == 1  # not double-counted
+    assert context.user_data["quiz"]["position"] == 1  # unchanged
+
+    async with session_scope() as s:
+        uw = await user_words_repo.get_by_id(s, uw_id)
+    assert uw.correct_answers == 0  # a correct MC answer never writes to UserWord anyway
+
+
+async def test_double_tap_on_stale_next_button_does_not_skip_a_question(handler_db):
+    """Same guard, for quiz:next - a double tap on "Далее" must not
+    advance the quiz twice."""
+    from handlers import quiz as quiz_handler
+
+    context = SimpleNamespace(user_data={})
+    await quiz_handler.handle_quiz_callback(_query("quiz:start"), context)
+    state = context.user_data["quiz"]
+    if len(state["questions"]) < 2:
+        return
+
+    q0 = state["questions"][0]
+    correct_index = q0["options"].index(q0["correct_answer"])
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:0:{correct_index}"), context)
+
+    await quiz_handler.handle_quiz_callback(_query("quiz:next:0"), context)
+    assert context.user_data["quiz"]["position"] == 1
+
+    stale_next = _query("quiz:next:0")
+    await quiz_handler.handle_quiz_callback(stale_next, context)
+    stale_next.callback_query.edit_message_text.assert_not_awaited()
+    assert context.user_data["quiz"]["position"] == 1  # still unchanged, not skipped to 2
+
+
 async def test_quiz_does_not_show_difficulty_buttons_anywhere(handler_db):
     """С трудом / Не помню / Помню / Очень легко must never appear in the
     quiz flow - that scale belongs only to the normal review flow."""
@@ -220,12 +284,12 @@ async def test_quiz_does_not_show_difficulty_buttons_anywhere(handler_db):
     state = context.user_data["quiz"]
     q0 = state["questions"][0]
 
-    q = _query(f"quiz:answer:{0}")
+    q = _query(f"quiz:answer:0:{0}")
     await quiz_handler.handle_quiz_callback(q, context)
     markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
     assert all(not cb.startswith("review:") for cb in callbacks)
-    assert callbacks == ["quiz:next"]
+    assert callbacks == ["quiz:next:0"]
 
 
 async def test_quiz_next_advances_to_the_next_question(handler_db):
@@ -239,9 +303,9 @@ async def test_quiz_next_advances_to_the_next_question(handler_db):
 
     q0 = state["questions"][0]
     correct_index = q0["options"].index(q0["correct_answer"])
-    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:0:{correct_index}"), context)
 
-    q2 = _query("quiz:next")
+    q2 = _query("quiz:next:0")
     await quiz_handler.handle_quiz_callback(q2, context)
     assert context.user_data["quiz"]["position"] == 1
 
@@ -266,8 +330,8 @@ async def test_results_screen_learnwords_button_shows_learning_intro(handler_db)
         pos = state["position"]
         q0 = state["questions"][pos]
         correct_index = q0["options"].index(q0["correct_answer"])
-        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
-        await quiz_handler.handle_quiz_callback(_query("quiz:next"), context)
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{pos}:{correct_index}"), context)
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:next:{pos}"), context)
 
     q = _query("quiz:learnwords")
     await quiz_handler.handle_quiz_callback(q, context)
@@ -292,8 +356,8 @@ async def test_results_screen_offers_next_review_never_learn_words(handler_db):
         pos = state["position"]
         q0 = state["questions"][pos]
         correct_index = q0["options"].index(q0["correct_answer"])
-        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
-        q_next = _query("quiz:next")
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{pos}:{correct_index}"), context)
+        q_next = _query(f"quiz:next:{pos}")
         await quiz_handler.handle_quiz_callback(q_next, context)
 
     # The final "quiz:next" call above pushed position past the last
@@ -317,8 +381,8 @@ async def test_results_screen_mainmenu_button_clears_quiz_state_and_sends_menu(h
         pos = state["position"]
         q0 = state["questions"][pos]
         correct_index = q0["options"].index(q0["correct_answer"])
-        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{correct_index}"), context)
-        await quiz_handler.handle_quiz_callback(_query("quiz:next"), context)
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{pos}:{correct_index}"), context)
+        await quiz_handler.handle_quiz_callback(_query(f"quiz:next:{pos}"), context)
 
     q = _query("quiz:mainmenu")
     await quiz_handler.handle_quiz_callback(q, context)
@@ -338,7 +402,7 @@ async def test_retry_wrong_after_a_mistake_only_uses_missed_words(handler_db):
     wrong_index = next(i for i, opt in enumerate(q0["options"]) if opt != q0["correct_answer"])
     uw_id = q0["user_word_id"]
 
-    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:{wrong_index}"), context)
+    await quiz_handler.handle_quiz_callback(_query(f"quiz:answer:0:{wrong_index}"), context)
 
     q = _query("quiz:retry_wrong")
     await quiz_handler.handle_quiz_callback(q, context)

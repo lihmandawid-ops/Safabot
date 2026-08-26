@@ -74,7 +74,7 @@ async def _render_question(edit, state: dict) -> None:
     lines.append("")
     lines.append(t("quiz.question", get_current_language()))
     text = "\n".join(lines)
-    await edit(text, reply_markup=quiz_choice_keyboard(q["options"]))
+    await edit(text, reply_markup=quiz_choice_keyboard(q["options"], position=state["position"]))
 
 
 async def _render_results(edit, state: dict) -> None:
@@ -150,7 +150,17 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if state is None:
                 await edit(t("quiz.no_words", get_current_language()), reply_markup=after_session_keyboard())
                 return
-            index = int(data.removeprefix("quiz:answer:"))
+            tapped_position, index = (int(part) for part in data.removeprefix("quiz:answer:").split(":"))
+            if tapped_position != state["position"]:
+                # Real user report: a slow response invites an impatient
+                # second tap on the same still-visible answer button
+                # before the first tap's edit has landed - by the time
+                # this stale tap is processed the quiz has already moved
+                # on, so grading it again (or against a question it no
+                # longer refers to) would double-count the answer at
+                # best and crash at worst. The callback query is already
+                # answered above, so the tap just silently does nothing.
+                return
             q = state["questions"][state["position"]]
             chosen = q["options"][index] if 0 <= index < len(q["options"]) else None
             is_correct = chosen == q["correct_answer"]
@@ -168,13 +178,18 @@ async def handle_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 # that the answer has been graded/shown.
                 feedback += "\n\n" + t("card.pronunciation_line", get_current_language(), pronunciation=q["pronunciation"])
             is_last = state["position"] + 1 >= len(state["questions"])
-            await edit(feedback, reply_markup=quiz_continue_keyboard(is_last_question=is_last))
+            await edit(feedback, reply_markup=quiz_continue_keyboard(is_last_question=is_last, position=state["position"]))
 
-        elif data == "quiz:next":
+        elif data.startswith("quiz:next:"):
             await query.answer()
             state = context.user_data.get("quiz")
             if state is None:
                 await edit(t("quiz.no_words", get_current_language()), reply_markup=after_session_keyboard())
+                return
+            tapped_position = int(data.removeprefix("quiz:next:"))
+            if tapped_position != state["position"]:
+                # Same stale-tap guard as quiz:answer above - a double
+                # tap on "Далее" must not advance the quiz twice.
                 return
             await _advance_or_finish(edit, session, state)
 

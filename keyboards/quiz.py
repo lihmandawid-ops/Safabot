@@ -11,18 +11,27 @@ from utils.i18n import get_current_language, t
 _OPTION_NUMBERS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣")
 
 
-def quiz_choice_keyboard(options: list[str]) -> InlineKeyboardMarkup:
+def quiz_choice_keyboard(options: list[str], *, position: int) -> InlineKeyboardMarkup:
+    """`position` (real user report: a slow-to-respond bot invites a
+    second tap on the same still-visible answer button before the first
+    tap's edit has landed) is embedded in callback_data so a stale second
+    tap - one that arrives after handle_quiz_callback has already moved
+    the quiz state past this question - can be recognized and ignored
+    instead of being re-graded or crashing on state that no longer
+    matches."""
     buttons = [
-        InlineKeyboardButton(f"{_OPTION_NUMBERS[i]} {option}", callback_data=f"quiz:answer:{i}")
+        InlineKeyboardButton(f"{_OPTION_NUMBERS[i]} {option}", callback_data=f"quiz:answer:{position}:{i}")
         for i, option in enumerate(options)
     ]
     rows = [[b] for b in buttons]
     return InlineKeyboardMarkup(rows)
 
 
-def quiz_continue_keyboard(*, is_last_question: bool) -> InlineKeyboardMarkup:
+def quiz_continue_keyboard(*, is_last_question: bool, position: int) -> InlineKeyboardMarkup:
     key = "quiz.button.finish" if is_last_question else "quiz.button.next"
-    return InlineKeyboardMarkup([[InlineKeyboardButton(t(key, get_current_language()), callback_data="quiz:next")]])
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(t(key, get_current_language()), callback_data=f"quiz:next:{position}")]]
+    )
 
 
 def quiz_results_keyboard(*, has_wrong: bool) -> InlineKeyboardMarkup:
