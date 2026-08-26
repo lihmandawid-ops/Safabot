@@ -23,6 +23,7 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton("⚙️ Limits", callback_data="admin:limits")],
             [InlineKeyboardButton("🔎 Search user", callback_data="admin:search")],
             [InlineKeyboardButton("📢 Broadcast", callback_data="admin:broadcast")],
+            [InlineKeyboardButton("🚪 Exit", callback_data="admin:exit")],
         ]
     )
 

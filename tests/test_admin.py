@@ -202,6 +202,31 @@ async def test_admin_callback_blocks_non_admin_even_with_valid_callback_data(han
     q.edit_message_text.assert_not_awaited()
 
 
+async def test_admin_exit_sends_the_regular_main_menu(handler_db):
+    from handlers import admin as admin_handler
+
+    update, q = _query("admin:exit", ADMIN_ID)
+    q.message = AsyncMock()
+    context = SimpleNamespace(user_data={"mode": admin_handler.MODE, "admin_submode": "search"})
+    await admin_handler.handle_admin_callback(update, context)
+
+    q.message.reply_text.assert_awaited_once()
+    kwargs = q.message.reply_text.call_args[1]
+    assert kwargs["reply_markup"] is not None
+    assert "mode" not in context.user_data
+    assert "admin_submode" not in context.user_data
+
+
+async def test_admin_exit_blocks_non_admin(handler_db):
+    from handlers import admin as admin_handler
+
+    update, q = _query("admin:exit", NON_ADMIN_ID)
+    q.message = AsyncMock()
+    await admin_handler.handle_admin_callback(update, SimpleNamespace(user_data={}))
+
+    q.message.reply_text.assert_not_awaited()
+
+
 async def test_admin_users_screen_shows_counts(handler_db):
     from handlers import admin as admin_handler
 

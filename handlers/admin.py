@@ -21,8 +21,11 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 from database.database import session_scope
 from database.repositories import admin as admin_repo
+from database.repositories import users as users_repo
 from keyboards.admin import admin_menu_keyboard, back_to_admin_menu_keyboard, broadcast_confirm_keyboard
+from keyboards.main_menu import main_menu_keyboard
 from services import admin_service
+from utils.i18n import get_current_language, set_current_language, t
 from utils.logging import get_logger
 from utils.telegram_helpers import safe_edit_message_text
 
@@ -54,6 +57,19 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     async def edit(text: str, reply_markup=None) -> None:
         await safe_edit_message_text(query, text, reply_markup=reply_markup or back_to_admin_menu_keyboard())
+
+    if data == "admin:exit":
+        await query.answer()
+        context.user_data.pop("mode", None)
+        context.user_data.pop("admin_submode", None)
+        async with session_scope() as session:
+            user = await users_repo.get_by_telegram_id(session, query.from_user.id)
+            set_current_language(user.interface_language if user else None)
+        language = get_current_language()
+        await query.message.reply_text(
+            t("onboarding.main_menu_ready", language), reply_markup=main_menu_keyboard(language)
+        )
+        return
 
     if data == "admin:home":
         await query.answer()
