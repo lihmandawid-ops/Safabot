@@ -51,7 +51,7 @@ async def build_flashcard_items(
         if translation is None:
             continue
         lang = LANGUAGE_BY_CODE.get(uw.word.language_code)
-        example = uw.word.examples[0].example_text if uw.word.examples else None
+        example = uw.word.examples[0] if uw.word.examples else None
         pronunciation = await pronunciation_service.ensure_and_format(
             session, uw.word, translation_language=translation_language, user_id=user_id
         )
@@ -62,7 +62,16 @@ async def build_flashcard_items(
                 "word": uw.word.word,
                 "translation": translation,
                 "pronunciation": pronunciation,
-                "example": example,
+                "example": example.example_text if example else None,
+                # Real user request: the example sentence's own translation
+                # must show alongside it - already stored on WordExample
+                # (populated at generation time by word_generation_service/
+                # dictionary_service), just never surfaced here before. No
+                # live AI backfill if missing (same as pronunciation was
+                # historically) - a sentence without one simply shows the
+                # foreign text alone, same graceful-degrade utils.word_
+                # display.py's build_word_card already uses.
+                "example_translation": example.translation if example else None,
             }
         )
     return items

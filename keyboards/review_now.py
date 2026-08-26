@@ -36,20 +36,49 @@ def mode_picker_keyboard(*, count: int, mastered: bool) -> InlineKeyboardMarkup:
     )
 
 
-def flashcard_keyboard() -> InlineKeyboardMarkup:
+def flashcard_keyboard(*, has_example: bool = False) -> InlineKeyboardMarkup:
     """study-flow-rework stage (real user feedback): simplified to just two
     buttons - 🏆 Уже выучено (services.user_word_service.mark_mastered,
     skips straight to MASTERED) and ➡️ Далее (moves to the next word
     without touching this word's repetition schedule at all - explicit
     product decision: a skip is not an answer). The old ✅/❌ Знаю/Не знаю
     grading row (which fed learning_service.record_on_demand_answer) is
-    removed from this flow."""
-    return InlineKeyboardMarkup(
+    removed from this flow.
+
+    Real user request: a third row - 📖 Учить слово из примера - only
+    when the card actually has an example sentence to pull words from
+    (handlers/review_now.py's revnow:examplewords branch)."""
+    rows = [
+        [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data="revnow:mastered")],
+        [InlineKeyboardButton(t("revnow.button.next", get_current_language()), callback_data="revnow:next")],
+    ]
+    if has_example:
+        rows.append(
+            [InlineKeyboardButton(t("revnow.button.learn_from_example", get_current_language()), callback_data="revnow:examplewords")]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+_EXAMPLE_WORD_NUMBERS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
+
+
+def example_words_keyboard(count: int) -> InlineKeyboardMarkup:
+    """📖 Учить слово из примера's numbered pick list (real user request:
+    "по нумерации предложить пользователю какое слово добавить" - offer
+    the words by number)."""
+    rows = [
         [
-            [InlineKeyboardButton(t("revnow.button.already_learned", get_current_language()), callback_data="revnow:mastered")],
-            [InlineKeyboardButton(t("revnow.button.next", get_current_language()), callback_data="revnow:next")],
+            InlineKeyboardButton(
+                _EXAMPLE_WORD_NUMBERS[i] if i < len(_EXAMPLE_WORD_NUMBERS) else str(i + 1),
+                callback_data=f"revnow:examplewords:pick:{i}",
+            )
         ]
+        for i in range(count)
+    ]
+    rows.append(
+        [InlineKeyboardButton(t("revnow.example_words.cancel", get_current_language()), callback_data="revnow:examplewords:cancel")]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 def empty_keyboard() -> InlineKeyboardMarkup:

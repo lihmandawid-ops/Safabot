@@ -34,21 +34,25 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from database.database import session_scope
-from database.models import WordStatus
+from database.models import WordSource, WordStatus
 from database.repositories import notifications as notifications_repo
 from database.repositories import user_languages as user_languages_repo
 from database.repositories import user_words as user_words_repo
 from database.repositories import users as users_repo
 from handlers import quiz as quiz_handler
+from handlers.dictionary import add_word_batch
 from keyboards.main_menu import main_menu_keyboard
 from keyboards.review_now import (
     completion_keyboard,
     empty_keyboard,
+    example_words_keyboard,
     flashcard_keyboard,
     mode_picker_keyboard,
     review_pool_keyboard,
 )
 from services import learning_service, quiz_service, review_now_service, user_word_service
+from services.ai_errors import AIConfigurationError, AIError
+from services.ai_service import get_ai_service
 from utils.i18n import get_current_language, set_current_language, t
 from utils.telegram_helpers import safe_edit_message_reply_markup, safe_edit_message_text
 from utils.time import local_today, utc_now
@@ -97,12 +101,18 @@ def _flashcard_text(item: dict, position: int, total: int) -> str:
     if item["example"]:
         lines.append("")
         lines.append(f"💬 {item['example']}")
+        # Real user request: the example sentence needs its own
+        # translation shown right under it, same as everywhere else in
+        # the bot a foreign example is displayed.
+        if item.get("example_translation"):
+            lines.append(item["example_translation"])
     return "\n".join(lines)
 
 
 async def _render_flashcard(edit, state: dict) -> None:
-    text = _flashcard_text(state["items"][state["position"]], state["position"], len(state["items"]))
-    await edit(text, reply_markup=flashcard_keyboard())
+    item = state["items"][state["position"]]
+    text = _flashcard_text(item, state["position"], len(state["items"]))
+    await edit(text, reply_markup=flashcard_keyboard(has_example=bool(item["example"])))
 
 
 async def _finish_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, state: dict, *, user) -> None:
@@ -248,6 +258,73 @@ async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAU
                 await _finish_flashcards(edit, context, state, user=user)
             else:
                 await _render_flashcard(edit, state)
+
+        elif data == "revnow:examplewords":
+            # 📖 Учить слово из примера (real user request): breaks the
+            # current card's example sentence down into its significant
+            # words, via the exact same AI call (analyze_text) and "words
+            # worth learning" semantics 📝 Разбор текста and 💬 Полезные
+            # фразы's own breakdown already use - never a second word-
+            # extraction implementation.
+            await query.answer()
+            state = context.user_data.get("revnow")
+            if state is None:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            item = state["items"][state["position"]]
+            example = item["example"]
+            if not example:
+                return
+            try:
+                result = await get_ai_service().analyze_text(
+                    example, language_code=current.language_code,
+                    translation_language=current.translation_language,
+                    interface_language=current.translation_language, user_id=user.id,
+                )
+            except AIConfigurationError:
+                await edit(t("ai.not_configured", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            except AIError:
+                await edit(t("ai.generic_error", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            if not result.key_words:
+                await edit(t("revnow.example_words.none_found", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            context.user_data["revnow_example_words"] = [kw.word for kw in result.key_words]
+            lines = [t("revnow.example_words.header", get_current_language()), ""]
+            lines.extend(f"{i}. {kw.word} — {kw.translation}" for i, kw in enumerate(result.key_words, start=1))
+            lines.append("")
+            lines.append(t("revnow.example_words.pick_hint", get_current_language()))
+            await edit("\n".join(lines), reply_markup=example_words_keyboard(len(result.key_words)))
+
+        elif data.startswith("revnow:examplewords:pick:"):
+            state = context.user_data.get("revnow")
+            words = context.user_data.get("revnow_example_words")
+            if state is None or not words:
+                await query.answer()
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            index = int(data.removeprefix("revnow:examplewords:pick:"))
+            if index < 0 or index >= len(words):
+                await query.answer()
+                return
+            await query.answer()
+            context.user_data.pop("revnow_example_words", None)
+            await add_word_batch(edit, session, user=user, current=current, raw_words=[words[index]], source=WordSource.AI)
+            # Real user request: "после выбора вернуть пользователя к
+            # дальнейшему повторению" - immediately continue the SAME
+            # flashcard (never advances state["position"] - picking a
+            # word to learn isn't an answer to the card being reviewed).
+            await _render_flashcard(query.message.reply_text, state)
+
+        elif data == "revnow:examplewords:cancel":
+            await query.answer()
+            context.user_data.pop("revnow_example_words", None)
+            state = context.user_data.get("revnow")
+            if state is None:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            await _render_flashcard(edit, state)
 
         elif data.startswith("revnow:notif:"):
             await query.answer()

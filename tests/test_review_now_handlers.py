@@ -307,3 +307,170 @@ async def test_cancel_clears_state_and_returns_to_main_menu(handler_db):
 
     assert "revnow" not in context.user_data
     q.callback_query.message.reply_text.assert_awaited_once()
+
+
+# --- 📖 Учить слово из примера (real user request: the example sentence
+# needs its own translation shown, plus a way to pick a word out of it to
+# add to learning, then return to the same card) ---
+
+
+async def _add_example(word_text="appointment", *, translation="Встреча назначена на завтра."):
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word=word_text)
+        await words_repo.add_example(
+            s, word_id=word.id, example_text="The appointment is scheduled for tomorrow.", translation=translation,
+        )
+
+
+async def test_flashcard_shows_example_translation_and_the_learn_from_example_button(handler_db):
+    from handlers.review_now import handle_review_now_callback
+
+    await _add_example()
+
+    context = SimpleNamespace(user_data={})
+    q = _query("revnow:mode:flashcard:4:0")
+    await handle_review_now_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "The appointment is scheduled for tomorrow." in text
+    assert "Встреча назначена на завтра." in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:mastered", "revnow:next", "revnow:examplewords"]
+
+
+def _install_fake_analyze_ai(monkeypatch, *, key_words):
+    from services import ai_models
+
+    async def _fake_analyze_text(text, **kwargs):
+        return ai_models.TextAnalysisResult(original_text=text, translation="перевод", key_words=key_words)
+
+    fake_ai = type("FakeAI", (), {"analyze_text": staticmethod(_fake_analyze_text)})()
+    monkeypatch.setattr("handlers.review_now.get_ai_service", lambda: fake_ai)
+    return fake_ai
+
+
+async def test_learn_from_example_shows_a_numbered_translated_word_list(handler_db, monkeypatch):
+    from services import ai_models
+    from handlers.review_now import handle_review_now_callback
+
+    await _add_example()
+    _install_fake_analyze_ai(
+        monkeypatch,
+        key_words=[
+            ai_models.AnalyzedWord(word="scheduled", translation="запланирован"),
+            ai_models.AnalyzedWord(word="tomorrow", translation="завтра"),
+        ],
+    )
+
+    context = SimpleNamespace(user_data={})
+    await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
+
+    q = _query("revnow:examplewords")
+    await handle_review_now_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "1. scheduled — запланирован" in text
+    assert "2. tomorrow — завтра" in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:examplewords:pick:0", "revnow:examplewords:pick:1", "revnow:examplewords:cancel"]
+    assert context.user_data["revnow_example_words"] == ["scheduled", "tomorrow"]
+
+
+async def test_picking_a_word_from_example_adds_it_and_returns_to_the_same_card(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from database.repositories import user_words as user_words_repo
+    from database.models import WordStatus
+    from services import ai_models, word_service
+    from handlers.review_now import handle_review_now_callback
+
+    await _add_example()
+    # add_word_batch (reused as-is from handlers/dictionary.py) looks the
+    # picked word up via dictionary_service.lookup_word, local pool first -
+    # AI dictionary lookup is unconfigured in this default test env, so
+    # "scheduled" needs to already be a real local Word for the add to
+    # succeed (mirrors tests/test_text_analysis_flow.py's own seeded-word
+    # requirement for exactly the same reason).
+    async with session_scope() as s:
+        await word_service.get_or_create_word(s, language_code="en", word="scheduled")
+    _install_fake_analyze_ai(monkeypatch, key_words=[ai_models.AnalyzedWord(word="scheduled", translation="запланирован")])
+
+    context = SimpleNamespace(user_data={})
+    await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
+    await handle_review_now_callback(_query("revnow:examplewords"), context)
+
+    q = _query("revnow:examplewords:pick:0")
+    await handle_review_now_callback(q, context)
+
+    # "revnow_example_words" state is consumed, the review is still where
+    # it was (position never advanced - picking a word to learn is not an
+    # answer to the card being reviewed), and a NEW message re-renders the
+    # exact same flashcard so the user lands back in the review flow.
+    assert "revnow_example_words" not in context.user_data
+    assert context.user_data["revnow"]["position"] == 0
+    q.callback_query.message.reply_text.assert_awaited_once()
+    resumed_text = q.callback_query.message.reply_text.call_args[0][0]
+    assert "appointment" in resumed_text
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        rows = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    added = [r for r in rows if r.word.word == "scheduled"]
+    assert len(added) == 1
+    # Real user request: a live add enters repetition immediately.
+    assert added[0].status == WordStatus.LEARNING
+
+
+async def test_learn_from_example_cancel_returns_to_the_same_card_without_adding(handler_db, monkeypatch):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from database.repositories import user_words as user_words_repo
+    from services import ai_models
+    from handlers.review_now import handle_review_now_callback
+
+    await _add_example()
+    _install_fake_analyze_ai(monkeypatch, key_words=[ai_models.AnalyzedWord(word="scheduled", translation="запланирован")])
+
+    context = SimpleNamespace(user_data={})
+    await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
+    await handle_review_now_callback(_query("revnow:examplewords"), context)
+
+    q = _query("revnow:examplewords:cancel")
+    await handle_review_now_callback(q, context)
+
+    assert "revnow_example_words" not in context.user_data
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert "appointment" in text
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["revnow:mastered", "revnow:next", "revnow:examplewords"]
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        rows = await user_words_repo.get_user_words(s, user_id=user.id, language_code="en")
+    assert not any(r.word.word == "scheduled" for r in rows)
+
+
+async def test_learn_from_example_without_ai_configured_shows_friendly_message(handler_db):
+    """Default test environment has AI forced unconfigured (conftest.py's
+    autouse fixture) - no monkeypatch needed here."""
+    from handlers.review_now import handle_review_now_callback
+
+    await _add_example()
+
+    context = SimpleNamespace(user_data={})
+    await handle_review_now_callback(_query("revnow:mode:flashcard:4:0"), context)
+
+    q = _query("revnow:examplewords")
+    await handle_review_now_callback(q, context)
+
+    text = q.callback_query.edit_message_text.call_args[0][0]
+    assert text  # some not-configured message shown
+    markup = q.callback_query.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "revnow:examplewords" in callbacks
