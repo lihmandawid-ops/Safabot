@@ -25,6 +25,7 @@ from telegram.ext import ContextTypes, MessageHandler, filters
 
 from database.database import session_scope
 from database.repositories import users as users_repo
+from handlers import admin as admin_handler
 from handlers import dictionary as dictionary_handler
 from handlers import grammar as grammar_handler
 from handlers import learning as learning_handler
@@ -122,6 +123,9 @@ async def route_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if mode == learning_handler.MODE:
         await learning_handler.handle_text_input(update, context, text)
+        return
+    if mode == admin_handler.MODE:
+        await admin_handler.handle_text_input(update, context, text)
         return
 
     # Bugfix: a reply keyboard is sticky on the client - if a button's

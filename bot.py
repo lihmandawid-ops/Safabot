@@ -25,6 +25,7 @@ from database.database import init_models, session_scope
 from database.repositories import languages as languages_repo
 from database.seed import seed_languages
 from database.seed_words import seed_words
+from handlers.admin import admin_callback_handler, admin_command_handler
 from handlers.dictionary import dictionary_callback_handler
 from handlers.help import help_command
 from handlers.learning import learning_callback_handler
@@ -113,6 +114,8 @@ def build_application() -> Application:
 
     application.add_handler(start_conversation_handler)
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(admin_command_handler)
+    application.add_handler(admin_callback_handler)
     application.add_handler(settings_callback_handler)
     application.add_handler(dictionary_callback_handler)
     application.add_handler(words_callback_handler)
