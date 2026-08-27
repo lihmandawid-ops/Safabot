@@ -156,6 +156,19 @@ async def test_difficulty_pick_answers_once_and_updates_screen(handler_db):
     q.edit_message_text.assert_awaited_once()
 
 
+async def test_difficulty_pick_updates_the_languages_summary_row(handler_db):
+    """Real user request: a manual pick from "🎚 Уровень сложности
+    изучения языка" saved correctly (UserLanguage.learning_difficulty)
+    but the "Изучаемые языки" row in the settings summary kept showing
+    the separate, auto-tracked `level` estimate instead - the row must
+    reflect the level the learner just picked, same as everything else
+    in the app already does (word generation reads the same
+    effective_difficulty())."""
+    q = await _run("set:difficulty:pick:c1")
+    summary = q.edit_message_text.call_args[0][0]
+    assert "C1" in summary
+
+
 async def test_difficulty_auto_answers_once_and_updates_screen(handler_db):
     q = await _run("set:difficulty:auto")
     assert q.answer.call_count == 1

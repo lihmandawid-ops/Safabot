@@ -45,7 +45,7 @@ from keyboards.settings import (
     topics_keyboard,
 )
 from keyboards.main_menu import main_menu_keyboard
-from services import level_placement_service, subscription_service
+from services import level_placement_service, level_progress_service, subscription_service
 from services.ai_errors import AIConfigurationError, AIError
 from services.learning_service import REVIEW_MODE_CHOICES
 from utils.i18n import get_current_language, set_current_language, t
@@ -111,13 +111,22 @@ async def _build_summary(session, user) -> str:
         lines.append(t("settings.your_languages", get_current_language()))
         for ul in languages:
             lang = LANGUAGE_BY_CODE.get(ul.language_code)
+            # Real user request: a manual pick from "🎚 Уровень сложности
+            # изучения языка" was saving correctly (learning_difficulty)
+            # but this row kept showing the separate, auto-tracked
+            # `level` estimate instead - never the value the learner just
+            # changed. effective_difficulty() is the same "what level is
+            # actually in effect right now" resolution word generation
+            # already uses, so this row now agrees with the rest of the
+            # app instead of reading a field the manual flow never touches.
+            displayed_level = level_progress_service.effective_difficulty(ul)
             lines.append(
                 t(
                     "settings.language_row",
                     get_current_language(),
                     flag=lang.flag if lang else "",
                     name=language_display_name(lang) if lang else ul.language_code,
-                    level=t(f"level.{ul.level}", get_current_language()),
+                    level=t(f"level.{displayed_level}", get_current_language()),
                     current_marker=t("settings.current_marker", get_current_language()) if ul.is_current else "",
                 )
             )
