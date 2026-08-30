@@ -558,6 +558,99 @@ async def test_manage_screen_from_review_section_moves_word_to_mastered(handler_
         assert uw2.status == WordStatus.MASTERED
 
 
+async def test_word_card_keyboard_offers_the_report_wrong_translation_button(handler_db):
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+
+    context = SimpleNamespace(user_data={})
+    await dictionary_handler.start_search(_message("dummy"), context)
+    update = _message("go")
+    await dictionary_handler.handle_search_query(update, context, "go")
+    async with session_scope() as s:
+        word = await words_repo.find_exact(s, language_code="en", normalized_word="go")
+
+    markup = update.message.reply_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert f"card:report:{word.id}" in callbacks
+
+
+async def test_report_wrong_translation_button_replaces_translation_and_resends_card(handler_db, monkeypatch):
+    """Real user report: אבנט (Hebrew "belt/sash") was mistranslated as
+    "window shutter" and, once persisted, never re-asked the AI again -
+    "⚠️ Неверный перевод" must fix exactly this."""
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    async with session_scope() as s:
+        from services import word_service
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="testword2")
+        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="оконная створка")
+        word_id = word.id
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            return (
+                '{"word": "testword2", "translations": [{"translation": "пояс", "usage_note": null}], '
+                '"part_of_speech": null, "phonetic": null, "pronunciation": null, '
+                '"definition": null, "examples": [], "difficulty": null, "category": null, '
+                '"verb_forms": null}'
+            )
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("services.dictionary_service.get_ai_service", lambda: live)
+
+    context = SimpleNamespace(user_data={})
+    q = _query(f"card:report:{word_id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+
+    # First reply is the "thanks, updated" confirmation, second is the
+    # re-sent card with the corrected translation.
+    assert q.callback_query.message.reply_text.await_count == 2
+    confirmation = q.callback_query.message.reply_text.call_args_list[0][0][0]
+    card_text = q.callback_query.message.reply_text.call_args_list[1][0][0]
+    assert "обновлён" in confirmation
+    assert "пояс" in card_text
+    assert "оконная створка" not in card_text
+
+    async with session_scope() as s:
+        refreshed = await words_repo.get_by_id(s, word_id)
+        ru = [t.translation for t in refreshed.translations if t.language_code == "ru"]
+    assert ru == ["пояс"]
+
+    get_ai_service.cache_clear()
+
+
+async def test_report_wrong_translation_button_without_ai_shows_failure_message(handler_db):
+    from database.database import session_scope
+    from database.repositories import words as words_repo
+    from handlers import dictionary as dictionary_handler
+    from services.ai_service import get_ai_service
+
+    get_ai_service.cache_clear()
+
+    async with session_scope() as s:
+        from services import word_service
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="testword3")
+        await words_repo.add_translation(s, word_id=word.id, language_code="ru", translation="перевод")
+        word_id = word.id
+
+    context = SimpleNamespace(user_data={})
+    q = _query(f"card:report:{word_id}")
+    await dictionary_handler.handle_dictionary_callback(q, context)
+
+    q.callback_query.message.reply_text.assert_awaited_once()
+    text = q.callback_query.message.reply_text.call_args[0][0]
+    assert "не удалось" in text.lower()
+
+
 async def test_manage_screen_from_all_section_hides_the_pause_button(handler_db):
     """Real user feedback: the 📚 Все section must not offer "⏸ Убрать из
     повторения" from the per-word screen at all."""

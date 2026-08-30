@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, or_, select
+from sqlalchemy import case, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -171,6 +171,19 @@ async def add_translation(
     session.add(row)
     await session.flush()
     return row
+
+
+async def delete_translations_for_language(session: AsyncSession, *, word_id: int, language_code: str) -> None:
+    """Removes only this word's WordTranslation rows for one
+    translation_language (report-wrong-translation feature) - never the
+    Word row itself, which UserWord.word_id references with
+    ondelete="CASCADE": deleting Word would silently wipe every learner's
+    progress on it, not just fix a bad translation. Other languages'
+    translations, examples, and forms are untouched."""
+    await session.execute(
+        delete(WordTranslation).where(WordTranslation.word_id == word_id, WordTranslation.language_code == language_code)
+    )
+    await session.flush()
 
 
 async def add_example(

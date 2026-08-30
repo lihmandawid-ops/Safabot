@@ -328,6 +328,29 @@ async def handle_dictionary_callback(update: Update, context: ContextTypes.DEFAU
                 return
             await query.message.reply_text(await _explain_word_text(card, current, user))
 
+        elif data.startswith("card:report:"):
+            # "⚠️ Неверный перевод" (bugfix, real-user report on the
+            # Hebrew shared dictionary): re-asks the AI fresh for this
+            # word and replaces ONLY this translation_language's
+            # translations - without this, a bad AI response for a real
+            # word is permanent, since search_words/
+            # find_unknown_words_for_generation only ever call AI when no
+            # local Word row exists yet.
+            word_id = int(data.removeprefix("card:report:"))
+            await query.answer()
+            word = await words_repo.get_by_id(session, word_id)
+            if word is None:
+                await query.message.reply_text(t("card.report_failed", get_current_language()))
+                return
+            updated = await word_service.report_wrong_translation(
+                session, word, translation_language=current.translation_language, user_id=user.id,
+            )
+            if not updated:
+                await query.message.reply_text(t("card.report_failed", get_current_language()))
+                return
+            await query.message.reply_text(t("card.report_success", get_current_language()))
+            await _send_card(query.message.reply_text, session, word_id, current.translation_language, user_id=user.id)
+
         elif data.startswith("dict:resume:"):
             user_word_id = int(data.removeprefix("dict:resume:"))
             user_word = await user_words_repo.get_by_id(session, user_word_id)

@@ -123,6 +123,49 @@ async def ensure_translation(session: AsyncSession, word: Word, *, translation_l
     return word
 
 
+async def report_wrong_translation(
+    session: AsyncSession, word: Word, *, translation_language: str, user_id: int,
+) -> bool:
+    """"⚠️ Неверный перевод": a shared-dictionary word's AI-generated
+    translation is otherwise persisted forever - search_words/
+    find_unknown_words_for_generation only ever call AI when no local Word
+    row exists yet, so a single bad AI response for a real word is never
+    retried on its own. Re-asks the AI fresh for this exact word and
+    REPLACES its translations in ONE language only - never deletes the
+    Word row itself (UserWord.word_id cascades on Word deletion, which
+    would silently wipe every learner's progress on it, not just fix a
+    translation) and never touches other translation languages,
+    pronunciation, examples, or forms, none of which the report is about.
+    Returns False (nothing changed) when the AI has nothing right now -
+    same swallow-and-report-nothing contract as ensure_translation/
+    ensure_pronunciation above.
+    """
+    from services.dictionary_service import get_dictionary_provider
+
+    result = await get_dictionary_provider().lookup(
+        word.word, language_code=word.language_code, translation_language=translation_language,
+        user_level=None, user_id=user_id,
+    )
+    if result is None or not result.translations:
+        return False
+
+    await words_repo.delete_translations_for_language(session, word_id=word.id, language_code=translation_language)
+    for translation in result.translations:
+        await words_repo.add_translation(
+            session, word_id=word.id, language_code=translation_language,
+            translation=translation.translation, definition=result.definition, usage_note=translation.usage_note,
+        )
+    # The raw delete + the fresh add_translation() rows above never went
+    # through word.translations.append()/.remove() (unlike ensure_
+    # translation's careful in-place update), so this already-loaded
+    # collection is now stale in the session's identity map - any later
+    # get_by_id() for the same word_id in this session would otherwise
+    # keep serving the old translation, AI fix or not. Expiring forces
+    # the next access to re-select it.
+    session.expire(word, ["translations"])
+    return True
+
+
 async def get_or_create_word(
     session: AsyncSession, *, language_code: str, word: str, **fields: object
 ) -> tuple[Word, bool]:

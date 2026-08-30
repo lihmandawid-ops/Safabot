@@ -28,6 +28,7 @@ def word_card_keyboard(word_id: int, *, back_callback: str = "dict:back") -> Inl
             [InlineKeyboardButton(t("card.button.add", get_current_language()), callback_data=f"card:add:{word_id}")],
             [InlineKeyboardButton(t("card.button.usage", get_current_language()), callback_data=f"card:usage:{word_id}")],
             [InlineKeyboardButton(t("card.button.forms", get_current_language()), callback_data=f"card:forms:{word_id}")],
+            [InlineKeyboardButton(t("card.button.report", get_current_language()), callback_data=f"card:report:{word_id}")],
             [InlineKeyboardButton(t("card.button.back", get_current_language()), callback_data=back_callback)],
         ]
     )
