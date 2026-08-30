@@ -20,6 +20,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -142,7 +143,11 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    # BigInteger, not Integer: Telegram user ids have already outgrown
+    # signed 32-bit (ids above 2_147_483_647 are routinely handed out).
+    # SQLite's INTEGER is 64-bit so this was invisible there, but on
+    # PostgreSQL an INT4 column rejects such an id outright.
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -708,9 +713,14 @@ class WordGenerationLog(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     # What asked for this generation (bugfix stage): "daily_quota" (the
     # normal 📚 Учить слова auto-fill), "extra_request" (➕ Ещё новые
-    # слова, counted separately against MAX_EXTRA_WORDS_PER_DAY), or
-    # "replacement" (🤔 Я это уже знаю's one-word swap).
-    trigger: Mapped[str] = mapped_column(String(16), nullable=False, default="daily_quota")
+    # слова, counted separately against MAX_EXTRA_WORDS_PER_DAY),
+    # "replacement" (🤔 Я это уже знаю's one-word swap), or
+    # "explicit_new_words"/"explicit_new_words_topic".
+    # String(32), not String(16): "explicit_new_words_topic" is 24
+    # characters and was already being written here. SQLite does not
+    # enforce declared VARCHAR lengths, so the overflow was silent
+    # there; PostgreSQL rejects it outright.
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False, default="daily_quota")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

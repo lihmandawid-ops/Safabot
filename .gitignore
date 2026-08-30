@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+# Also ignore .env copies (.env.bak, .env.local, ...): they carry the
+# same BOT_TOKEN and API keys as .env itself, and a bare `.env` rule
+# does not cover them.
+.env.*
+# ...except the committed template, which holds no real values.
+!.env.example
 backups/
 *.db
 *.sqlite3
