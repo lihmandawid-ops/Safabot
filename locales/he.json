@@ -192,6 +192,7 @@
   "card.button.pronounce": "🔊 הגייה",
   "card.button.back": "⬅️ חזרה",
   "dictionary.prompt": "🔎 הזן את המילה שברצונך לחפש:",
+  "dictionary.searching": "🔎 מחפש את המילה...",
   "dictionary.not_found": "😕 לא נמצא דבר. נסה מילה אחרת.",
   "dictionary.results_header": "תוצאות חיפוש:",
   "dictionary.already_in_dictionary": "המילה הזו כבר נמצאת במילון שלך.",

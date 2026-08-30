@@ -192,6 +192,7 @@
   "card.button.pronounce": "🔊 Pronunciación",
   "card.button.back": "⬅️ Atrás",
   "dictionary.prompt": "🔎 Escribe la palabra que quieres buscar:",
+  "dictionary.searching": "🔎 Buscando la palabra...",
   "dictionary.not_found": "😕 No se encontró nada. Prueba con otra palabra.",
   "dictionary.results_header": "Resultados de la búsqueda:",
   "dictionary.already_in_dictionary": "Esta palabra ya está en tu diccionario.",

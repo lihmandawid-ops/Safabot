@@ -192,6 +192,7 @@
   "card.button.pronounce": "🔊 Произношение",
   "card.button.back": "⬅️ Назад",
   "dictionary.prompt": "🔎 Введите слово для поиска:",
+  "dictionary.searching": "🔎 Идёт поиск слова...",
   "dictionary.not_found": "😕 Ничего не найдено. Попробуйте другое слово.",
   "dictionary.results_header": "Результаты поиска:",
   "dictionary.already_in_dictionary": "Это слово уже находится в твоём словаре.",

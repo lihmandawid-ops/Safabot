@@ -192,6 +192,7 @@
   "card.button.pronounce": "🔊 Вимова",
   "card.button.back": "⬅️ Назад",
   "dictionary.prompt": "🔎 Введіть слово для пошуку:",
+  "dictionary.searching": "🔎 Триває пошук слова...",
   "dictionary.not_found": "😕 Нічого не знайдено. Спробуйте інше слово.",
   "dictionary.results_header": "Результати пошуку:",
   "dictionary.already_in_dictionary": "Це слово вже є у твоєму словнику.",

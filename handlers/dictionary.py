@@ -96,21 +96,40 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         query = raw_words[0] if raw_words else text
-        results = await dictionary_service.lookup_word(
+
+        # Real user request: a local hit resolves instantly, but the AI
+        # fallback (services.dictionary_service.lookup_word's second half)
+        # can take several seconds - show "🔎 Идёт поиск слова..." ONLY
+        # when we're actually about to fall through to AI, never for a
+        # cached local hit (which would just flash and vanish). Checking
+        # locally first also means a real hit here skips the redundant
+        # second local lookup that lookup_word would otherwise do internally.
+        local_matches = await word_service.search_words(
+            session, language_code=current.language_code, query=query, limit=5
+        )
+        loading_message = None
+        if not local_matches:
+            loading_message = await update.message.reply_text(t("dictionary.searching", get_current_language()))
+
+        results = local_matches or await dictionary_service.lookup_word(
             session, language_code=current.language_code,
             translation_language=current.translation_language, raw_word=query,
             user_id=user.id, user_level=current.level,
         )
 
+        # Edit the "🔎 Идёт поиск..." placeholder into the real result in
+        # place, rather than leaving it behind as a stray extra message.
+        send = loading_message.edit_text if loading_message is not None else update.message.reply_text
+
         if not results:
-            await update.message.reply_text(t("dictionary.not_found", get_current_language()))
+            await send(t("dictionary.not_found", get_current_language()))
             return
 
         if len(results) == 1:
-            await _send_card(update.message.reply_text, session, results[0].id, current.translation_language, user_id=user.id)
+            await _send_card(send, session, results[0].id, current.translation_language, user_id=user.id)
             return
 
-        await update.message.reply_text(
+        await send(
             t("dictionary.results_header", get_current_language()), reply_markup=search_results_keyboard(results)
         )
 

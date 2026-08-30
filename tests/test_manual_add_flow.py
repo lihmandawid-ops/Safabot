@@ -227,6 +227,77 @@ async def test_batch_add_reports_already_had_without_duplicating(handler_db):
     assert sum(1 for r in rows if r.word.word == "go") == 1  # still just one
 
 
+async def test_search_shows_no_loading_message_for_a_local_hit(handler_db):
+    """Real user request: "идёт поиск слова" must only appear while the AI
+    fallback is actually running - a word already in the local dictionary
+    resolves instantly and must never show/flash the placeholder."""
+    from handlers import dictionary as dictionary_handler
+
+    update = _message("go")
+    await dictionary_handler.handle_search_query(update, context=SimpleNamespace(user_data={}), text="go")
+
+    update.message.reply_text.assert_awaited_once()  # the card itself, nothing before it
+    loading_placeholder = update.message.reply_text.return_value
+    loading_placeholder.edit_text.assert_not_awaited()
+
+
+async def test_search_shows_loading_message_then_edits_it_with_not_found(handler_db):
+    """AI unconfigured (this fixture's default environment) + a word not
+    in the local dictionary: the placeholder must appear first, then be
+    EDITED into place with the real "not found" result - never left
+    behind as a stray extra message."""
+    from handlers import dictionary as dictionary_handler
+
+    update = _message("zzznotarealword")
+    await dictionary_handler.handle_search_query(update, context=SimpleNamespace(user_data={}), text="zzznotarealword")
+
+    update.message.reply_text.assert_awaited_once()
+    placeholder_text = update.message.reply_text.call_args[0][0]
+    assert "Идёт поиск" in placeholder_text
+
+    loading_placeholder = update.message.reply_text.return_value
+    loading_placeholder.edit_text.assert_awaited_once()
+    final_text = loading_placeholder.edit_text.call_args[0][0]
+    assert "не найдено" in final_text.lower() or "😕" in final_text
+
+
+async def test_search_shows_loading_message_then_edits_it_with_the_ai_result(handler_db, monkeypatch):
+    """Same placeholder, but this time the AI fallback finds the word -
+    the placeholder must be edited into the actual word card, not
+    replaced by a second, separate message."""
+    from handlers import dictionary as dictionary_handler
+    from services.ai_provider import AIProvider
+    from services.ai_service import LiveAIService, get_ai_service
+
+    class _MockProvider(AIProvider):
+        async def complete(self, *, system, user):
+            return (
+                '{"word": "brandnewword", "translations": [{"translation": "новое слово", "usage_note": null}], '
+                '"part_of_speech": null, "phonetic": null, "pronunciation": null, '
+                '"definition": null, "examples": [], "difficulty": null, "category": null, '
+                '"verb_forms": null}'
+            )
+
+    live = LiveAIService(
+        provider=_MockProvider(), model="test-model", provider_label="mock",
+        max_retries=0, requests_per_minute=1000, requests_per_day=1000,
+    )
+    get_ai_service.cache_clear()
+    monkeypatch.setattr("services.dictionary_service.get_ai_service", lambda: live)
+
+    update = _message("brandnewword")
+    await dictionary_handler.handle_search_query(update, context=SimpleNamespace(user_data={}), text="brandnewword")
+
+    update.message.reply_text.assert_awaited_once()
+    loading_placeholder = update.message.reply_text.return_value
+    loading_placeholder.edit_text.assert_awaited_once()
+    card_text = loading_placeholder.edit_text.call_args[0][0]
+    assert "brandnewword" in card_text
+    assert "новое слово" in card_text
+
+    get_ai_service.cache_clear()
+
+
 async def test_manual_add_of_paused_word_offers_resume(handler_db):
     from database.database import session_scope
     from database.repositories import words as words_repo
