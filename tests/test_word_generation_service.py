@@ -725,6 +725,88 @@ async def test_generate_candidates_topics_override_scopes_a_single_call(session,
     assert fake.last_category == "travel"
 
 
+async def test_generate_candidates_broadens_to_goal_industry_when_topic_is_exhausted(session, monkeypatch):
+    """Real user request: a narrow/exhausted topic must not just report
+    "nothing found" - generate_candidates makes one more bounded attempt-
+    block with the topic dropped (still scoped to the learner's own
+    goal/industry, just not pinned to that one topic) before genuinely
+    giving up."""
+    user, ul = await _create_user(session, telegram_id=5037)
+
+    class _TopicAwareAI:
+        def __init__(self):
+            self.categories_seen: list[str | None] = []
+
+        async def generate_words(self, *, category=None, **kwargs):
+            self.categories_seen.append(category)
+            if category == "travel":
+                return ai_models.GenerateWordsResult(words=[])  # topic exhausted - nothing new left
+            return ai_models.GenerateWordsResult(words=[_generated("broadword")])
+
+    fake = _TopicAwareAI()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(
+        session, user=user, user_language=ul, amount=1, topics=["travel"],
+    )
+
+    assert [c.word for c in candidates] == ["broadword"]
+    assert "travel" in fake.categories_seen  # the topic was genuinely tried first
+    assert None in fake.categories_seen  # then broadened, never skipped straight to giving up
+
+
+async def test_generate_candidates_broadening_is_still_bounded(session, monkeypatch):
+    """Never unbounded, even with the new broadening step: if neither the
+    topic nor the broadened goal/industry search find anything new, the
+    function still returns (empty) rather than retrying forever."""
+    from config import get_settings
+
+    user, ul = await _create_user(session, telegram_id=5038)
+
+    class _NeverFindsAnything:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, *, category=None, **kwargs):
+            self.calls += 1
+            return ai_models.GenerateWordsResult(words=[])
+
+    fake = _NeverFindsAnything()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(
+        session, user=user, user_language=ul, amount=1, topics=["travel"],
+    )
+
+    assert candidates == []
+    assert fake.calls == get_settings().max_generation_attempts * 2  # topic tier + broadened tier, no more
+
+
+async def test_generate_candidates_no_broadening_when_there_was_no_topic_to_begin_with(session, monkeypatch):
+    """A plain 🆕 Новые слова request with no saved topics is already at
+    its broadest - there is nothing to fall back FROM, so it must not
+    double its AI-call budget for no reason."""
+    from config import get_settings
+
+    user, ul = await _create_user(session, telegram_id=5039)
+
+    class _NeverFindsAnything:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_words(self, *, category=None, **kwargs):
+            self.calls += 1
+            return ai_models.GenerateWordsResult(words=[])
+
+    fake = _NeverFindsAnything()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(session, user=user, user_language=ul, amount=1)
+
+    assert candidates == []
+    assert fake.calls == get_settings().max_generation_attempts
+
+
 async def test_add_candidate_to_learning_persists_as_learning_status(session, monkeypatch):
     """Real user request: a candidate the learner just accepted is a LIVE
     add - it must enter repetition immediately, not sit as an untouched

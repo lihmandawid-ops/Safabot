@@ -248,6 +248,17 @@ async def generate_candidates(
     are merged into the single `known_words` prompt field the AI already
     understands as "never suggest these again", so no AIService interface
     change is needed for the exclusion itself.
+
+    Real user request: a narrow topic (or a learner who has simply worked
+    through most of a broad one) can genuinely run dry within
+    MAX_GENERATION_ATTEMPTS - rather than reporting "nothing found" the
+    moment the SPECIFIC topic/profile-selected-topics is exhausted, this
+    makes ONE additional bounded attempt-block with the topic constraint
+    dropped (still the learner's own goal/industry, just not pinned to
+    that one topic) before genuinely giving up. Never unbounded - the
+    total AI calls this can make is capped at 2 x MAX_GENERATION_ATTEMPTS,
+    same "never unbounded" guarantee section 12 already made for the
+    single-topic case.
     """
     if amount <= 0:
         return []
@@ -266,46 +277,61 @@ async def generate_candidates(
             seen_normalized.add(key)
             excluded.append(word)
 
-    category = _topic_hint(user_language, override=topics)
     industry = _industry_hint(user_language)
     goal = _goal_hint(user_language)
     performance_note = await _performance_note(session, user_id=user.id, user_language=user_language)
+    level = effective_difficulty(user_language)
 
     candidates: list[ai_models.GeneratedWord] = []
-    attempts = 0
-    while len(candidates) < amount and attempts < settings.max_generation_attempts:
-        attempts += 1
-        shortfall = amount - len(candidates)
-        entries = await _generate_via_ai(
-            language_code=user_language.language_code,
-            translation_language=user_language.translation_language,
-            level=effective_difficulty(user_language),
-            amount=shortfall,
-            category=category,
-            industry=industry,
-            goal=goal,
-            known_words=excluded,
-            performance_note=performance_note,
-            user_id=user.id,
-        )
-        if not entries:
-            # Real user report: a single AI hiccup (timeout, transient
-            # network error, rate limit) used to abort the whole retry
-            # loop immediately here, wasting the remaining attempts the
-            # `while` condition above already budgeted - the loop must
-            # keep trying up to max_generation_attempts even when one
-            # attempt came back completely empty, not just when it came
-            # back with only duplicates.
-            continue
-        for entry in entries:
-            if len(candidates) >= amount:
-                break
-            key = normalize_word(entry.word)
-            if key in seen_normalized:
+    total_attempts = 0
+
+    async def _fill(category: str | None, max_attempts: int) -> None:
+        nonlocal total_attempts
+        attempts = 0
+        while len(candidates) < amount and attempts < max_attempts:
+            attempts += 1
+            total_attempts += 1
+            shortfall = amount - len(candidates)
+            entries = await _generate_via_ai(
+                language_code=user_language.language_code,
+                translation_language=user_language.translation_language,
+                level=level,
+                amount=shortfall,
+                category=category,
+                industry=industry,
+                goal=goal,
+                known_words=excluded,
+                performance_note=performance_note,
+                user_id=user.id,
+            )
+            if not entries:
+                # Real user report: a single AI hiccup (timeout, transient
+                # network error, rate limit) used to abort the whole retry
+                # loop immediately here, wasting the remaining attempts the
+                # `while` condition above already budgeted - the loop must
+                # keep trying up to max_attempts even when one attempt came
+                # back completely empty, not just when it came back with
+                # only duplicates.
                 continue
-            seen_normalized.add(key)
-            excluded.append(entry.word)
-            candidates.append(entry)
+            for entry in entries:
+                if len(candidates) >= amount:
+                    break
+                key = normalize_word(entry.word)
+                if key in seen_normalized:
+                    continue
+                seen_normalized.add(key)
+                excluded.append(entry.word)
+                candidates.append(entry)
+
+    category = _topic_hint(user_language, override=topics)
+    await _fill(category, settings.max_generation_attempts)
+
+    if len(candidates) < amount and category is not None:
+        logger.info(
+            "Word generation for %r exhausted topic %r after %d attempts (%d/%d found) - broadening to goal/industry",
+            user_language.language_code, category, total_attempts, len(candidates), amount,
+        )
+        await _fill(None, settings.max_generation_attempts)
 
     await generation_logs_repo.log(
         session,
@@ -313,7 +339,7 @@ async def generate_candidates(
         language_code=user_language.language_code,
         requested_amount=amount,
         generated_amount=len(candidates),
-        provider=(settings.ai_provider if attempts > 0 else "local"),
+        provider=(settings.ai_provider if total_attempts > 0 else "local"),
         trigger="explicit_new_words" if topics is None else "explicit_new_words_topic",
     )
     return candidates

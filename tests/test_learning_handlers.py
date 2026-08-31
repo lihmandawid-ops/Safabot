@@ -964,11 +964,11 @@ async def test_tapping_a_preset_topic_immediately_generates_words(handler_db, mo
     from services import ai_models, word_generation_service
     from utils.topics import PRESET_TOPICS
 
-    captured = {}
+    categories_seen = []
 
     class _FakeAI:
         async def generate_words(self, *, category=None, **kwargs):
-            captured["category"] = category
+            categories_seen.append(category)
             return ai_models.GenerateWordsResult(
                 words=[ai_models.GeneratedWord(word="topicword", translations=[ai_models.TranslationResult(translation="тема-слово")])]
             )
@@ -980,7 +980,11 @@ async def test_tapping_a_preset_topic_immediately_generates_words(handler_db, mo
     q = _query(f"learn:topicgen:{code}")
     await learning_handler.handle_learning_callback(q, context)
 
-    assert captured["category"] == code
+    # This mock always returns the same single duplicate word, so the
+    # topic alone can never fill amount=2 - generate_candidates' topic-
+    # broadening then also tries category=None, which is why this checks
+    # "the topic was tried" rather than "it was the only/last category".
+    assert code in categories_seen
     text = q.callback_query.edit_message_text.call_args[0][0]
     assert "topicword" in text
     # two edit_message_text calls - an immediate "⏳ Подбираем слова..."
@@ -1036,11 +1040,11 @@ async def test_custom_topic_free_text_immediately_generates_words(handler_db, mo
     from handlers import learning as learning_handler
     from services import ai_models, word_generation_service
 
-    captured = {}
+    categories_seen = []
 
     class _FakeAI:
         async def generate_words(self, *, category=None, **kwargs):
-            captured["category"] = category
+            categories_seen.append(category)
             return ai_models.GenerateWordsResult(
                 words=[ai_models.GeneratedWord(word="autoword", translations=[ai_models.TranslationResult(translation="авто-слово")])]
             )
@@ -1054,7 +1058,11 @@ async def test_custom_topic_free_text_immediately_generates_words(handler_db, mo
     update = NS(effective_user=NS(id=42), message=message)
     await learning_handler.handle_text_input(update, context, "Слова для работы в автомастерской")
 
-    assert captured["category"] == "Слова для работы в автомастерской"
+    # This mock always returns the same single duplicate word, so the
+    # topic alone can never fill amount=2 - generate_candidates' topic-
+    # broadening then also tries category=None, which is why this checks
+    # "the topic was tried" rather than "it was the only/last category".
+    assert "Слова для работы в автомастерской" in categories_seen
     # Only ONE message is ever sent (the "⏳ Подбираем слова..." placeholder)
     # - the actual result then EDITS that same message in place, never
     # sends a second one (no message clutter from the loading indicator).
