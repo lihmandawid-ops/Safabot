@@ -253,12 +253,15 @@ async def generate_candidates(
     through most of a broad one) can genuinely run dry within
     MAX_GENERATION_ATTEMPTS - rather than reporting "nothing found" the
     moment the SPECIFIC topic/profile-selected-topics is exhausted, this
-    makes ONE additional bounded attempt-block with the topic constraint
-    dropped (still the learner's own goal/industry, just not pinned to
-    that one topic) before genuinely giving up. Never unbounded - the
-    total AI calls this can make is capped at 2 x MAX_GENERATION_ATTEMPTS,
-    same "never unbounded" guarantee section 12 already made for the
-    single-topic case.
+    cascades through progressively broader attempt-blocks (topic+industry
+    -> industry alone -> goal alone) before genuinely giving up. A narrow
+    work_industry (e.g. a niche trade) can be just as quickly exhausted in
+    a smaller language's vocabulary as a topic can, so it gets the same
+    treatment - never unbounded, the total AI calls this can make is
+    capped at 3 x MAX_GENERATION_ATTEMPTS (fewer if there's nothing left
+    to drop - a request with no topic and no industry to begin with never
+    pays for tiers it can't use), same "never unbounded" guarantee
+    section 12 already made for the single-topic case.
     """
     if amount <= 0:
         return []
@@ -285,7 +288,7 @@ async def generate_candidates(
     candidates: list[ai_models.GeneratedWord] = []
     total_attempts = 0
 
-    async def _fill(category: str | None, max_attempts: int) -> None:
+    async def _fill(*, category: str | None, industry: str | None, goal: str | None, max_attempts: int) -> None:
         nonlocal total_attempts
         attempts = 0
         while len(candidates) < amount and attempts < max_attempts:
@@ -324,14 +327,21 @@ async def generate_candidates(
                 candidates.append(entry)
 
     category = _topic_hint(user_language, override=topics)
-    await _fill(category, settings.max_generation_attempts)
+    await _fill(category=category, industry=industry, goal=goal, max_attempts=settings.max_generation_attempts)
 
     if len(candidates) < amount and category is not None:
         logger.info(
             "Word generation for %r exhausted topic %r after %d attempts (%d/%d found) - broadening to goal/industry",
             user_language.language_code, category, total_attempts, len(candidates), amount,
         )
-        await _fill(None, settings.max_generation_attempts)
+        await _fill(category=None, industry=industry, goal=goal, max_attempts=settings.max_generation_attempts)
+
+    if len(candidates) < amount and industry is not None:
+        logger.info(
+            "Word generation for %r exhausted industry %r after %d attempts (%d/%d found) - broadening to goal only",
+            user_language.language_code, industry, total_attempts, len(candidates), amount,
+        )
+        await _fill(category=None, industry=None, goal=goal, max_attempts=settings.max_generation_attempts)
 
     await generation_logs_repo.log(
         session,

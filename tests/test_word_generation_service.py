@@ -755,6 +755,38 @@ async def test_generate_candidates_broadens_to_goal_industry_when_topic_is_exhau
     assert None in fake.categories_seen  # then broadened, never skipped straight to giving up
 
 
+async def test_generate_candidates_broadens_to_goal_only_when_industry_is_also_exhausted(session, monkeypatch):
+    """Real user report: a learner with both a saved topic AND a narrow
+    work_industry (e.g. a niche trade) can exhaust tier 2 (industry+goal,
+    topic dropped) just as fast as tier 1 - this must not just give up,
+    it drops the industry too and makes one final bounded attempt-block
+    scoped to the goal alone before genuinely reporting nothing found."""
+    user, ul = await _create_user(session, telegram_id=5040)
+    ul.work_industry = "Установка окон"
+    await session.commit()
+
+    class _IndustryAwareAI:
+        def __init__(self):
+            self.industries_seen: list[str | None] = []
+
+        async def generate_words(self, *, category=None, industry=None, **kwargs):
+            self.industries_seen.append(industry)
+            if industry == "Установка окон":
+                return ai_models.GenerateWordsResult(words=[])  # topic AND industry both exhausted
+            return ai_models.GenerateWordsResult(words=[_generated("goalword")])
+
+    fake = _IndustryAwareAI()
+    monkeypatch.setattr(word_generation_service, "get_ai_service", lambda: fake)
+
+    candidates = await word_generation_service.generate_candidates(
+        session, user=user, user_language=ul, amount=1, topics=["travel"],
+    )
+
+    assert [c.word for c in candidates] == ["goalword"]
+    assert "Установка окон" in fake.industries_seen  # industry genuinely tried before being dropped
+    assert None in fake.industries_seen  # then broadened to goal-only, never skipped straight to giving up
+
+
 async def test_generate_candidates_broadening_is_still_bounded(session, monkeypatch):
     """Never unbounded, even with the new broadening step: if neither the
     topic nor the broadened goal/industry search find anything new, the
