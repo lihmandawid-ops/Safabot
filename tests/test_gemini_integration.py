@@ -308,6 +308,11 @@ def _reset_ai_factories():
 def test_get_ai_service_uses_gemini_only_when_deepseek_not_configured(monkeypatch):
     from services.ai_service import LiveAIService, get_ai_service
 
+    # Explicit, not just relying on the *_ENABLED default: production's
+    # own .env may have flipped it off (real incident, 2026-08-31 - Gemini
+    # disabled there after a genuine outage), and this test must still
+    # prove Gemini-when-enabled wiring regardless of the ambient .env.
+    monkeypatch.setenv("GEMINI_ENABLED", "true")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     monkeypatch.setenv("AI_API_KEY", "")
     _reset_ai_factories()
@@ -323,6 +328,7 @@ def test_get_ai_service_uses_gemini_only_when_deepseek_not_configured(monkeypatc
 def test_get_ai_service_wires_gemini_proxy_url_into_the_provider(monkeypatch):
     from services.ai_service import get_ai_service
 
+    monkeypatch.setenv("GEMINI_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     monkeypatch.setenv("AI_API_KEY", "")
     monkeypatch.setenv("GEMINI_PROXY_URL", "http://proxyhost:3128")
@@ -354,6 +360,7 @@ def test_get_ai_service_uses_deepseek_only_when_gemini_not_configured(monkeypatc
 def test_get_ai_service_uses_fallback_provider_when_both_configured(monkeypatch):
     from services.ai_service import LiveAIService, get_ai_service
 
+    monkeypatch.setenv("GEMINI_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
     _reset_ai_factories()
@@ -401,6 +408,7 @@ def test_get_ai_service_respects_gemini_enabled_flag(monkeypatch):
 def test_get_ai_service_uses_gateway_only_when_nothing_else_configured(monkeypatch):
     from services.ai_service import LiveAIService, get_ai_service
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     _reset_ai_factories()
     try:
@@ -417,6 +425,7 @@ def test_get_ai_service_uses_gateway_only_when_nothing_else_configured(monkeypat
 def test_get_ai_service_uses_gateway_model_and_base_url_from_settings(monkeypatch):
     from services.ai_service import get_ai_service
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     monkeypatch.setenv("AI_GATEWAY_MODEL", "google/gemini-3.1-pro-preview")
     monkeypatch.setenv("AI_GATEWAY_BASE_URL", "https://my-gateway.example/v1")
@@ -440,6 +449,7 @@ def test_get_ai_service_gateway_is_primary_over_deepseek(monkeypatch):
     with DeepSeek as the final fallback if the Gateway itself fails."""
     from services.ai_service import LiveAIService, get_ai_service
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
     _reset_ai_factories()
@@ -460,6 +470,8 @@ def test_get_ai_service_gateway_is_primary_over_deepseek(monkeypatch):
 def test_get_ai_service_full_three_tier_chain_gateway_gemini_deepseek(monkeypatch):
     from services.ai_service import get_ai_service
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
+    monkeypatch.setenv("GEMINI_ENABLED", "true")
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     monkeypatch.setenv("AI_API_KEY", "sk-test-deepseek-key")
@@ -502,6 +514,10 @@ def test_get_ai_service_respects_ai_gateway_enabled_flag(monkeypatch):
 async def test_ai_gateway_connection_missing_api_key_is_reported(monkeypatch):
     from services.ai_diagnostics import test_ai_gateway_connection
 
+    # Explicit, not just relying on the *_ENABLED default: production's
+    # own .env may have flipped it off (real incident, 2026-08-31), and
+    # this must still prove the "missing key" reason, not "disabled".
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "")
     config.get_settings.cache_clear()
 
@@ -514,6 +530,7 @@ async def test_ai_gateway_connection_missing_api_key_is_reported(monkeypatch):
 async def test_ai_gateway_connection_success_reports_ok(monkeypatch):
     from services.ai_diagnostics import test_ai_gateway_connection
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     config.get_settings.cache_clear()
     try:
@@ -529,6 +546,7 @@ async def test_ai_gateway_connection_success_reports_ok(monkeypatch):
 async def test_ai_gateway_connection_unauthorized_is_reported(monkeypatch):
     from services.ai_diagnostics import test_ai_gateway_connection
 
+    monkeypatch.setenv("AI_GATEWAY_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-test-key")
     config.get_settings.cache_clear()
     try:
@@ -613,6 +631,10 @@ async def test_analyze_text_through_gemini_provider_carries_the_right_languages(
 async def test_gemini_connection_missing_api_key_is_reported(monkeypatch):
     from services.ai_diagnostics import test_gemini_connection
 
+    # Explicit, not just relying on the *_ENABLED default: production's
+    # own .env may have flipped it off (real incident, 2026-08-31), and
+    # this must still prove the "missing key" reason, not "disabled".
+    monkeypatch.setenv("GEMINI_ENABLED", "true")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     config.get_settings.cache_clear()
 
@@ -641,6 +663,7 @@ async def test_gemini_connection_disabled_is_reported_even_with_key(monkeypatch)
 async def test_gemini_connection_success_reports_ok(monkeypatch):
     from services.ai_diagnostics import test_gemini_connection
 
+    monkeypatch.setenv("GEMINI_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     config.get_settings.cache_clear()
     try:
@@ -656,6 +679,7 @@ async def test_gemini_connection_success_reports_ok(monkeypatch):
 async def test_gemini_connection_unauthorized_is_reported(monkeypatch):
     from services.ai_diagnostics import test_gemini_connection
 
+    monkeypatch.setenv("GEMINI_ENABLED", "true")  # not just the default - see comment above
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test-key")
     config.get_settings.cache_clear()
     try:
