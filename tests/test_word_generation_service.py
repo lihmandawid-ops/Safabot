@@ -725,12 +725,16 @@ async def test_generate_candidates_topics_override_scopes_a_single_call(session,
     assert fake.last_category == "travel"
 
 
-async def test_generate_candidates_broadens_to_goal_industry_when_topic_is_exhausted(session, monkeypatch):
+async def test_generate_candidates_broadens_to_nearby_topics_when_topic_is_exhausted(session, monkeypatch):
     """Real user request: a narrow/exhausted topic must not just report
-    "nothing found" - generate_candidates makes one more bounded attempt-
-    block with the topic dropped (still scoped to the learner's own
-    goal/industry, just not pinned to that one topic) before genuinely
-    giving up."""
+    "nothing found", and broadening must not just drop topic guidance
+    altogether either - the user explicitly asked for "похожую, ближайшую
+    тему" (a similar/nearby topic). generate_candidates makes one more
+    bounded attempt-block with the rest of PRESET_TOPICS offered as the
+    category (still scoped to the learner's own goal/industry) before
+    falling back further."""
+    from utils.topics import PRESET_TOPICS
+
     user, ul = await _create_user(session, telegram_id=5037)
 
     class _TopicAwareAI:
@@ -752,7 +756,10 @@ async def test_generate_candidates_broadens_to_goal_industry_when_topic_is_exhau
 
     assert [c.word for c in candidates] == ["broadword"]
     assert "travel" in fake.categories_seen  # the topic was genuinely tried first
-    assert None in fake.categories_seen  # then broadened, never skipped straight to giving up
+    nearby_call = fake.categories_seen[-1]
+    assert nearby_call is not None  # broadened to a real nearby-topics hint, not just dropped
+    assert "travel" not in nearby_call.split(", ")  # the exhausted topic itself is excluded
+    assert set(nearby_call.split(", ")) == set(PRESET_TOPICS) - {"travel"}
 
 
 async def test_generate_candidates_broadens_to_goal_only_when_industry_is_also_exhausted(session, monkeypatch):

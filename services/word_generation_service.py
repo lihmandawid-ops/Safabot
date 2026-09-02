@@ -33,6 +33,7 @@ from services.ai_service import get_ai_service
 from utils.logging import get_logger
 from utils.text import normalize_word
 from utils.time import local_day_bounds, utc_now
+from utils.topics import PRESET_TOPICS
 
 logger = get_logger(__name__)
 
@@ -253,15 +254,19 @@ async def generate_candidates(
     through most of a broad one) can genuinely run dry within
     MAX_GENERATION_ATTEMPTS - rather than reporting "nothing found" the
     moment the SPECIFIC topic/profile-selected-topics is exhausted, this
-    cascades through progressively broader attempt-blocks (topic+industry
-    -> industry alone -> goal alone) before genuinely giving up. A narrow
-    work_industry (e.g. a niche trade) can be just as quickly exhausted in
-    a smaller language's vocabulary as a topic can, so it gets the same
-    treatment - never unbounded, the total AI calls this can make is
-    capped at 3 x MAX_GENERATION_ATTEMPTS (fewer if there's nothing left
-    to drop - a request with no topic and no industry to begin with never
-    pays for tiers it can't use), same "never unbounded" guarantee
-    section 12 already made for the single-topic case.
+    cascades through progressively broader attempt-blocks: topic+industry
+    -> a similar/nearby topic from PRESET_TOPICS (see _nearby_topics_hint)
+    with industry+goal still applied -> industry dropped too, goal alone -
+    before genuinely giving up. This is literally the fallback the user
+    asked for ("подбирались слова по похожей, ближайшей теме к основной
+    теме"), not just a topic-agnostic search. A narrow work_industry (e.g.
+    a niche trade) can be just as quickly exhausted in a smaller
+    language's vocabulary as a topic can, so it gets the same treatment -
+    never unbounded, the total AI calls this can make is capped at
+    3 x MAX_GENERATION_ATTEMPTS (fewer if there's nothing left to drop - a
+    request with no topic and no industry to begin with never pays for
+    tiers it can't use), same "never unbounded" guarantee section 12
+    already made for the single-topic case.
     """
     if amount <= 0:
         return []
@@ -330,11 +335,12 @@ async def generate_candidates(
     await _fill(category=category, industry=industry, goal=goal, max_attempts=settings.max_generation_attempts)
 
     if len(candidates) < amount and category is not None:
+        nearby = _nearby_topics_hint(original_category=category)
         logger.info(
-            "Word generation for %r exhausted topic %r after %d attempts (%d/%d found) - broadening to goal/industry",
-            user_language.language_code, category, total_attempts, len(candidates), amount,
+            "Word generation for %r exhausted topic %r after %d attempts (%d/%d found) - broadening to nearby topics %r",
+            user_language.language_code, category, total_attempts, len(candidates), amount, nearby,
         )
-        await _fill(category=None, industry=industry, goal=goal, max_attempts=settings.max_generation_attempts)
+        await _fill(category=nearby, industry=industry, goal=goal, max_attempts=settings.max_generation_attempts)
 
     if len(candidates) < amount and industry is not None:
         logger.info(
@@ -435,6 +441,25 @@ def _topic_hint(user_language: UserLanguage, *, override: list[str] | None = Non
     selected_topics list."""
     topics = override if override is not None else user_language.selected_topics
     return ", ".join(topics) if topics else None
+
+
+def _nearby_topics_hint(*, original_category: str | None) -> str | None:
+    """Real user request: when the learner's own topic(s) run dry, don't
+    just drop topic guidance altogether - offer the AI the REST of the
+    preset topic list (PRESET_TOPICS) as a "pick something related"
+    category, the same "похожая, ближайшая тема" fallback the user asked
+    for, before falling all the way back to goal-only. Reuses the exact
+    same free-text "Category" prompt line _topic_hint already builds for
+    a multi-selected-topics profile - the AI already treats a joined list
+    there as "any of these", so no prompt-shape change is needed.
+
+    A custom free-text topic never matches PRESET_TOPICS, so this simply
+    offers the whole preset list in that case; a learner who already had
+    every preset topic selected has nothing left to offer (returns None,
+    same as the old topic-agnostic fallback)."""
+    original = {t.strip() for t in (original_category or "").split(",") if t.strip()}
+    remaining = [t for t in PRESET_TOPICS if t not in original]
+    return ", ".join(remaining) if remaining else None
 
 
 def _goal_hint(user_language: UserLanguage) -> str | None:
