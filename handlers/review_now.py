@@ -1,0 +1,360 @@
+"""🔁 Повторить - ON-DEMAND REVIEW (repetition-system stage sections 1-7,
+16-17; bugfix stage sections 38-42): replaces the old due-gated "🔄
+Повторить" entry point (handlers/review.py used to call handlers.
+learning.show_review_intro, which only showed anything when words were
+actually due). Tapping the button shows exactly two choices - 🆕 Повторить
+новые слова / ✅ Повторить выученные слова - and NEVER asks "how many
+words?"; Safabot always picks a small batch itself (AUTO_REVIEW_COUNT).
+Selection, scoring and the mode hand-off all reuse existing machinery:
+
+- word selection: services.learning_service.get_words_for_on_demand_review
+  (itself a thin wrapper over the same due/upcoming/new-fallback query
+  every other review path uses).
+- 🔤 Обычное повторение: an ephemeral context.user_data["revnow"] state,
+  the same lightweight pattern 🏆 Викторина already uses (no
+  LearningSession row for something this transient) - answers are scored
+  through services.learning_service.record_on_demand_answer, which is
+  just repetition_service.calculate_next_review + apply_review_result,
+  the exact same path the normal review flow uses.
+- 🏆 Викторина: handed off entirely to handlers/quiz.py's existing state
+  machine via quiz_service.build_quiz(only_word_ids=...) so there is only
+  ever one quiz renderer in the codebase.
+- "revnow:notif:<slot>:<mode>" (tapped from a 🔔 automatic reminder built
+  by services/notification_service.py) re-reads the exact word_ids that
+  notification was logged with (NotificationLog.word_ids) instead of
+  re-running selection, so the words the user reviews are exactly the
+  ones they were shown - then joins the same _launch() used by the pool/
+  mode taps above.
+"""
+from __future__ import annotations
+
+import random
+
+from telegram import Update
+from telegram.ext import CallbackQueryHandler, ContextTypes
+
+from database.database import session_scope
+from database.models import WordSource, WordStatus
+from database.repositories import notifications as notifications_repo
+from database.repositories import user_languages as user_languages_repo
+from database.repositories import user_words as user_words_repo
+from database.repositories import users as users_repo
+from handlers import quiz as quiz_handler
+from handlers.dictionary import add_word_batch
+from keyboards.main_menu import main_menu_keyboard
+from keyboards.review_now import (
+    completion_keyboard,
+    empty_keyboard,
+    example_words_keyboard,
+    flashcard_keyboard,
+    mode_picker_keyboard,
+    review_pool_keyboard,
+)
+from services import learning_service, quiz_service, review_now_service, user_word_service
+from services.ai_errors import AIConfigurationError, AIError
+from services.ai_service import get_ai_service
+from utils.i18n import get_current_language, set_current_language, t
+from utils.telegram_helpers import safe_edit_message_reply_markup, safe_edit_message_text
+from utils.time import local_today, utc_now
+
+_REVIEWABLE_STATUSES = (WordStatus.LEARNING, WordStatus.REVIEW)
+# bugfix stage sections 38-42: 🔄 Повторить must never ask "how many
+# words?" - Safabot picks a small, sensible batch on its own instead.
+# Matches the existing ON_DEMAND_REVIEW_OPTIONS' middle value, so this is
+# still a familiar batch size, just no longer user-chosen.
+AUTO_REVIEW_COUNT = 8
+
+
+async def _current_user_and_language(session, telegram_id: int):
+    user = await users_repo.get_by_telegram_id(session, telegram_id)
+    if user is None:
+        return None, None
+    set_current_language(user.interface_language)
+    current = await user_languages_repo.get_current_language(session, user.id)
+    return user, current
+
+
+async def show_review_now_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("revnow", None)
+    async with session_scope() as session:
+        user, current = await _current_user_and_language(session, update.effective_user.id)
+        if user is None:
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
+            return
+        if current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+        await update.message.reply_text(
+            t("revnow.pool_prompt", get_current_language()),
+            reply_markup=review_pool_keyboard(),
+        )
+
+
+def _flashcard_text(item: dict, position: int, total: int) -> str:
+    lines = [t("revnow.progress", get_current_language(), current=position + 1, total=total), ""]
+    lines.append(f"{item['flag']} {item['word']}".strip())
+    lines.append("")
+    lines.append(item["translation"])
+    if item["pronunciation"]:
+        lines.append("")
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=item["pronunciation"]))
+    if item["example"]:
+        lines.append("")
+        lines.append(f"💬 {item['example']}")
+        # Real user request: the example sentence needs its own
+        # translation shown right under it, same as everywhere else in
+        # the bot a foreign example is displayed.
+        if item.get("example_translation"):
+            lines.append(item["example_translation"])
+    return "\n".join(lines)
+
+
+async def _render_flashcard(edit, state: dict) -> None:
+    item = state["items"][state["position"]]
+    text = _flashcard_text(item, state["position"], len(state["items"]))
+    await edit(text, reply_markup=flashcard_keyboard(has_example=bool(item["example"])))
+
+
+async def _finish_flashcards(edit, context: ContextTypes.DEFAULT_TYPE, state: dict, *, user) -> None:
+    """study-flow-rework stage: with "📚 Учить слова" no longer routing
+    through the old LearningSession-based due+new flow (the only place
+    that used to update the streak), completing a 🔄 Повторить flashcard
+    batch is now one of the two daily-practice checkpoints that keeps it
+    alive - see learning_service.update_streak's docstring."""
+    total = len(state["items"])
+    context.user_data.pop("revnow", None)
+    await learning_service.update_streak(user, utc_now())
+    await edit(t("revnow.completed", get_current_language(), count=total, total=total), reply_markup=completion_keyboard())
+
+
+async def _launch_flashcards(
+    session, edit, context: ContextTypes.DEFAULT_TYPE, words, translation_language: str, *, user_id: int
+) -> None:
+    items = await review_now_service.build_flashcard_items(session, words, translation_language, user_id=user_id)
+    if not items:
+        await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+        return
+    state = {"items": items, "position": 0}
+    context.user_data["revnow"] = state
+    await _render_flashcard(edit, state)
+
+
+async def _launch_quiz(session, edit, context: ContextTypes.DEFAULT_TYPE, user, current, words) -> None:
+    questions = await quiz_service.build_quiz(
+        session,
+        user_id=user.id,
+        language_code=current.language_code,
+        translation_language=current.translation_language,
+        only_word_ids=[uw.id for uw in words],
+    )
+    if not questions:
+        await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+        return
+    state = quiz_handler._new_quiz_state(current.language_code, current.translation_language, questions)
+    context.user_data["quiz"] = state
+    await quiz_handler._render_question(edit, state)
+
+
+async def _launch(session, edit, context: ContextTypes.DEFAULT_TYPE, user, current, words, *, mode: str) -> None:
+    resolved = mode if mode != "mixed" else random.choice(("flashcard", "quiz"))
+    if resolved == "quiz":
+        await _launch_quiz(session, edit, context, user, current, words)
+    else:
+        await _launch_flashcards(session, edit, context, words, current.translation_language, user_id=user.id)
+
+
+def _parse_count_flag(text: str) -> tuple[int, bool]:
+    count_str, flag_str = text.split(":")
+    return int(count_str), flag_str == "1"
+
+
+async def handle_review_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    data = query.data
+
+    async def edit(text: str, reply_markup=None) -> None:
+        await safe_edit_message_text(query, text, reply_markup=reply_markup)
+
+    async with session_scope() as session:
+        user, current = await _current_user_and_language(session, query.from_user.id)
+        if user is None or current is None:
+            await query.answer(t("card.no_language", get_current_language()), show_alert=True)
+            return
+
+        if data in ("revnow:menu", "revnow:menu:mastered"):
+            # bugfix stage sections 38-42: no count question - tapping
+            # either top-level pool choice goes straight to selection +
+            # launch (or the flashcard/quiz mode prompt, if the user has
+            # no saved preference), using Safabot's own AUTO_REVIEW_COUNT.
+            await query.answer()
+            context.user_data.pop("revnow", None)
+            context.user_data.pop("quiz", None)
+            mastered = data == "revnow:menu:mastered"
+            words = await learning_service.get_words_for_on_demand_review(
+                session, user=user, user_language=current, limit=AUTO_REVIEW_COUNT, include_mastered=mastered,
+            )
+            if not words:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            if user.review_mode is None:
+                await edit(
+                    t("revnow.mode_prompt", get_current_language()),
+                    reply_markup=mode_picker_keyboard(count=AUTO_REVIEW_COUNT, mastered=mastered),
+                )
+                return
+            await _launch(session, edit, context, user, current, words, mode=user.review_mode)
+
+        elif data.startswith("revnow:mode:"):
+            await query.answer()
+            mode_str, rest = data.removeprefix("revnow:mode:").split(":", 1)
+            count, mastered = _parse_count_flag(rest)
+            words = await learning_service.get_words_for_on_demand_review(
+                session, user=user, user_language=current, limit=count, include_mastered=mastered,
+            )
+            if not words:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            await _launch(session, edit, context, user, current, words, mode=mode_str)
+
+        elif data == "revnow:next":
+            # study-flow-rework stage (real user feedback): the flashcard
+            # only offers "🏆 Уже выучено" / "➡️ Далее" now - no separate
+            # "✅ Знаю" / "❌ Не знаю" grading step. ➡️ Далее just moves on
+            # WITHOUT touching this word's repetition schedule (never calls
+            # record_on_demand_answer) - by explicit product decision, a
+            # skip is not an answer, so next_review_at/interval/repetitions
+            # stay exactly as they were; the word simply comes up again in
+            # a future review the same as if it hadn't been shown at all.
+            await query.answer()
+            state = context.user_data.get("revnow")
+            if state is None:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            state["position"] += 1
+            if state["position"] >= len(state["items"]):
+                await _finish_flashcards(edit, context, state, user=user)
+            else:
+                await _render_flashcard(edit, state)
+
+        elif data == "revnow:mastered":
+            # AI-new-words stage sections 16-17, 35, 38: ✅ Слово уже
+            # выучено - skips the normal repetition ladder entirely
+            # (unlike revnow:know/dontknow above), removing the word from
+            # active repetition and moving it straight to "Выученные
+            # слова" - the word stays in the DB, only its status changes
+            # (never a delete - spec section 17).
+            state = context.user_data.get("revnow")
+            if state is None:
+                await query.answer()
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            item = state["items"][state["position"]]
+            user_word = await user_words_repo.get_by_id(session, item["user_word_id"])
+            if user_word is not None:
+                await user_word_service.mark_mastered(session, user_word)
+            await query.answer(t("revnow.mastered_confirmed", get_current_language()), show_alert=True)
+            state["position"] += 1
+            if state["position"] >= len(state["items"]):
+                await _finish_flashcards(edit, context, state, user=user)
+            else:
+                await _render_flashcard(edit, state)
+
+        elif data == "revnow:examplewords":
+            # 📖 Учить слово из примера (real user request): breaks the
+            # current card's example sentence down into its significant
+            # words, via the exact same AI call (analyze_text) and "words
+            # worth learning" semantics 📝 Разбор текста and 💬 Полезные
+            # фразы's own breakdown already use - never a second word-
+            # extraction implementation.
+            await query.answer()
+            state = context.user_data.get("revnow")
+            if state is None:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            item = state["items"][state["position"]]
+            example = item["example"]
+            if not example:
+                return
+            try:
+                result = await get_ai_service().analyze_text(
+                    example, language_code=current.language_code,
+                    translation_language=current.translation_language,
+                    interface_language=current.translation_language, user_id=user.id,
+                )
+            except AIConfigurationError:
+                await edit(t("ai.not_configured", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            except AIError:
+                await edit(t("ai.generic_error", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            if not result.key_words:
+                await edit(t("revnow.example_words.none_found", get_current_language()), reply_markup=flashcard_keyboard(has_example=True))
+                return
+            context.user_data["revnow_example_words"] = [kw.word for kw in result.key_words]
+            lines = [t("revnow.example_words.header", get_current_language()), ""]
+            lines.extend(f"{i}. {kw.word} — {kw.translation}" for i, kw in enumerate(result.key_words, start=1))
+            lines.append("")
+            lines.append(t("revnow.example_words.pick_hint", get_current_language()))
+            await edit("\n".join(lines), reply_markup=example_words_keyboard(len(result.key_words)))
+
+        elif data.startswith("revnow:examplewords:pick:"):
+            state = context.user_data.get("revnow")
+            words = context.user_data.get("revnow_example_words")
+            if state is None or not words:
+                await query.answer()
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            index = int(data.removeprefix("revnow:examplewords:pick:"))
+            if index < 0 or index >= len(words):
+                await query.answer()
+                return
+            await query.answer()
+            context.user_data.pop("revnow_example_words", None)
+            await add_word_batch(edit, session, user=user, current=current, raw_words=[words[index]], source=WordSource.AI)
+            # Real user request: "после выбора вернуть пользователя к
+            # дальнейшему повторению" - immediately continue the SAME
+            # flashcard (never advances state["position"] - picking a
+            # word to learn isn't an answer to the card being reviewed).
+            await _render_flashcard(query.message.reply_text, state)
+
+        elif data == "revnow:examplewords:cancel":
+            await query.answer()
+            context.user_data.pop("revnow_example_words", None)
+            state = context.user_data.get("revnow")
+            if state is None:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            await _render_flashcard(edit, state)
+
+        elif data.startswith("revnow:notif:"):
+            await query.answer()
+            slot, mode_str = data.removeprefix("revnow:notif:").split(":")
+            scheduled_date = local_today(utc_now(), user.timezone)
+            word_ids = await notifications_repo.get_word_ids_for(
+                session, user_id=user.id, notification_type=slot, scheduled_date=scheduled_date,
+            )
+            words = []
+            for word_id in word_ids or []:
+                uw = await user_words_repo.get_by_id(session, word_id)
+                if uw is not None and uw.status in _REVIEWABLE_STATUSES:
+                    words.append(uw)
+            if not words:
+                await edit(t("revnow.empty", get_current_language()), reply_markup=empty_keyboard())
+                return
+            await _launch(session, edit, context, user, current, words, mode=mode_str)
+
+        elif data == "revnow:skip":
+            await query.answer()
+            await safe_edit_message_reply_markup(query, reply_markup=None)
+
+        elif data in ("revnow:cancel", "revnow:mainmenu"):
+            await query.answer()
+            context.user_data.pop("revnow", None)
+            context.user_data.pop("quiz", None)
+            await query.message.reply_text(
+                t("onboarding.main_menu_ready", get_current_language()),
+                reply_markup=main_menu_keyboard(get_current_language()),
+            )
+
+
+review_now_callback_handler = CallbackQueryHandler(handle_review_now_callback, pattern="^revnow:")

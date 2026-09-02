@@ -1,0 +1,475 @@
+"""End-to-end tests for handlers/settings.py (bugfix stage, real-Telegram
+feedback): every branch of handle_settings_callback must answer the
+callback query EXACTLY once. A prior version answered unconditionally at
+the top of the function AND again with a toast message in several
+branches - Telegram rejects a second answerCallbackQuery for the same
+query, so _render_home never ran and the settings screen silently never
+updated for language/level/daily-words/notification changes. These tests
+assert call_count == 1 specifically to catch a regression of that bug,
+plus cover the new ➕ Добавить язык flow (real gap: onboarding used to be
+the only way to pick a learning language at all).
+
+Mocks only the Telegram objects - real handlers, real session_scope(),
+real database, same pattern as tests/test_manual_add_flow.py.
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest_asyncio
+
+
+@pytest_asyncio.fixture
+async def handler_db(monkeypatch):
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{path}")
+
+    import config
+    config.get_settings.cache_clear()
+
+    import database.database as db_module
+    db_module._engine = None
+    db_module._session_factory = None
+
+    from database.database import init_models, session_scope
+    from database.seed import seed_languages
+    from database.repositories import users as users_repo
+    from database.repositories import user_languages as user_languages_repo
+    from datetime import time
+
+    await init_models()
+    async with session_scope() as s:
+        await seed_languages(s)
+        user = await users_repo.create_user(
+            s, telegram_id=42, username="grace", first_name="Grace",
+            interface_language="ru", timezone="UTC", level="beginner", daily_new_words=4,
+            morning_time=time(9, 0), afternoon_time=time(14, 0), evening_time=time(20, 0),
+        )
+        await user_languages_repo.add_language(
+            s, user_id=user.id, language_code="en", translation_language="ru",
+            level="beginner", daily_new_words=4,
+        )
+
+    yield
+
+    await db_module.dispose_engine()
+    os.remove(path)
+
+
+def _query(data: str):
+    q = AsyncMock()
+    q.data = data
+    q.message = AsyncMock()
+    q.from_user = SimpleNamespace(id=42)
+    return SimpleNamespace(callback_query=q)
+
+
+async def _run(data: str, context: SimpleNamespace | None = None):
+    from handlers import settings as settings_handler
+
+    update = _query(data)
+    if context is None:
+        context = SimpleNamespace(user_data={})
+    await settings_handler.handle_settings_callback(update, context)
+    return update.callback_query
+
+
+def _message_update(telegram_id: int, text: str):
+    msg = AsyncMock()
+    msg.text = text
+    return SimpleNamespace(effective_user=SimpleNamespace(id=telegram_id), message=msg), msg
+
+
+async def test_notifications_toggle_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:notif:toggle")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()  # _render_home actually ran
+
+
+async def test_language_pick_answers_once_and_updates_screen(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+    from database.repositories import user_languages as user_languages_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        de = await user_languages_repo.add_language(
+            s, user_id=user.id, language_code="de", translation_language="ru",
+            level="beginner", daily_new_words=4,
+        )
+        de_id = de.id
+
+    q = await _run(f"set:lang:pick:{de_id}")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_interface_language_pick_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:iface:pick:en")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_switching_to_ukrainian_actually_renders_ukrainian_everywhere(handler_db):
+    """Repetition-system-audit stage: real user report - picking Ukrainian
+    confirmed with the Russian text "Язык изменён" and everything after
+    stayed Russian. Root cause was locales/uk.json not existing at all
+    (utils.i18n.t() silently falls back to Russian for a language with no
+    catalog); this proves the confirmation toast, the settings screen
+    that follows, AND the resent persistent main-menu keyboard are all
+    genuinely Ukrainian now, not just "answered without erroring"."""
+    q = await _run("set:iface:pick:uk")
+    assert q.answer.call_count == 1
+
+    toast_text = q.answer.call_args[0][0]
+    assert "Мову інтерфейсу змінено" in toast_text
+    assert "Язык интерфейса изменён" not in toast_text
+
+    q.edit_message_text.assert_awaited_once()
+    screen_text = q.edit_message_text.call_args[0][0]
+    assert "Ваші налаштування" in screen_text
+    assert "Ваши настройки" not in screen_text
+
+    q.message.reply_text.assert_awaited_once()
+    menu_text, menu_kwargs = q.message.reply_text.call_args[0][0], q.message.reply_text.call_args[1]
+    assert "Головне меню оновлено" in menu_text
+    labels = [btn.text for row in menu_kwargs["reply_markup"].keyboard for btn in row]
+    assert "⚙️ Налаштування" in labels
+
+    # And it must persist across a fresh load of the same user row, not
+    # just linger in the ContextVar from this one update.
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.interface_language == "uk"
+
+
+async def test_difficulty_pick_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:difficulty:pick:c1")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_difficulty_pick_updates_the_languages_summary_row(handler_db):
+    """Real user request: a manual pick from "🎚 Уровень сложности
+    изучения языка" saved correctly (UserLanguage.learning_difficulty)
+    but the "Изучаемые языки" row in the settings summary kept showing
+    the separate, auto-tracked `level` estimate instead - the row must
+    reflect the level the learner just picked, same as everything else
+    in the app already does (word generation reads the same
+    effective_difficulty())."""
+    q = await _run("set:difficulty:pick:c1")
+    summary = q.edit_message_text.call_args[0][0]
+    assert "C1" in summary
+
+
+async def test_difficulty_auto_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:difficulty:auto")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_notification_time_pick_answers_once_and_updates_screen(handler_db):
+    q = await _run("set:notif:time:morning:0800")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+
+
+async def test_add_language_full_flow(handler_db):
+    from database.database import session_scope
+    from database.models import SubscriptionStatus
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+
+    # The fixture user already has 1 language (en) and free_max_languages
+    # defaults to 1 - grant PRO so this test exercises the picker flow
+    # itself, not the plan-limit gate (covered separately below).
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        await users_repo.update_user(s, user, subscription_status=SubscriptionStatus.PRO)
+
+    context = SimpleNamespace(user_data={})
+
+    start = await _run("set:addlang:start", context)
+    assert start.answer.call_count == 1
+    start.edit_message_text.assert_awaited_once()
+
+    # study-flow-rework stage sections 4-6: no separate translation-language
+    # step anymore - picking the learning language goes straight to the
+    # level picker, with translation_language auto-derived as the user's
+    # own interface_language ("ru" for this fixture user).
+    pick_learn = await _run("set:addlang:learn:de", context)
+    assert pick_learn.answer.call_count == 1
+    pick_learn.edit_message_text.assert_awaited_once()
+
+    # study-flow-rework stage section 30: the add-language level picker
+    # also gets the "🟢 Только начинаю" leading button, aliased onto a1.
+    # Real user request: this screen offers exactly two ways to set the
+    # level - "начинаю" or "узнать мой уровень" (AI placement test) -
+    # never the old flat list of all 6 CEFR buttons.
+    markup = pick_learn.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == [
+        "set:addlang:level:de:ru:a1",
+        "set:addlang:placement:start:de:ru",
+        "set:lang:list",
+    ]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert labels[0] == "🟢 Только начинаю"
+    assert labels[1] == "🤖 Узнать мой уровень"
+
+    # study-flow-rework stage (real user feedback): the daily-words-count
+    # step is gone - picking a level now moves straight to the goal
+    # question (real user request: onboarding already asks "Для чего вы
+    # изучаете этот язык?" - adding a language later must too).
+    pick_level = await _run("set:addlang:level:de:ru:advanced", context)
+    assert pick_level.answer.call_count == 1
+    pick_level.edit_message_text.assert_awaited_once()
+    goal_markup = pick_level.edit_message_text.call_args[1]["reply_markup"]
+    goal_callbacks = [b.callback_data for row in goal_markup.inline_keyboard for b in row]
+    assert "set:addlang:goal:travel" in goal_callbacks
+
+    pick_goal = await _run("set:addlang:goal:travel", context)
+    assert pick_goal.answer.call_count == 1
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.translation_language == "ru"
+        assert de.level == "advanced"
+        assert de.daily_new_words == 2  # silently defaulted, no picker step anymore
+        assert de.learning_goal == "travel"
+        assert de.is_current is True  # newly added language becomes active
+
+
+async def test_add_language_goal_work_asks_for_industry(handler_db):
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:de:ru:a1", context)
+
+    industry_prompt = await _run("set:addlang:goal:work", context)
+    assert industry_prompt.answer.call_count == 1
+    markup = industry_prompt.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "set:addlang:industry:it" in callbacks
+
+    q = await _run("set:addlang:industry:it", context)
+    assert q.answer.call_count == 1
+
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.learning_goal == "work"
+        assert de.work_industry == "it"
+
+
+async def test_add_language_goal_work_other_industry_uses_free_text(handler_db):
+    from handlers import settings as settings_handler
+
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:de:ru:a1", context)
+    await _run("set:addlang:goal:work", context)
+
+    other = await _run("set:addlang:industry:other", context)
+    assert other.answer.call_count == 1
+    assert context.user_data["settings_submode"] == "addlang_industry_custom"
+
+    text_update, msg = _message_update(42, "Marine biology")
+    await settings_handler.handle_text_input(text_update, context, "Marine biology")
+    msg.reply_text.assert_awaited_once()
+
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import users as users_repo
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        languages = await user_languages_repo.get_user_languages(s, user.id)
+        de = next(ul for ul in languages if ul.language_code == "de")
+        assert de.learning_goal == "work"
+        assert de.work_industry == "Marine biology"
+    assert "addlang_pending" not in context.user_data
+    assert "settings_submode" not in context.user_data
+
+
+async def test_add_language_goal_expired_when_pending_state_is_lost(handler_db):
+    """set:addlang:goal:/set:addlang:industry: reached without a prior
+    set:addlang:level:/placement-test step (e.g. a stale button after a
+    restart that lost context.user_data) must not crash - it shows the
+    dedicated "session expired" alert instead of KeyError-ing on a
+    missing "addlang_pending"."""
+    context = SimpleNamespace(user_data={})
+    q = await _run("set:addlang:goal:travel", context)
+    assert q.answer.call_count == 1
+    args, kwargs = q.answer.call_args
+    assert kwargs.get("show_alert") is True
+
+    context2 = SimpleNamespace(user_data={})
+    q2 = await _run("set:addlang:industry:it", context2)
+    assert q2.answer.call_count == 1
+    assert q2.answer.call_args[1].get("show_alert") is True
+
+
+async def test_add_language_duplicate_shows_alert_without_crashing(handler_db):
+    context = SimpleNamespace(user_data={})
+    await _run("set:addlang:level:en:ru:beginner", context)  # en/ru already exists from the fixture
+    q = await _run("set:addlang:goal:skip", context)
+    assert q.answer.call_count == 1
+    args, kwargs = q.answer.call_args
+    assert kwargs.get("show_alert") is True
+
+
+async def test_add_language_respects_free_plan_limit(handler_db):
+    """The fixture user already has 1 language (en) and no PRO access -
+    free_max_languages defaults to 1, so ➕ Добавить язык must refuse."""
+    q = await _run("set:addlang:start")
+    assert q.answer.call_count == 1
+    args, kwargs = q.answer.call_args
+    assert kwargs.get("show_alert") is True
+    q.edit_message_text.assert_not_awaited()  # never entered the picker
+
+
+async def test_difficulty_picker_includes_beginner_button(handler_db):
+    """study-flow-rework stage section 30: "🟢 Только начинаю" is a leading
+    button here too - same callback_data as A1, no new level value."""
+    q = await _run("set:difficulty:list")
+    assert q.answer.call_count == 1
+    markup = q.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert callbacks[0] == "set:difficulty:pick:a1"
+    assert labels[0] == "🟢 Только начинаю"
+
+
+async def test_review_settings_home_shows_defaults(handler_db):
+    """Real user request: the automatic-reminder word-count picker (8/10/
+    12) is gone from this screen entirely - only the per-slot toggles and
+    review-mode picker remain."""
+    q = await _run("set:revsettings:home")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    markup = q.edit_message_text.call_args.kwargs["reply_markup"]
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert not any(cb.startswith("set:revsettings:count:") for cb in callbacks)
+    assert any(label.startswith("☑️") and "Утро" in label for label in labels)
+    assert any(label.startswith("✅") and "спрашивать" in label for label in labels)  # review_mode defaults to None
+
+
+async def test_review_settings_slot_toggle_flips_and_persists(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:revsettings:slot:evening")
+    assert q.answer.call_count == 1
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.evening_enabled is False  # defaulted True, now toggled off
+
+    q2 = await _run("set:revsettings:slot:evening")
+    assert q2.answer.call_count == 1
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.evening_enabled is True  # toggled back on
+
+
+async def test_support_screen_answers_once_and_shows_the_support_message(handler_db, monkeypatch):
+    import config
+
+    monkeypatch.setenv("SUPPORT_CONTACT", "@safabot_support")
+    config.get_settings.cache_clear()
+
+    q = await _run("set:support")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    text = q.edit_message_text.call_args[0][0]
+    assert "@safabot_support" in text
+
+    config.get_settings.cache_clear()
+
+
+async def test_review_settings_mode_pick_saves_and_can_be_cleared(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:revsettings:mode:quiz")
+    assert q.answer.call_count == 1
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.review_mode == "quiz"
+
+    q2 = await _run("set:revsettings:mode:ask")
+    assert q2.answer.call_count == 1
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+    assert user.review_mode is None
+
+
+async def test_reset_confirm_shows_warning_never_deletes_yet(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:reset:confirm")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    markup = q.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "set:reset:do" in callbacks
+    assert "set:reset:cancel" in callbacks
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is not None
+
+
+async def test_reset_cancel_returns_home_without_deleting(handler_db):
+    from database.database import session_scope
+    from database.repositories import users as users_repo
+
+    q = await _run("set:reset:cancel")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()  # _render_home actually ran
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is not None
+
+
+async def test_reset_do_wipes_the_user_and_every_related_row(handler_db):
+    """🗑 Сброс бота (real user request): a full, irreversible account
+    wipe - the user row and everything hanging off it (here: their one
+    UserLanguage and one UserWord) must all be gone afterwards, and the
+    reply keyboard must be removed so a stale main-menu button doesn't
+    linger for a user who no longer exists."""
+    from telegram import ReplyKeyboardRemove
+    from database.database import session_scope
+    from database.repositories import user_languages as user_languages_repo
+    from database.repositories import user_words as user_words_repo
+    from database.repositories import users as users_repo
+    from services import word_service
+
+    async with session_scope() as s:
+        user = await users_repo.get_by_telegram_id(s, 42)
+        word, _ = await word_service.get_or_create_word(s, language_code="en", word="hello")
+        await user_words_repo.add_word(s, user_id=user.id, word_id=word.id, language_code="en")
+
+    q = await _run("set:reset:do")
+    assert q.answer.call_count == 1
+    q.edit_message_text.assert_awaited_once()
+    q.message.reply_text.assert_awaited_once()
+    assert isinstance(q.message.reply_text.call_args[1]["reply_markup"], ReplyKeyboardRemove)
+
+    async with session_scope() as s:
+        assert await users_repo.get_by_telegram_id(s, 42) is None
+        assert await user_languages_repo.get_user_languages(s, user.id) == []
+        assert await user_words_repo.get_user_words(s, user_id=user.id, language_code="en") == []

@@ -1,0 +1,189 @@
+"""Data access for UserWord - one user's personal learning state for one
+Word (spec sections 4-6, 20 of this stage's brief).
+
+Kept as thin CRUD/query functions on purpose: deciding WHEN to pause,
+restore a deleted word, or reject a duplicate add is business logic that
+belongs in services/user_word_service.py, not here.
+"""
+from __future__ import annotations
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from database.models import UserWord, Word, WordStatus
+from utils.text import normalize_word
+from utils.time import utc_now
+
+_WORD = selectinload(UserWord.word)
+# Branch into every sibling relationship a caller might read off
+# `user_word.word` (translations/examples/forms) - chaining a single
+# .selectinload().selectinload() only follows one path, so each needs its
+# own tuple entry sharing the `_WORD` prefix (same pattern as
+# words_repo._WITH_RELATIONS).
+_WITH_WORD = (
+    _WORD.selectinload(Word.translations),
+    _WORD.selectinload(Word.examples),
+    _WORD.selectinload(Word.forms),
+)
+
+
+async def get_user_word(session: AsyncSession, *, user_id: int, word_id: int) -> UserWord | None:
+    result = await session.execute(
+        select(UserWord)
+        .where(UserWord.user_id == user_id, UserWord.word_id == word_id)
+        .options(*_WITH_WORD)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_by_id(session: AsyncSession, user_word_id: int) -> UserWord | None:
+    result = await session.execute(
+        select(UserWord).where(UserWord.id == user_word_id).options(*_WITH_WORD)
+    )
+    return result.scalar_one_or_none()
+
+
+async def add_word(
+    session: AsyncSession, *, user_id: int, word_id: int, language_code: str, status: str = WordStatus.NEW
+) -> UserWord:
+    user_word = UserWord(
+        user_id=user_id,
+        word_id=word_id,
+        language_code=language_code,
+        status=status,
+        next_review_at=utc_now(),
+    )
+    session.add(user_word)
+    await session.flush()
+    return user_word
+
+
+async def pause_word(session: AsyncSession, user_word: UserWord) -> UserWord:
+    user_word.status = WordStatus.PAUSED
+    user_word.is_paused = True
+    await session.flush()
+    return user_word
+
+
+async def resume_word(session: AsyncSession, user_word: UserWord, *, status: str) -> UserWord:
+    """Bringing a word back into REVIEW must make it actually due again -
+    a naturally-MASTERED word has next_review_at=None (repetition_service
+    never schedules a further review for it), and a long-PAUSED word may
+    carry a next_review_at from months ago. Leaving either alone would
+    silently exclude the word from get_due_for_review forever (None fails
+    its IS NOT NULL check) or until its stale date arrives, even though
+    the user just explicitly asked to review it again."""
+    user_word.status = status
+    user_word.is_paused = False
+    user_word.next_review_at = utc_now()
+    await session.flush()
+    return user_word
+
+
+async def delete_word(session: AsyncSession, user_word: UserWord) -> UserWord:
+    """Soft delete: never remove the row (spec section 13 - the shared
+    Word must survive, and a re-add later should be able to restore this
+    exact history instead of starting over)."""
+    user_word.status = WordStatus.DELETED
+    await session.flush()
+    return user_word
+
+
+async def restore_word(session: AsyncSession, user_word: UserWord, *, status: str = WordStatus.NEW) -> UserWord:
+    # Same reasoning as resume_word above: a restored word must be
+    # immediately due again, not stuck on whatever next_review_at it had
+    # (if any) from before it was deleted.
+    user_word.status = status
+    user_word.is_paused = False
+    user_word.next_review_at = utc_now()
+    await session.flush()
+    return user_word
+
+
+async def mark_mastered(session: AsyncSession, user_word: UserWord) -> UserWord:
+    """🤔 Я это уже знаю (bugfix stage section 12): the user already knows a
+    word before ever reviewing it, so it's counted as mastered immediately
+    rather than started on the normal repetition ladder."""
+    user_word.status = WordStatus.MASTERED
+    await session.flush()
+    return user_word
+
+
+async def get_user_words(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    language_code: str | None = None,
+    statuses: list[str] | None = None,
+    exclude_deleted: bool = True,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[UserWord]:
+    stmt = select(UserWord).where(UserWord.user_id == user_id).options(*_WITH_WORD)
+    if language_code is not None:
+        stmt = stmt.where(UserWord.language_code == language_code)
+    if statuses is not None:
+        stmt = stmt.where(UserWord.status.in_(statuses))
+    elif exclude_deleted:
+        stmt = stmt.where(UserWord.status != WordStatus.DELETED)
+    # SQLite's CURRENT_TIMESTAMP is second-resolution, so several words
+    # added within the same second would otherwise tie and could reorder
+    # between renders - fatal for numbering stability (spec section 9).
+    # UserWord.id is monotonically increasing, so it's a stable tiebreaker.
+    stmt = stmt.order_by(UserWord.added_at, UserWord.id)
+    if limit is not None:
+        stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_review_words(session: AsyncSession, *, user_id: int, language_code: str | None = None) -> list[UserWord]:
+    return await get_user_words(session, user_id=user_id, language_code=language_code, statuses=[WordStatus.REVIEW])
+
+
+async def get_mastered_words(session: AsyncSession, *, user_id: int, language_code: str | None = None) -> list[UserWord]:
+    return await get_user_words(session, user_id=user_id, language_code=language_code, statuses=[WordStatus.MASTERED])
+
+
+async def get_paused_words(session: AsyncSession, *, user_id: int, language_code: str | None = None) -> list[UserWord]:
+    return await get_user_words(session, user_id=user_id, language_code=language_code, statuses=[WordStatus.PAUSED])
+
+
+async def count_user_words(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    language_code: str | None = None,
+    statuses: list[str] | None = None,
+    exclude_deleted: bool = True,
+) -> int:
+    stmt = select(func.count()).select_from(UserWord).where(UserWord.user_id == user_id)
+    if language_code is not None:
+        stmt = stmt.where(UserWord.language_code == language_code)
+    if statuses is not None:
+        stmt = stmt.where(UserWord.status.in_(statuses))
+    elif exclude_deleted:
+        stmt = stmt.where(UserWord.status != WordStatus.DELETED)
+    result = await session.execute(stmt)
+    return int(result.scalar_one())
+
+
+async def search_user_words(
+    session: AsyncSession, *, user_id: int, language_code: str, query: str
+) -> list[UserWord]:
+    normalized_query = normalize_word(query)
+    stmt = (
+        select(UserWord)
+        .join(Word, UserWord.word_id == Word.id)
+        .where(
+            UserWord.user_id == user_id,
+            UserWord.language_code == language_code,
+            UserWord.status != WordStatus.DELETED,
+            Word.normalized_word.like(f"%{normalized_query}%"),
+        )
+        .options(*_WITH_WORD)
+        .order_by(Word.normalized_word)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())

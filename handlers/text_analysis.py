@@ -1,0 +1,208 @@
+"""📝 Разбор текста (AI-integration spec sections 15-16).
+
+Entry point (start_text_analysis) is reached from the main menu's plain-
+text "📝 Разобрать текст" button, which sets context.user_data["mode"] =
+"text_analysis" (see handlers/menu.py's router) so the next free-text
+message is treated as either a new text to analyze, or - if results are
+already on screen - a number selection like "1,3" picking specific key
+words out of them (same UX as ⭐ Мои слова's numbered bulk-select).
+
+Adding words (⭐ Добавить все / ⭐ Добавить выбранные) reuses
+handlers.dictionary.add_word_batch wholesale - the exact same lookup +
+UserWordService path 📖 Словарь and ➕ Добавить слово use, just tagged
+source=WordSource.AI since these came out of an AI text analysis
+(spec section 16: never a second add-words implementation).
+"""
+from __future__ import annotations
+
+from telegram import Update
+from telegram.ext import CallbackQueryHandler, ContextTypes
+
+from config import get_settings
+from database.database import session_scope
+from database.models import WordSource
+from database.repositories import user_languages as user_languages_repo
+from database.repositories import users as users_repo
+from handlers.dictionary import add_word_batch
+from keyboards.text_analysis import results_keyboard, selection_keyboard
+from services.ai_errors import AIConfigurationError, AIError
+from services.ai_service import get_ai_service
+from utils.i18n import get_current_language, set_current_language, t
+from utils.text import parse_number_list
+
+MODE = "text_analysis"
+
+
+async def start_text_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["mode"] = MODE
+    context.user_data.pop("text_analysis", None)
+    await update.message.reply_text(t("text_analysis.prompt", get_current_language()))
+
+
+async def _current_language(session, telegram_id: int):
+    user = await users_repo.get_by_telegram_id(session, telegram_id)
+    if user is None:
+        return None, None
+    set_current_language(user.interface_language)
+    current = await user_languages_repo.get_current_language(session, user.id)
+    return user, current
+
+
+def render_results(
+    text: str,
+    translation: str,
+    text_pronunciation: str | None,
+    key_words: list[tuple[str, str, str | None]],
+    phrases: list[tuple[str, str | None]],
+) -> str:
+    """Global pronunciation rule sections 43-45: the whole analyzed text,
+    every key word, and every useful phrase each get their own
+    pronunciation shown inline when the AI provided one - key words and
+    phrases keep pronunciation in parentheses right on their existing
+    numbered/bulleted line rather than a second line each, so the list
+    stays as compact as it already was.
+
+    Public (not underscore-prefixed) because handlers/phrases.py's
+    📖 Разобрать / ➕ Добавить слова reuses this exact renderer (plus
+    handle_text_analysis_callback's add_all/add_selected) for breaking a
+    saved/generated phrase down into its significant words - the same
+    "significant words worth adding" semantics analyze_text's key_words
+    already has, so this is not a second word-extraction implementation.
+    """
+    lines = [t("text_analysis.title", get_current_language()), "", text, translation]
+    if text_pronunciation:
+        lines.append("")
+        lines.append(t("card.pronunciation_line", get_current_language(), pronunciation=text_pronunciation))
+    if key_words:
+        lines.append("")
+        lines.append(t("text_analysis.key_words_header", get_current_language()))
+        for i, (word, word_translation, pronunciation) in enumerate(key_words, start=1):
+            word_part = f"{word} ({pronunciation})" if pronunciation else word
+            lines.append(f"{i}. {word_part} — {word_translation}")
+    else:
+        lines.append("")
+        lines.append(t("text_analysis.no_key_words", get_current_language()))
+    if phrases:
+        lines.append("")
+        lines.append(t("text_analysis.phrases_header", get_current_language()))
+        for phrase, pronunciation in phrases:
+            phrase_part = f"{phrase} ({pronunciation})" if pronunciation else phrase
+            lines.append(f"- {phrase_part}")
+    lines.append("")
+    lines.append(t("text_analysis.select_hint", get_current_language()))
+    return "\n".join(lines)
+
+
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    cache = context.user_data.get("text_analysis")
+    if cache is not None:
+        try:
+            numbers = parse_number_list(text)
+        except ValueError:
+            numbers = None
+        if numbers is not None:
+            await _handle_selection(update, context, cache, numbers)
+            return
+        # Not a number list - treat as a brand new text to analyze,
+        # replacing whatever was cached from the previous one.
+
+    max_length = get_settings().max_text_length
+    if len(text) > max_length:
+        await update.message.reply_text(t("text_analysis.too_long", get_current_language(), max_length=max_length))
+        return
+
+    async with session_scope() as session:
+        user, current = await _current_language(session, update.effective_user.id)
+        if user is None:
+            await update.message.reply_text(t("settings.profile_not_found", get_current_language()))
+            return
+        if current is None:
+            await update.message.reply_text(t("card.no_language", get_current_language()))
+            return
+
+        try:
+            # current.translation_language, not user.interface_language -
+            # same fix/reasoning as handlers/dictionary.py's
+            # _explain_word_text: the prose here must match this learning
+            # language's own translation language.
+            result = await get_ai_service().analyze_text(
+                text, language_code=current.language_code,
+                translation_language=current.translation_language,
+                interface_language=current.translation_language, user_id=user.id,
+            )
+        except AIConfigurationError:
+            context.user_data.pop("text_analysis", None)
+            await update.message.reply_text(t("ai.not_configured", get_current_language()))
+            return
+        except AIError:
+            context.user_data.pop("text_analysis", None)
+            await update.message.reply_text(t("ai.generic_error", get_current_language()))
+            return
+
+        key_words = [(kw.word, kw.translation, kw.pronunciation) for kw in result.key_words]
+        phrases = [(ph.phrase, ph.pronunciation) for ph in result.useful_phrases]
+        context.user_data["text_analysis"] = {"words": [kw.word for kw in result.key_words]}
+        await update.message.reply_text(
+            render_results(result.original_text, result.translation, result.pronunciation, key_words, phrases),
+            reply_markup=results_keyboard() if key_words else None,
+        )
+
+
+async def _handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, cache: dict, numbers: list[int]) -> None:
+    words = cache["words"]
+    out_of_range = [n for n in numbers if n < 1 or n > len(words)]
+    if out_of_range:
+        await update.message.reply_text(
+            t("text_analysis.out_of_range", get_current_language(), numbers=", ".join(str(n) for n in out_of_range))
+        )
+        return
+
+    selected = [words[n - 1] for n in numbers]
+    context.user_data["text_analysis"]["selected"] = selected
+    lines = [t("text_analysis.selected_header", get_current_language())]
+    lines.extend(f"{n}. {words[n - 1]}" for n in numbers)
+    await update.message.reply_text("\n".join(lines), reply_markup=selection_keyboard())
+
+
+async def handle_text_analysis_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    data = query.data
+    cache = context.user_data.get("text_analysis")
+
+    async with session_scope() as session:
+        user = await users_repo.get_by_telegram_id(session, query.from_user.id)
+        set_current_language(user.interface_language if user else None)
+
+    if data == "textan:cancel":
+        await query.answer(t("text_analysis.cancelled", get_current_language()))
+        return
+
+    if cache is None:
+        await query.answer(t("text_analysis.expired", get_current_language()), show_alert=True)
+        return
+
+    if data == "textan:add_all":
+        raw_words = cache.get("words") or []
+    elif data == "textan:add_selected":
+        raw_words = cache.get("selected") or []
+    else:
+        return
+
+    if not raw_words:
+        await query.answer(t("text_analysis.expired", get_current_language()), show_alert=True)
+        return
+
+    await query.answer()
+    async with session_scope() as session:
+        user, current = await _current_language(session, query.from_user.id)
+        if user is None or current is None:
+            await query.message.reply_text(t("card.no_language", get_current_language()))
+            return
+        await add_word_batch(
+            query.message.reply_text, session,
+            user=user, current=current, raw_words=raw_words, source=WordSource.AI,
+        )
+    context.user_data.pop("text_analysis", None)
+
+
+text_analysis_callback_handler = CallbackQueryHandler(handle_text_analysis_callback, pattern="^textan:")
